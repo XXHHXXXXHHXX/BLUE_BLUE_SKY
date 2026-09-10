@@ -1,0 +1,327 @@
+{
+  "version": "1.0.0",
+  "exportTime": "2026-04-03T13:46:51.486Z",
+  "nodes": [
+    {
+      "id": "ac-1",
+      "type": "ac",
+      "position": {
+        "x": 400,
+        "y": 50
+      },
+      "data": {
+        "nodeType": "ac",
+        "label": "交流电源",
+        "category": "source",
+        "sourceData": {
+          "inputVoltage": 220,
+          "outputVoltage": 220,
+          "current": 30,
+          "inputPower": 850,
+          "outputPower": 803,
+          "efficiency": 94.5,
+          "temperature": 45
+        }
+      },
+      "measured": {
+        "width": 200,
+        "height": 188
+      },
+      "selected": false
+    },
+    {
+      "id": "psu-1",
+      "type": "psu",
+      "position": {
+        "x": 655.1193745766734,
+        "y": 71.60059521825147
+      },
+      "data": {
+        "nodeType": "psu",
+        "label": "电源模块1",
+        "category": "source",
+        "sourceData": {
+          "inputVoltage": 220,
+          "outputVoltage": 12,
+          "current": 30,
+          "inputPower": 400,
+          "outputPower": 376,
+          "efficiency": 94,
+          "temperature": 48
+        }
+      },
+      "measured": {
+        "width": 200,
+        "height": 222
+      },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "fan-1",
+      "type": "fan",
+      "position": {
+        "x": -31.48751887677989,
+        "y": 207.5745803752051
+      },
+      "data": {
+        "nodeType": "fan",
+        "label": "风扇1",
+        "category": "load",
+        "fanData": {
+          "power": 15,
+          "rpm": 5000,
+          "speedPercent": 60,
+          "temperature": 40
+        }
+      },
+      "measured": {
+        "width": 295,
+        "height": 183
+      },
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "cpu-1",
+      "type": "cpu",
+      "position": {
+        "x": 591.634356286272,
+        "y": 407.6883329573298
+      },
+      "data": {
+        "nodeType": "cpu",
+        "label": "CPU0",
+        "category": "load",
+        "cpuData": {
+          "power": 150,
+          "temperature": 72,
+          "powerDomains": [
+            {
+              "name": "TA_CORE_DVFS",
+              "voltage": 0.85,
+              "current": 80,
+              "power": 68
+            },
+            {
+              "name": "DDRIO",
+              "voltage": 1.1,
+              "current": 15,
+              "power": 16.5
+            },
+            {
+              "name": "TB_CORE_DVFS",
+              "voltage": 0.85,
+              "current": 75,
+              "power": 63.75
+            },
+            {
+              "name": "IO_NB_AVS",
+              "voltage": 0.95,
+              "current": 10,
+              "power": 9.5
+            },
+            {
+              "name": "UNCORE_DVFS",
+              "voltage": 0.9,
+              "current": 25,
+              "power": 22.5
+            },
+            {
+              "name": "IO_NA_AVS",
+              "voltage": 0.95,
+              "current": 8,
+              "power": 7.6
+            }
+          ],
+          "amuEvents": [
+            {
+              "id": "amu-1",
+              "timestamp": "2026-03-23T09:25:39.889Z",
+              "type": "info",
+              "domain": "TA_CORE_DVFS",
+              "message": "电源域功耗正常",
+              "value": 68
+            },
+            {
+              "id": "amu-2",
+              "timestamp": "2026-03-23T09:24:39.889Z",
+              "type": "warning",
+              "domain": "DDRIO",
+              "message": "功耗接近阈值",
+              "value": 16.5
+            },
+            {
+              "id": "amu-3",
+              "timestamp": "2026-03-23T09:23:39.889Z",
+              "type": "info",
+              "domain": "TB_CORE_DVFS",
+              "message": "电源域功耗正常",
+              "value": 63.75
+            },
+            {
+              "id": "amu-4",
+              "timestamp": "2026-03-23T09:22:39.889Z",
+              "type": "error",
+              "domain": "IO_NB_AVS",
+              "message": "检测到功耗尖峰",
+              "value": 9.5
+            },
+            {
+              "id": "amu-5",
+              "timestamp": "2026-03-23T09:21:39.889Z",
+              "type": "warning",
+              "domain": "UNCORE_DVFS",
+              "message": "电压波动检测",
+              "value": 22.5
+            }
+          ]
+        }
+      },
+      "measured": {
+        "width": 220,
+        "height": 125
+      },
+      "selected": false,
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-ac-psu",
+      "source": "ac-1",
+      "target": "psu-1",
+      "type": "powerEdge",
+      "data": {
+        "loss": 47,
+        "lossPercent": 5.5,
+        "animated": true
+      }
+    },
+    {
+      "id": "e-psu-fan",
+      "source": "fan-1",
+      "target": "psu-1",
+      "type": "powerEdge",
+      "data": {
+        "loss": 2,
+        "lossPercent": 0.5,
+        "animated": true
+      },
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left"
+    },
+    {
+      "id": "e-psu-cpu",
+      "source": "psu-1",
+      "target": "cpu-1",
+      "type": "powerEdge",
+      "data": {
+        "loss": 5,
+        "lossPercent": 1.3,
+        "animated": true
+      }
+    },
+    {
+      "id": "e-ac-1-fan-1-1775220906372",
+      "source": "fan-1",
+      "target": "ac-1",
+      "sourceHandle": "source-top",
+      "targetHandle": "target-bottom",
+      "type": "powerEdge",
+      "data": {
+        "loss": 0,
+        "lossPercent": 0,
+        "animated": true
+      },
+      "selected": true
+    },
+    {
+      "id": "e-fan-1-cpu-1-1775220918548",
+      "source": "cpu-1",
+      "target": "fan-1",
+      "sourceHandle": "source-left",
+      "targetHandle": "target-left",
+      "type": "powerEdge",
+      "data": {
+        "loss": 0,
+        "lossPercent": 0,
+        "animated": true
+      }
+    },
+    {
+      "id": "e-cpu-1-fan-1-1775220923836",
+      "source": "fan-1",
+      "target": "cpu-1",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "type": "powerEdge",
+      "data": {
+        "loss": 0,
+        "lossPercent": 0,
+        "animated": true
+      }
+    },
+    {
+      "id": "e-cpu-1-fan-1-1775220951748",
+      "source": "fan-1",
+      "target": "cpu-1",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "type": "powerEdge",
+      "data": {
+        "loss": 0,
+        "lossPercent": 0,
+        "animated": true
+      }
+    },
+    {
+      "id": "e-cpu-1-fan-1-1775221052132",
+      "source": "fan-1",
+      "target": "cpu-1",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "type": "powerEdge",
+      "data": {
+        "loss": 0,
+        "lossPercent": 0,
+        "animated": true
+      }
+    },
+    {
+      "id": "e-cpu-1-fan-1-1775221055756",
+      "source": "fan-1",
+      "target": "cpu-1",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "type": "powerEdge",
+      "data": {
+        "loss": 0,
+        "lossPercent": 0,
+        "animated": true
+      }
+    },
+    {
+      "id": "e-cpu-1-fan-1-1775221057300",
+      "source": "fan-1",
+      "target": "cpu-1",
+      "sourceHandle": "source-right",
+      "targetHandle": "target-left",
+      "type": "powerEdge",
+      "data": {
+        "loss": 0,
+        "lossPercent": 0,
+        "animated": true
+      }
+    }
+  ],
+  "nodeScales": {},
+  "bmcConfig": {
+    "enabled": false,
+    "ip": "",
+    "username": "",
+    "password": "",
+    "port": 443,
+    "protocol": "https"
+  }
+}

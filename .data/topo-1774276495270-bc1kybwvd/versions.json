@@ -1,0 +1,98 @@
+[
+  {
+    "id": "v-1774276515608-3vgirlvpg",
+    "label": "手动保存",
+    "timestamp": "2026-03-23T14:35:15.608Z",
+    "isAuto": false,
+    "data": {
+      "version": "1.0.0",
+      "exportTime": "2026-03-23T14:35:13.689Z",
+      "nodes": [
+        {
+          "id": "psip-new-1774276508985-1",
+          "type": "psip",
+          "position": {
+            "x": 149.02519379844964,
+            "y": 163.00516795865633
+          },
+          "data": {
+            "label": "PSIP",
+            "nodeType": "psip",
+            "category": "source",
+            "sourceData": {
+              "inputVoltage": 11.97,
+              "outputVoltage": 1.82,
+              "current": 4.91,
+              "inputPower": 9.85,
+              "outputPower": 8.94,
+              "efficiency": 90.78,
+              "temperature": 45.61
+            }
+          },
+          "measured": {
+            "width": 301,
+            "height": 249
+          }
+        }
+      ],
+      "edges": [],
+      "nodeScales": {},
+      "bmcConfig": {
+        "enabled": false,
+        "ip": "",
+        "username": "",
+        "password": "",
+        "port": 443,
+        "protocol": "https"
+      }
+    }
+  },
+  {
+    "id": "v-1774276515605-30jq9q6an",
+    "label": "手动保存",
+    "timestamp": "2026-03-23T14:35:15.605Z",
+    "isAuto": false,
+    "data": {
+      "version": "1.0.0",
+      "exportTime": "2026-03-23T14:35:10.697Z",
+      "nodes": [
+        {
+          "id": "psip-new-1774276508985-1",
+          "type": "psip",
+          "position": {
+            "x": 149.02519379844964,
+            "y": 163.00516795865633
+          },
+          "data": {
+            "label": "PSIP",
+            "nodeType": "psip",
+            "category": "source",
+            "sourceData": {
+              "inputVoltage": 11.97,
+              "outputVoltage": 1.82,
+              "current": 4.91,
+              "inputPower": 9.85,
+              "outputPower": 8.94,
+              "efficiency": 90.78,
+              "temperature": 45.61
+            }
+          },
+          "measured": {
+            "width": 301,
+            "height": 249
+          }
+        }
+      ],
+      "edges": [],
+      "nodeScales": {},
+      "bmcConfig": {
+        "enabled": false,
+        "ip": "",
+        "username": "",
+        "password": "",
+        "port": 443,
+        "protocol": "https"
+      }
+    }
+  }
+]

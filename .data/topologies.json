@@ -1,0 +1,23 @@
+{
+  "currentId": "default",
+  "topologies": [
+    {
+      "id": "default",
+      "name": "默认拓扑",
+      "description": "系统默认拓扑",
+      "createdAt": "2026-03-23T09:26:43.763Z",
+      "updatedAt": "2026-04-03T13:46:51.489Z",
+      "isDefault": true,
+      "nodeCount": 4
+    },
+    {
+      "id": "topo-1774276495270-bc1kybwvd",
+      "name": "凌昕辰",
+      "description": "78",
+      "createdAt": "2026-03-23T14:34:55.277Z",
+      "updatedAt": "2026-04-03T13:45:21.063Z",
+      "isDefault": false,
+      "nodeCount": 1
+    }
+  ]
+}

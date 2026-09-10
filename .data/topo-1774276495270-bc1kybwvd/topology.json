@@ -1,0 +1,42 @@
+{
+  "version": "1.0.0",
+  "exportTime": "2026-04-03T13:45:21.060Z",
+  "nodes": [
+    {
+      "id": "psip-new-1774276508985-1",
+      "type": "psip",
+      "position": {
+        "x": 149.02519379844964,
+        "y": 163.00516795865633
+      },
+      "data": {
+        "label": "PSIP",
+        "nodeType": "psip",
+        "category": "source",
+        "sourceData": {
+          "inputVoltage": 11.97,
+          "outputVoltage": 1.82,
+          "current": 4.91,
+          "inputPower": 9.85,
+          "outputPower": 8.94,
+          "efficiency": 90.78,
+          "temperature": 45.61
+        }
+      },
+      "measured": {
+        "width": 301,
+        "height": 249
+      }
+    }
+  ],
+  "edges": [],
+  "nodeScales": {},
+  "bmcConfig": {
+    "enabled": false,
+    "ip": "",
+    "username": "",
+    "password": "",
+    "port": 443,
+    "protocol": "https"
+  }
+}

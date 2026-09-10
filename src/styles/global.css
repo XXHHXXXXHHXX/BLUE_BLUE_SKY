@@ -1,0 +1,611 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* React Flow 节点通用样式 */
+.hardware-node {
+  background: #fff;
+  border: 2px solid #d9d9d9;
+  border-radius: 10px;
+  padding: 14px 18px;
+  min-width: 200px;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.hardware-node:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.hardware-node.selected {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.2);
+}
+
+/* 节点内容区域：左图标 + 右信息 */
+.hardware-node .node-content {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.hardware-node .node-icon-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.04);
+  font-size: 24px;
+  color: #595959;
+  flex-shrink: 0;
+}
+
+.hardware-node.source-node .node-icon-area {
+  background: rgba(22, 119, 255, 0.08);
+  color: #1677ff;
+}
+
+.hardware-node.load-node .node-icon-area {
+  background: rgba(82, 196, 26, 0.08);
+  color: #52c41a;
+}
+
+.hardware-node.fan-node .node-icon-area {
+  background: rgba(19, 194, 194, 0.08);
+  color: #13c2c2;
+}
+
+.hardware-node.cpu-node .node-icon-area {
+  background: rgba(114, 46, 209, 0.08);
+  color: #722ed1;
+}
+
+.hardware-node.sensor-node .node-icon-area {
+  background: rgba(250, 173, 20, 0.08);
+  color: #faad14;
+}
+
+.hardware-node.mgmt-node .node-icon-area {
+  background: rgba(47, 84, 235, 0.08);
+  color: #2f54eb;
+}
+
+.hardware-node .node-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.hardware-node .node-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-weight: 600;
+  font-size: 15px;
+  color: #262626;
+}
+
+.hardware-node .node-header .node-icon {
+  font-size: 22px;
+}
+
+.hardware-node .node-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+}
+
+.hardware-node .node-body .data-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: #595959;
+}
+
+.hardware-node .data-row .data-label {
+  color: #8c8c8c;
+}
+
+.hardware-node .data-row .data-value {
+  font-weight: 500;
+  font-family: 'Courier New', monospace;
+}
+
+.hardware-node .node-footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+}
+
+/* 源节点 */
+.hardware-node.source-node {
+  border-color: #91caff;
+  background: linear-gradient(135deg, #e6f4ff 0%, #fff 100%);
+}
+
+/* 负载节点 */
+.hardware-node.load-node {
+  border-color: #b7eb8f;
+  background: linear-gradient(135deg, #f6ffed 0%, #fff 100%);
+}
+
+/* 风扇节点 */
+.hardware-node.fan-node {
+  border-color: #87e8de;
+  background: linear-gradient(135deg, #e6fffb 0%, #fff 100%);
+}
+
+/* CPU节点 */
+.hardware-node.cpu-node {
+  border-color: #d3adf7;
+  background: linear-gradient(135deg, #f9f0ff 0%, #fff 100%);
+  min-width: 220px;
+}
+
+/* 传感器节点 */
+.hardware-node.sensor-node {
+  border-color: #ffd591;
+  background: linear-gradient(135deg, #fff7e6 0%, #fff 100%);
+  min-width: 180px;
+}
+
+/* 管理板节点 */
+.hardware-node.mgmt-node {
+  border-color: #adc6ff;
+  background: linear-gradient(135deg, #f0f5ff 0%, #fff 100%);
+}
+
+/* 温度计节点 */
+.hardware-node.thermometer-node {
+  border-color: #87e8de;
+  background: linear-gradient(135deg, #e6fffb 0%, #fff 100%);
+  min-width: 180px;
+}
+
+.hardware-node.thermometer-node .node-icon-area {
+  background: rgba(19, 194, 194, 0.08);
+  color: #13c2c2;
+}
+
+/* 温度计 - 低温蓝色闪烁 */
+@keyframes thermometer-cold-flash {
+  0%, 100% {
+    border-color: #1890ff;
+    box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.3), 0 0 12px rgba(24, 144, 255, 0.2);
+  }
+  50% {
+    border-color: #69c0ff;
+    box-shadow: 0 0 0 5px rgba(24, 144, 255, 0.5), 0 0 20px rgba(24, 144, 255, 0.4);
+  }
+}
+
+/* 温度计 - 正常绿色呼吸 */
+@keyframes thermometer-normal-flash {
+  0%, 100% {
+    border-color: #52c41a;
+    box-shadow: 0 0 0 2px rgba(82, 196, 26, 0.2);
+  }
+  50% {
+    border-color: #95de64;
+    box-shadow: 0 0 0 4px rgba(82, 196, 26, 0.4), 0 0 12px rgba(82, 196, 26, 0.3);
+  }
+}
+
+/* 温度计 - 偏热橙色闪烁 */
+@keyframes thermometer-warm-flash {
+  0%, 100% {
+    border-color: #fa8c16;
+    box-shadow: 0 0 0 3px rgba(250, 140, 22, 0.3), 0 0 12px rgba(250, 140, 22, 0.2);
+  }
+  50% {
+    border-color: #ffc069;
+    box-shadow: 0 0 0 5px rgba(250, 140, 22, 0.5), 0 0 20px rgba(250, 140, 22, 0.4);
+  }
+}
+
+/* 温度计 - 过热红色闪烁 */
+@keyframes thermometer-hot-flash {
+  0%, 100% {
+    border-color: #ff4d4f;
+    box-shadow: 0 0 0 3px rgba(255, 77, 79, 0.4), 0 0 16px rgba(255, 77, 79, 0.3);
+  }
+  50% {
+    border-color: #ff7875;
+    box-shadow: 0 0 0 6px rgba(255, 77, 79, 0.6), 0 0 28px rgba(255, 77, 79, 0.5);
+  }
+}
+
+.hardware-node.thermometer-node.thermometer-cold {
+  border-color: #1890ff !important;
+  animation: thermometer-cold-flash 2.5s ease-in-out infinite;
+}
+
+.hardware-node.thermometer-node.thermometer-normal {
+  border-color: #52c41a !important;
+  animation: thermometer-normal-flash 3s ease-in-out infinite;
+}
+
+.hardware-node.thermometer-node.thermometer-warm {
+  border-color: #fa8c16 !important;
+  animation: thermometer-warm-flash 2s ease-in-out infinite;
+}
+
+.hardware-node.thermometer-node.thermometer-hot {
+  border-color: #ff4d4f !important;
+  animation: thermometer-hot-flash 1.5s ease-in-out infinite;
+}
+
+/* 效率进度条 */
+.efficiency-bar {
+  width: 100%;
+  height: 4px;
+  background: #f0f0f0;
+  border-radius: 2px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.efficiency-bar .efficiency-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+/* 工具栏 */
+.topology-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 10;
+  display: flex;
+  gap: 6px;
+  background: #fff;
+  padding: 6px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Power Edge标签 */
+.power-edge-label {
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid #d9d9d9;
+  white-space: nowrap;
+}
+
+/* 设计模式 - 模块面板 */
+.module-palette {
+  width: 220px;
+  height: 100%;
+  background: #fff;
+  border-right: 1px solid #f0f0f0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.module-palette .palette-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #262626;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.module-palette .palette-category {
+  margin-bottom: 12px;
+}
+
+.module-palette .category-label {
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.module-palette .palette-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  cursor: grab;
+  transition: all 0.2s;
+  font-size: 13px;
+  color: #595959;
+}
+
+.module-palette .palette-item:hover {
+  border-color: #1677ff;
+  background: #e6f4ff;
+  color: #1677ff;
+}
+
+.module-palette .palette-item:active {
+  cursor: grabbing;
+}
+
+.module-palette .palette-item .palette-icon {
+  font-size: 18px;
+}
+
+/* 图标选择器 */
+.icon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.icon-picker-grid .icon-picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 18px;
+  color: #595959;
+  transition: all 0.2s;
+}
+
+.icon-picker-grid .icon-picker-item:hover {
+  border-color: #1677ff;
+  color: #1677ff;
+  background: #e6f4ff;
+}
+
+.icon-picker-grid .icon-picker-item.selected {
+  border-color: #1677ff;
+  color: #1677ff;
+  background: #e6f4ff;
+}
+
+/* === 节点缩放 - 四角拖拽手柄 === */
+.scalable-node-wrapper {
+  position: relative;
+}
+
+/* 缩放内容区域：保持固定尺寸，内部内容缩放 */
+.scalable-node-content {
+  position: relative;
+  /* 基础尺寸，与 .hardware-node 的 min-width 一致 */
+  min-width: 200px;
+}
+
+.node-resize-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: #fff;
+  border: 2px solid #1677ff;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: auto;
+  z-index: 10;
+  touch-action: none;
+}
+
+.scalable-node-wrapper:hover .node-resize-handle {
+  opacity: 1;
+}
+
+.node-resize-handle:hover {
+  background: #1677ff;
+  border-color: #1677ff;
+}
+
+.node-scale-badge {
+  position: absolute;
+  top: -20px;
+  right: 0;
+  font-size: 10px;
+  color: #8c8c8c;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #d9d9d9;
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 16px;
+  pointer-events: none;
+}
+
+/* === 连线高亮 - 选中节点的关联节点高亮 === */
+.node-highlighted .hardware-node {
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.3), 0 0 16px rgba(22, 119, 255, 0.15);
+  border-color: #1677ff !important;
+}
+
+/* 多侧 Handle 样式 - 非默认 Handle 默认隐藏，hover 节点时显示 */
+.react-flow__handle[data-handleid] {
+  width: 6px;
+  height: 6px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+/* Handle 现在在 scalable-node-wrapper 内部，不在 hardware-node 内部 */
+.scalable-node-wrapper:hover .react-flow__handle[data-handleid] {
+  opacity: 1;
+}
+
+/* 保持向后兼容：如果 Handle 仍在 hardware-node 内部（如未使用 HOC 的情况） */
+.hardware-node:hover .react-flow__handle[data-handleid] {
+  opacity: 1;
+}
+
+/* 可编辑 Label 输入框 */
+.edge-label-input {
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid #1677ff;
+  border-radius: 3px;
+  padding: 1px 4px;
+  outline: none;
+  min-width: 60px;
+  background: #fff;
+}
+
+/* === 警告状态 - 黄色闪烁边框提示 (60-79°C / 85-89% 效率) === */
+@keyframes warning-flash {
+  0%, 100% {
+    border-color: #faad14;
+    box-shadow: 0 0 0 3px rgba(250, 173, 20, 0.3), 0 0 12px rgba(250, 173, 20, 0.2);
+  }
+  50% {
+    border-color: #ffc53d;
+    box-shadow: 0 0 0 5px rgba(250, 173, 20, 0.5), 0 0 20px rgba(250, 173, 20, 0.4);
+  }
+}
+
+/* === 严重异常状态 - 红色闪烁边框提示 (>=80°C / <85% 效率) === */
+@keyframes critical-flash {
+  0%, 100% {
+    border-color: #ff4d4f;
+    box-shadow: 0 0 0 3px rgba(255, 77, 79, 0.4), 0 0 16px rgba(255, 77, 79, 0.3);
+  }
+  50% {
+    border-color: #ff7875;
+    box-shadow: 0 0 0 6px rgba(255, 77, 79, 0.6), 0 0 28px rgba(255, 77, 79, 0.5);
+  }
+}
+
+/* === 组合警告状态 - 黄红交替闪烁 (同时有警告和严重异常时) === */
+@keyframes warning-critical-flash {
+  0%, 100% {
+    border-color: #ff4d4f;
+    box-shadow: 0 0 0 3px rgba(255, 77, 79, 0.4), 0 0 16px rgba(255, 77, 79, 0.3);
+  }
+  25% {
+    border-color: #faad14;
+    box-shadow: 0 0 0 4px rgba(250, 173, 20, 0.5), 0 0 20px rgba(250, 173, 20, 0.4);
+  }
+  50% {
+    border-color: #ff7875;
+    box-shadow: 0 0 0 6px rgba(255, 77, 79, 0.6), 0 0 28px rgba(255, 77, 79, 0.5);
+  }
+  75% {
+    border-color: #ffc53d;
+    box-shadow: 0 0 0 4px rgba(250, 173, 20, 0.5), 0 0 20px rgba(250, 173, 20, 0.4);
+  }
+}
+
+/* 温度警告 - 黄色边框 (60-79°C) */
+.hardware-node.warning-temp {
+  border-color: #faad14 !important;
+  animation: warning-flash 2.5s ease-in-out infinite;
+}
+
+/* 温度严重异常 - 红色边框 (>=80°C) */
+.hardware-node.abnormal-temp,
+.hardware-node.critical-temp {
+  border-color: #ff4d4f !important;
+  animation: critical-flash 2s ease-in-out infinite;
+}
+
+/* 效率警告 - 黄色边框 (85-89%) */
+.hardware-node.warning-efficiency {
+  border-color: #faad14 !important;
+  animation: warning-flash 2.5s ease-in-out infinite;
+}
+
+/* 效率严重异常 - 红色边框 (<85%) */
+.hardware-node.abnormal-efficiency,
+.hardware-node.critical-efficiency {
+  border-color: #ff4d4f !important;
+  animation: critical-flash 2s ease-in-out infinite;
+}
+
+/* 状态警告 - 黄色边框 */
+.hardware-node.warning-status {
+  border-color: #faad14 !important;
+  animation: warning-flash 2.5s ease-in-out infinite;
+}
+
+/* 状态异常 - 红色边框 */
+.hardware-node.abnormal-status,
+.hardware-node.critical-status {
+  border-color: #ff4d4f !important;
+  animation: critical-flash 2s ease-in-out infinite;
+}
+
+/* 组合：温度/效率警告 + 状态警告 */
+.hardware-node.warning-temp.warning-status,
+.hardware-node.warning-efficiency.warning-status {
+  animation: warning-flash 2s ease-in-out infinite;
+}
+
+/* 组合：温度/效率严重 + 状态警告 */
+.hardware-node.critical-temp.warning-status,
+.hardware-node.critical-efficiency.warning-status {
+  animation: warning-critical-flash 2s ease-in-out infinite;
+}
+
+/* 组合：温度警告 + 效率严重 */
+.hardware-node.warning-temp.critical-efficiency {
+  animation: warning-critical-flash 2s ease-in-out infinite;
+}
+
+/* 组合：温度严重 + 效率警告 */
+.hardware-node.critical-temp.warning-efficiency {
+  animation: warning-critical-flash 2s ease-in-out infinite;
+}
+
+/* 组合：温度严重 + 效率严重 */
+.hardware-node.critical-temp.critical-efficiency {
+  animation: critical-flash 1.5s ease-in-out infinite;
+}
+
+/* 兼容旧类名 - 保持原有红色闪烁 */
+.hardware-node.abnormal-temp:not(.critical-temp):not(.warning-temp),
+.hardware-node.abnormal-efficiency:not(.critical-efficiency):not(.warning-efficiency) {
+  animation: critical-flash 2s ease-in-out infinite;
+}
+
+/* 自定义 JSON 数据面板 */
+.edge-custom-data {
+  font-size: 10px;
+  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin-top: 2px;
+  max-width: 200px;
+  white-space: nowrap;
+}
+
+.edge-custom-data-row {
+  line-height: 1.6;
+}
+
+.edge-custom-data-key {
+  color: #8c8c8c;
+  font-weight: 500;
+}
+
+.edge-custom-data-value {
+  color: #262626;
+}

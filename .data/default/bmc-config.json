@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "ip": "",
+  "username": "",
+  "password": "",
+  "port": 443,
+  "protocol": "https"
+}
