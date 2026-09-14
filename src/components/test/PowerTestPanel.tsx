@@ -900,7 +900,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
 
         // 解析阶段配置：阶段独立配置 > 配置模板 > 当前标签页配置
         const template = stage.configTemplateId ? savedConfigs.find((c) => c.id === stage.configTemplateId) : null;
-        const baseEnvVars = template?.envVars ?? tab.powerTestConfig.envVars;
+        const baseEnvVars = stage.envVars ?? template?.envVars ?? tab.powerTestConfig.envVars;
         const requiredEnvVarEntries = Object.entries(stage.requiredEnvVarValues || {}).filter(([, v]) => v.trim());
         const mergedEnvVars = [...baseEnvVars, ...requiredEnvVarEntries.map(([key, value]) => ({ key, value }))];
         const baseConfig = {
@@ -2379,6 +2379,75 @@ echo "{\"score\": \${SCORE}}"`}
                           );
                         })()}
 
+                        <div style={{ marginBottom: 8 }}>
+                          <div style={{ fontWeight: 500, marginBottom: 6, fontSize: 12 }}>
+                            <SettingOutlined style={{ marginRight: 4 }} />
+                            阶段环境变量
+                            {stage.envVars === undefined && (
+                              <span style={{ color: '#999', fontWeight: 400, marginLeft: 6 }}>
+                                （未配置时沿用模板或标签页环境变量）
+                              </span>
+                            )}
+                          </div>
+                          {(stage.envVars || []).map((env, envIndex) => (
+                            <Row key={envIndex} gutter={6} style={{ marginBottom: 6 }}>
+                              <Col span={9}>
+                                <Input
+                                  size="small"
+                                  placeholder="变量名"
+                                  value={env.key}
+                                  onChange={(e) => {
+                                    const list = [...(stage.envVars || [])];
+                                    list[envIndex] = { ...list[envIndex], key: e.target.value };
+                                    updatePipelineStage(tab.id, stage.id, { envVars: list });
+                                  }}
+                                  disabled={tab.isRunningTest}
+                                />
+                              </Col>
+                              <Col span={11}>
+                                <Input
+                                  size="small"
+                                  placeholder="变量值"
+                                  value={env.value}
+                                  onChange={(e) => {
+                                    const list = [...(stage.envVars || [])];
+                                    list[envIndex] = { ...list[envIndex], value: e.target.value };
+                                    updatePipelineStage(tab.id, stage.id, { envVars: list });
+                                  }}
+                                  disabled={tab.isRunningTest}
+                                />
+                              </Col>
+                              <Col span={4}>
+                                <Button
+                                  type="link"
+                                  danger
+                                  size="small"
+                                  icon={<MinusCircleOutlined />}
+                                  disabled={tab.isRunningTest}
+                                  onClick={() => {
+                                    const list = (stage.envVars || []).filter((_, i) => i !== envIndex);
+                                    updatePipelineStage(tab.id, stage.id, { envVars: list });
+                                  }}
+                                />
+                              </Col>
+                            </Row>
+                          ))}
+                          <Button
+                            type="dashed"
+                            size="small"
+                            icon={<PlusOutlined />}
+                            disabled={tab.isRunningTest}
+                            onClick={() => {
+                              updatePipelineStage(tab.id, stage.id, {
+                                envVars: [...(stage.envVars || []), { key: '', value: '' }],
+                              });
+                            }}
+                            style={{ width: '100%' }}
+                          >
+                            添加环境变量
+                          </Button>
+                        </div>
+
                         <Select
                           size="small"
                           placeholder="选择配置模板（可选）"
@@ -2547,8 +2616,8 @@ echo "{\"score\": \${SCORE}}"`}
               </>
             )}
 
-            {/* 环境变量配置 - 测试包选择成功后显示 */}
-            {(tab.powerTestConfig.packageFile || selectedLibraryPackageId) && (
+            {/* 环境变量配置 - 测试包选择成功后显示（流水线模式下在各自阶段内独立配置） */}
+            {!tab.pipelineMode && (tab.powerTestConfig.packageFile || selectedLibraryPackageId) && (
               <div style={{ marginTop: 16 }}>
                 <Divider style={{ margin: '8px 0 12px' }} />
                 <div style={{ fontWeight: 'bold', marginBottom: 8, fontSize: 14 }}>

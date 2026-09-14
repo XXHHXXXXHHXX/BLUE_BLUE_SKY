@@ -112,6 +112,8 @@ export interface PipelineStage {
   configTemplateId?: string | null;
   /** 阶段独立的监控命令；未设置时沿用配置模板或当前标签页配置 */
   monitorCommands?: MonitorCommand[];
+  /** 阶段独立的环境变量；未设置时沿用配置模板或当前标签页配置 */
+  envVars?: Array<{ key: string; value: string }>;
   remotePath?: string;
   jobId?: string;
   status?: 'pending' | 'running' | 'completed' | 'error' | 'skipped';
