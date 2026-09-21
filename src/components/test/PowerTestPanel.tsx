@@ -176,6 +176,8 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<Job | null>(null);
   const lastJobIdRef = useRef<string | null>(null);
+  // 同步 activeJobId 到 ref，供 visibilitychange 等事件回调读取最新值，避免闭包捕获旧值
+  const activeJobIdRef = useRef<string | null>(null);
 
   // 保存报告弹窗打开时拉取目录，并默认选中最近使用的目录
   useEffect(() => {
@@ -190,6 +192,8 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const processedResultCountRef = useRef(0);
   const prevJobStatusRef = useRef<string | null>(null);
   const isAbortingRef = useRef(false);
+  // 指向轮询函数的引用，供页面重新可见时立即触发一次状态同步
+  const pollJobStatusRef = useRef<(() => Promise<void>) | null>(null);
 
   // 加载已保存的配置列表
   useEffect(() => {
@@ -270,6 +274,11 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     saveConfigForm.resetFields();
   }, [tab.id, saveReportForm, saveConfigForm]);
 
+  // 保持 activeJobIdRef 与 activeJobId 同步，避免事件回调闭包捕获过期值
+  useEffect(() => {
+    activeJobIdRef.current = activeJobId;
+  }, [activeJobId]);
+
   // 页面加载时：检测当前主机是否有运行中的后台任务，自动恢复查看
   useEffect(() => {
     const restoreRunningJob = async () => {
@@ -283,6 +292,10 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
             (j.status === 'running' || j.status === 'pending')
         );
         if (runningJob) {
+          // 已关联该任务且正在轮询时，避免重复恢复日志/结果导致重复输出
+          if (activeJobIdRef.current === runningJob.id && tab.isRunningTest) {
+            return;
+          }
           setActiveJobId(runningJob.id);
           setIsRunningTest(tab.id, true);
           setTestStatus(tab.id, 'testing');
@@ -328,6 +341,29 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           processedLogCountRef.current = runningJob.logs.length;
           prevJobStatusRef.current = runningJob.status;
           addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 已恢复关联到运行中的后台任务 [${runningJob.id}]`);
+        } else if (activeJobIdRef.current || tab.isRunningTest) {
+          // 当前主机没有运行中的后台任务，但标签页仍被标记为运行中：
+          // 说明任务已在页面隐藏/离开期间结束，主动同步清理运行状态，避免一直显示“运行中”
+          const prevJob = lastJobIdRef.current
+            ? data.jobs.find((j: Job) => j.id === lastJobIdRef.current)
+            : undefined;
+          let finalStatus: TestTab['testStatus'] = tab.testResults.length > 0 ? 'completed' : 'idle';
+          if (prevJob) {
+            if (prevJob.status === 'error') {
+              finalStatus = 'error';
+            } else if (prevJob.status === 'aborted' || prevJob.status === 'completed') {
+              finalStatus = 'completed';
+            }
+          }
+          setTestStatus(tab.id, finalStatus);
+          setIsRunningTest(tab.id, false);
+          setActiveJobId(null);
+          setActiveJob(null);
+          prevJobStatusRef.current = null;
+          isAbortingRef.current = false;
+          if (activeJobIdRef.current) {
+            addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 后台任务已结束，运行状态已同步`);
+          }
         }
       } catch (err) {
         console.error('恢复运行中任务失败:', err);
@@ -335,9 +371,14 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     };
     restoreRunningJob();
 
-    // 监听页面可见性变化，当页面重新可见时如果需要则重新检测运行中的任务
+    // 监听页面可见性变化：页面重新可见时，若有活跃轮询则立即同步一次状态
+    //（浏览器在后台标签页会节流 setInterval，导致返回时状态更新滞后）；
+    // 若没有活跃轮询，则重新检测当前主机是否有运行中的后台任务
     const handleVisibilityChange = () => {
-      if (!document.hidden && !activeJobId) {
+      if (document.hidden) return;
+      if (activeJobIdRef.current) {
+        pollJobStatusRef.current?.();
+      } else {
         restoreRunningJob();
       }
     };
@@ -350,7 +391,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   useEffect(() => {
     if (!activeJobId) return;
 
-    const interval = setInterval(async () => {
+    const poll = async () => {
       try {
         const res = await fetch(`/api/test/jobs/${activeJobId}`);
         const data = await res.json();
@@ -475,9 +516,16 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       } catch (err) {
         console.error('轮询任务状态失败:', err);
       }
-    }, 1000);
+    };
 
-    return () => clearInterval(interval);
+    pollJobStatusRef.current = poll;
+    const interval = setInterval(poll, 1000);
+    return () => {
+      clearInterval(interval);
+      if (pollJobStatusRef.current === poll) {
+        pollJobStatusRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeJobId, tab.id]);
 
