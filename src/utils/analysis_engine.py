@@ -50,16 +50,26 @@ def analyze(data: dict) -> dict:
         return {"error": "数据点不足，至少需要 2 个样本进行分析"}
 
     iteration_params = config.get('iterationParams', [])
-    param_names = [p['name'] for p in iteration_params]
+    config_names = [p['name'] for p in iteration_params]
 
-    # 兼容旧数据：如果没有 iterationParams，尝试从 iterationValues 推断
-    if not param_names and results:
-        all_keys = set()
-        for r in results:
-            iv = r.get('iterationValues', {})
-            if iv:
-                all_keys.update(iv.keys())
-        param_names = sorted(all_keys)
+    # 收集数据中实际存在的迭代参数键。优先以真实数据为准，
+    # 避免 config.iterationParams 与 results.iterationValues 键不一致
+    # （例如参数在测试后/保存报告前被重命名或修改）时，
+    # 导致历史实际最优点等位置的每个迭代参数取值错误（显示为 0）。
+    data_keys = set()
+    for r in results:
+        iv = r.get('iterationValues') or {}
+        if iv:
+            data_keys.update(iv.keys())
+
+    if data_keys:
+        # 按 config 顺序排列已知参数，未知参数按字典序补齐
+        known = [n for n in config_names if n in data_keys]
+        unknown = sorted(data_keys - set(config_names))
+        param_names = known + unknown
+    else:
+        # 兼容旧数据：没有任何 iterationValues 时，仅能使用 config 参数名
+        param_names = config_names
 
     if not param_names:
         return {"error": "未检测到迭代参数，无法分析"}
