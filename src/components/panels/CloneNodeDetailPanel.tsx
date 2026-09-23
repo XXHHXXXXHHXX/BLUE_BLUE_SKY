@@ -105,6 +105,15 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
           };
         }
         break;
+      case 'busbar':
+        if (sourceData) {
+          dataPoint = {
+            power: sourceData.busbarPower,
+            voltage: sourceData.busbarVoltage,
+            current: sourceData.busbarCurrent,
+          };
+        }
+        break;
       case 'fan':
         if (fanData) {
           dataPoint = {
@@ -216,9 +225,27 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
             <Descriptions.Item label="PSU输出电流查询">{formatCurrent(s.outputCurrent ?? s.current)}</Descriptions.Item>
             <Descriptions.Item label="PSU输出功率查询">{formatPower(s.outputPower)}</Descriptions.Item>
             <Descriptions.Item label="转换效率">{formatEfficiency(s.efficiency)}</Descriptions.Item>
-            {s.temperature != null && (
-              <Descriptions.Item label="温度">{formatTemperature(s.temperature)}</Descriptions.Item>
+            {s.psuIntakeTemp != null && (
+              <Descriptions.Item label="PSU(入风口)温度">{formatTemperature(s.psuIntakeTemp)}</Descriptions.Item>
             )}
+            {s.psuMosTemp != null && (
+              <Descriptions.Item label="PSU(主功率MOS)温度">{formatTemperature(s.psuMosTemp)}</Descriptions.Item>
+            )}
+            {s.psuRearIntakeTemp != null && (
+              <Descriptions.Item label="后扩PSU位置(PSU入风)温度">{formatTemperature(s.psuRearIntakeTemp)}</Descriptions.Item>
+            )}
+          </Descriptions>
+        );
+      }
+
+      case 'busbar': {
+        const s = d.sourceData as SourceData;
+        if (!s) return <div>暂无数据</div>;
+        return (
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label="母线电压">{formatVoltage(s.busbarVoltage)}</Descriptions.Item>
+            <Descriptions.Item label="母线电流">{formatCurrent(s.busbarCurrent)}</Descriptions.Item>
+            <Descriptions.Item label="母线功耗">{formatPower(s.busbarPower)}</Descriptions.Item>
           </Descriptions>
         );
       }
@@ -445,7 +472,7 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
   const hasRecordableData = useCallback(() => {
     if (!node?.data) return false;
     const { nodeType } = node.data;
-    return ['ac', 'psu', 'vr', 'psip', 'fan', 'cpu', 'memory', 'disk', 'io', 'card', 'sensor'].includes(nodeType);
+    return ['ac', 'psu', 'vr', 'psip', 'busbar', 'fan', 'cpu', 'memory', 'disk', 'io', 'card', 'sensor'].includes(nodeType);
   }, [node]);
 
   const getHistoryChartData = useCallback(() => {

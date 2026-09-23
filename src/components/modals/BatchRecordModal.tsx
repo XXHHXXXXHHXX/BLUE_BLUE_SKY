@@ -17,12 +17,13 @@ interface BatchRecordModalProps {
 }
 
 /** 可录像的节点类型 */
-const RECORDABLE_TYPES = ['ac', 'psu', 'vr', 'psip', 'fan', 'cpu', 'memory', 'disk', 'io', 'card', 'sensor'];
+const RECORDABLE_TYPES = ['ac', 'psu', 'vr', 'psip', 'busbar', 'fan', 'cpu', 'memory', 'disk', 'io', 'card', 'sensor'];
 
 /** 节点类型显示名称 */
 const TYPE_NAMES: Record<string, string> = {
   ac: 'AC 电源',
   psu: 'PSU 电源',
+  busbar: '母线',
   vr: 'VR 稳压器',
   psip: 'PSIP 电源',
   fan: '风扇',
@@ -38,6 +39,7 @@ const TYPE_NAMES: Record<string, string> = {
 const TYPE_COLORS: Record<string, string> = {
   ac: 'green',
   psu: 'green',
+  busbar: 'green',
   vr: 'blue',
   psip: 'blue',
   fan: 'cyan',

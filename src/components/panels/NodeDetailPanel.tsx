@@ -22,6 +22,7 @@ import {
   getNodeDisplayLabel,
 } from '../../utils/formatters';
 import type { SourceData, FanData, LoadData, MemoryData, DiskData, IOData, CardData, SensorData } from '../../types/power';
+import { DEFAULT_FIELD_THRESHOLDS } from '../../types/topology';
 import type { TopologyNode, FieldThreshold } from '../../types/topology';
 import { getThresholdColorForField } from '../../utils/formatters';
 import { 
@@ -115,6 +116,15 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
             temperature: sourceData.temperature,
             voltage: sourceData.outputVoltage,
             current: sourceData.current,
+          };
+        }
+        break;
+      case 'busbar':
+        if (sourceData) {
+          dataPoint = {
+            power: sourceData.busbarPower,
+            voltage: sourceData.busbarVoltage,
+            current: sourceData.busbarCurrent,
           };
         }
         break;
@@ -221,29 +231,37 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
     const displayMetrics = d.displayMetrics as Record<string, number | null> | undefined;
 
     // 通用字段渲染：对已知字段从数据对象取值，对未知字段从 displayMetrics 取值
+    // rawValues 提供字段对应的原始数值，用于应用阈值颜色
     const renderDynamicFields = (
       fieldValues: Record<string, React.ReactNode>,
+      rawValues: Record<string, number | null | undefined> = {},
       skipKeys: string[] = []
     ) => {
       return orderedVisibleFieldKeys
         .filter((key) => !skipKeys.includes(key))
         .map((key) => {
+          let content: React.ReactNode;
+          let raw: number | null | undefined;
+
           if (fieldValues[key] !== undefined) {
-            return (
-              <Descriptions.Item key={key} label={getFieldLabel(key)}>
-                {fieldValues[key]}
-              </Descriptions.Item>
-            );
+            content = fieldValues[key];
+            raw = rawValues[key];
+          } else {
+            raw = displayMetrics?.[key];
+            content = (raw !== null && raw !== undefined && !Number.isNaN(raw))
+              ? typeof raw === 'number' ? raw.toFixed(2) : String(raw)
+              : 'NA';
           }
-          // 自定义字段从 displayMetrics 读取
-          const customValue = displayMetrics?.[key];
+
+          // 应用阈值颜色（仅对纯文本内容生效，不覆盖已有 ReactNode 的自定义颜色）
+          const thresholdColor = getThresholdColorForField(raw, key, thresholds, DEFAULT_FIELD_THRESHOLDS);
+          if (thresholdColor && typeof content === 'string') {
+            content = <span style={{ color: thresholdColor }}>{content}</span>;
+          }
+
           return (
             <Descriptions.Item key={key} label={getFieldLabel(key)}>
-              {customValue !== null && customValue !== undefined && !Number.isNaN(customValue)
-                ? typeof customValue === 'number'
-                  ? customValue.toFixed(2)
-                  : String(customValue)
-                : 'NA'}
+              {content}
             </Descriptions.Item>
           );
         });
@@ -263,10 +281,15 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
             </span>
           ),
         };
+        const rawValues: Record<string, number | null | undefined> = {
+          outputVoltage: s.outputVoltage,
+          current: s.current,
+          outputPower: s.outputPower,
+        };
 
         return (
           <Descriptions column={1} bordered size="small">
-            {renderDynamicFields(fieldValues)}
+            {renderDynamicFields(fieldValues, rawValues)}
           </Descriptions>
         );
       }
@@ -300,11 +323,65 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
               {formatTemperature(s.temperature)}
             </span>
           ),
+          psuIntakeTemp: (
+            <span style={{ color: getThresholdColorForField(s.psuIntakeTemp, 'psuIntakeTemp', thresholds) }}>
+              {formatTemperature(s.psuIntakeTemp)}
+            </span>
+          ),
+          psuMosTemp: (
+            <span style={{ color: getThresholdColorForField(s.psuMosTemp, 'psuMosTemp', thresholds) }}>
+              {formatTemperature(s.psuMosTemp)}
+            </span>
+          ),
+          psuRearIntakeTemp: (
+            <span style={{ color: getThresholdColorForField(s.psuRearIntakeTemp, 'psuRearIntakeTemp', thresholds) }}>
+              {formatTemperature(s.psuRearIntakeTemp)}
+            </span>
+          ),
+        };
+        const rawValues: Record<string, number | null | undefined> = {
+          inputVoltage: s.inputVoltage,
+          inputCurrent: s.inputCurrent ?? s.current,
+          inputPower: s.inputPower,
+          outputVoltage: s.outputVoltage,
+          outputCurrent: s.outputCurrent ?? s.current,
+          outputPower: s.outputPower,
+          efficiency: s.efficiency,
+          temperature: s.temperature,
+          psuIntakeTemp: s.psuIntakeTemp,
+          psuMosTemp: s.psuMosTemp,
+          psuRearIntakeTemp: s.psuRearIntakeTemp,
         };
 
         return (
           <Descriptions column={1} bordered size="small">
-            {renderDynamicFields(fieldValues, ['psuOutputVoltageControl'])}
+            {renderDynamicFields(fieldValues, rawValues)}
+          </Descriptions>
+        );
+      }
+
+      case 'busbar': {
+        const s = d.sourceData as SourceData;
+        if (!s) return <div>暂无数据</div>;
+
+        const fieldValues: Record<string, React.ReactNode> = {
+          busbarVoltage: formatVoltage(s.busbarVoltage),
+          busbarCurrent: formatCurrent(s.busbarCurrent),
+          busbarPower: (
+            <span style={{ color: getThresholdColorForField(s.busbarPower, 'busbarPower', thresholds) }}>
+              {formatPower(s.busbarPower)}
+            </span>
+          ),
+        };
+        const rawValues: Record<string, number | null | undefined> = {
+          busbarVoltage: s.busbarVoltage,
+          busbarCurrent: s.busbarCurrent,
+          busbarPower: s.busbarPower,
+        };
+
+        return (
+          <Descriptions column={1} bordered size="small">
+            {renderDynamicFields(fieldValues, rawValues)}
           </Descriptions>
         );
       }
@@ -343,11 +420,21 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
             </span>
           ),
         };
+        const rawValues: Record<string, number | null | undefined> = {
+          inputVoltage: s.inputVoltage,
+          inputCurrent: s.inputCurrent ?? s.current,
+          inputPower: s.inputPower,
+          outputVoltage: s.outputVoltage,
+          outputCurrent: s.outputCurrent ?? s.current,
+          outputPower: s.outputPower,
+          efficiency: s.efficiency,
+          temperature: s.temperature,
+        };
 
         return (
           <>
             <Descriptions column={1} bordered size="small">
-              {renderDynamicFields(fieldValues, ['vrOutputVoltageControl'])}
+              {renderDynamicFields(fieldValues, rawValues, ['vrOutputVoltageControl'])}
             </Descriptions>
             <div style={{ marginTop: 16 }}>
               <Title level={5}>VR输出电压调节接口</Title>
@@ -399,11 +486,21 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
             </span>
           ),
         };
+        const rawValues: Record<string, number | null | undefined> = {
+          inputVoltage: s.inputVoltage,
+          inputCurrent: s.inputCurrent ?? s.current,
+          inputPower: s.inputPower,
+          outputVoltage: s.outputVoltage,
+          outputCurrent: s.outputCurrent ?? s.current,
+          outputPower: s.outputPower,
+          efficiency: s.efficiency,
+          temperature: s.temperature,
+        };
 
         return (
           <>
             <Descriptions column={1} bordered size="small">
-              {renderDynamicFields(fieldValues, ['psipOutputVoltageControl'])}
+              {renderDynamicFields(fieldValues, rawValues, ['psipOutputVoltageControl'])}
             </Descriptions>
             <div style={{ marginTop: 16 }}>
               <Title level={5}>psip输出电压调节接口</Title>
@@ -447,11 +544,19 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
           rpm: formatRPM(f.rpm),
           speedPercent: `${f.speedPercent ?? 'NA'}%`,
         };
+        const rawValues: Record<string, number | null | undefined> = {
+          power: f.power,
+          temperature: f.temperature,
+          rpm: f.rpm,
+          speedPercent: f.speedPercent,
+          fanInputVoltage: f.fanInputVoltage,
+          fanInputCurrent: f.fanInputCurrent,
+        };
 
         return (
           <>
             <Descriptions column={1} bordered size="small">
-              {renderDynamicFields(fieldValues, ['fanSpeedControl'])}
+              {renderDynamicFields(fieldValues, rawValues, ['fanSpeedControl'])}
             </Descriptions>
             <div style={{ marginTop: 16 }}>
               <Title level={5}>风扇调速接口</Title>
@@ -484,10 +589,14 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
             </span>
           ),
         };
+        const rawValues: Record<string, number | null | undefined> = {
+          power: c.power,
+          temperature: c.temperature,
+        };
 
         return (
           <Descriptions column={1} bordered size="small">
-            {renderDynamicFields(fieldValues)}
+            {renderDynamicFields(fieldValues, rawValues)}
           </Descriptions>
         );
       }
@@ -513,10 +622,14 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
             </Tag>
           ),
         };
+        const rawValues: Record<string, number | null | undefined> = {
+          power: m.power,
+          temperature: m.temperature,
+        };
 
         return (
           <Descriptions column={1} bordered size="small">
-            {renderDynamicFields(fieldValues)}
+            {renderDynamicFields(fieldValues, rawValues)}
           </Descriptions>
         );
       }
@@ -542,10 +655,18 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
             </Tag>
           ),
         };
+        const rawValues: Record<string, number | null | undefined> = {
+          power: dk.power,
+          temperature: dk.temperature,
+          diskInputVoltage: dk.diskInputVoltage,
+          diskInputCurrent: dk.diskInputCurrent,
+          nvmeInternalTemp: dk.nvmeInternalTemp,
+          nvmeMaxTemp: dk.nvmeMaxTemp,
+        };
 
         return (
           <Descriptions column={1} bordered size="small">
-            {renderDynamicFields(fieldValues)}
+            {renderDynamicFields(fieldValues, rawValues)}
           </Descriptions>
         );
       }
@@ -567,10 +688,15 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
           ),
           linkSpeed: io.linkSpeed,
         };
+        const rawValues: Record<string, number | null | undefined> = {
+          power: io.power,
+          temperature: io.temperature,
+          linkSpeed: io.linkSpeed as number | null | undefined,
+        };
 
         return (
           <Descriptions column={1} bordered size="small">
-            {renderDynamicFields(fieldValues)}
+            {renderDynamicFields(fieldValues, rawValues)}
           </Descriptions>
         );
       }
@@ -592,10 +718,18 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
           ),
           slotId: cd.slotId,
         };
+        const rawValues: Record<string, number | null | undefined> = {
+          power: cd.power,
+          temperature: cd.temperature,
+          cardInputVoltage: cd.cardInputVoltage,
+          cardInputCurrent: cd.cardInputCurrent,
+          ocpMainChipTemp: cd.ocpMainChipTemp,
+          ocpOpticalMaxTemp: cd.ocpOpticalMaxTemp,
+        };
 
         return (
           <Descriptions column={1} bordered size="small">
-            {renderDynamicFields(fieldValues)}
+            {renderDynamicFields(fieldValues, rawValues)}
           </Descriptions>
         );
       }
@@ -648,7 +782,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
   const hasRecordableData = useCallback(() => {
     if (!node?.data) return false;
     const { nodeType } = node.data;
-    return ['ac', 'psu', 'vr', 'psip', 'fan', 'cpu', 'memory', 'disk', 'io', 'card', 'sensor'].includes(nodeType);
+    return ['ac', 'psu', 'vr', 'psip', 'busbar', 'fan', 'cpu', 'memory', 'disk', 'io', 'card', 'sensor'].includes(nodeType);
   }, [node]);
 
   // 获取历史曲线数据（按指标分组）

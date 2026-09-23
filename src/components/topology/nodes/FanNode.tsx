@@ -32,6 +32,8 @@ const FanNode: React.FC<NodeProps> = (props) => {
       rpm: number | null;
       speedPercent: number | null;
       temperature?: number | null;
+      fanInputVoltage?: number | null;
+      fanInputCurrent?: number | null;
     };
     onSpeedChange?: (speed: number) => void;
   };
@@ -46,6 +48,8 @@ const FanNode: React.FC<NodeProps> = (props) => {
   const rpm = fanData?.rpm ?? null;
   const speedPercent = fanData?.speedPercent ?? null;
   const temperature = fanData?.temperature ?? null;
+  const fanInputVoltage = fanData?.fanInputVoltage ?? null;
+  const fanInputCurrent = fanData?.fanInputCurrent ?? null;
 
   const tempLevel = getTemperatureLevel(temperature ?? undefined);
   const tempClass = tempLevel === 'critical' 
@@ -66,6 +70,10 @@ const FanNode: React.FC<NodeProps> = (props) => {
     switch (fieldKey) {
       case 'power':
         return <div key={fieldKey}>{getFieldLabel('power')}: {formatPower(power)}</div>;
+      case 'fanInputVoltage':
+        return <div key={fieldKey}>{getFieldLabel('fanInputVoltage')}: {formatVoltage(fanInputVoltage)}</div>;
+      case 'fanInputCurrent':
+        return <div key={fieldKey}>{getFieldLabel('fanInputCurrent')}: {formatCurrent(fanInputCurrent)}</div>;
       case 'rpm':
         return <div key={fieldKey}>{getFieldLabel('rpm')}: {formatRPM(rpm)}</div>;
       case 'speedPercent':

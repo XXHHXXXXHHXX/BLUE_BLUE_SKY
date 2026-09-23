@@ -7,7 +7,7 @@ import type {
 
 /** 所有节点类型 */
 export type HardwareNodeType =
-  | 'ac' | 'psu' | 'vr' | 'psip'
+  | 'ac' | 'psu' | 'vr' | 'psip' | 'busbar'
   | 'cpu' | 'memory' | 'fan' | 'disk'
   | 'io' | 'card' | 'sensor' | 'mgmtBoard' | 'chassis'
   | 'thermometer' | 'custom';
@@ -49,14 +49,7 @@ export interface FixedFieldDef {
 /** 各节点类型的固定字段定义 */
 export const FIXED_FIELD_DEFS: Record<string, FixedFieldDef[]> = {
   cpu: [
-    { fieldKey: 'cpuInputVoltage', label: 'CPU输入电压' },
-    { fieldKey: 'cpuInputCurrent', label: 'CPU输入电流' },
-    { fieldKey: 'power', label: 'CPU输入功耗' },
-    { fieldKey: 'temperature', label: 'CPU温度' },
-    { fieldKey: 'cpuDpmThreshold', label: 'DPM双阈值配置（超功耗阈值水线和撤离超功耗阈值水线）' },
-    { fieldKey: 'cpuCfgTdp', label: 'CPU CFG TDP' },
-    { fieldKey: 'cpuFreq', label: 'CPU FREQ' },
-    { fieldKey: 'cpuThermalTarget', label: 'CPU控温目标' },
+    { fieldKey: 'power', label: 'CPU功耗' },
   ],
   memory: [
     { fieldKey: 'dimmInputVoltage', label: '内存输入电压' },
@@ -66,20 +59,18 @@ export const FIXED_FIELD_DEFS: Record<string, FixedFieldDef[]> = {
     { fieldKey: 'dimmThermalTarget', label: 'DIMM控温目标' },
   ],
   disk: [
-    { fieldKey: 'diskInputVoltage', label: '硬盘输入电压' },
-    { fieldKey: 'diskInputCurrent', label: '硬盘输入电流' },
-    { fieldKey: 'power', label: '硬盘功耗' },
-    { fieldKey: 'temperature', label: '硬盘温度' },
-    { fieldKey: 'diskThermalTarget', label: '硬盘控温目标' },
+    { fieldKey: 'diskInputVoltage', label: '硬盘背板输入电压' },
+    { fieldKey: 'diskInputCurrent', label: '硬盘背板输入电流' },
+    { fieldKey: 'power', label: '硬盘背板功耗' },
+    { fieldKey: 'temperature', label: '硬盘背板温度' },
+    { fieldKey: 'nvmeInternalTemp', label: 'NVMe盘内置温度' },
+    { fieldKey: 'nvmeMaxTemp', label: '所有NVMe盘最大温度' },
   ],
   fan: [
     { fieldKey: 'fanInputVoltage', label: '风扇输入电压' },
     { fieldKey: 'fanInputCurrent', label: '风扇输入电流' },
-    { fieldKey: 'power', label: '风扇功耗' },
-    { fieldKey: 'temperature', label: '风扇温度' },
-    { fieldKey: 'fanSpeedControl', label: '风扇调速接口' },
-    { fieldKey: 'rpm', label: '转速' },
-    { fieldKey: 'speedPercent', label: '速度百分比' },
+    { fieldKey: 'power', label: '风扇总功耗' },
+    { fieldKey: 'rpm', label: '风扇风速' },
   ],
   io: [
     { fieldKey: 'power', label: '功耗' },
@@ -90,9 +81,8 @@ export const FIXED_FIELD_DEFS: Record<string, FixedFieldDef[]> = {
     { fieldKey: 'cardInputVoltage', label: '标卡输入电压' },
     { fieldKey: 'cardInputCurrent', label: '标卡输入电流' },
     { fieldKey: 'power', label: '标卡功耗' },
-    { fieldKey: 'temperature', label: '标卡温度' },
-    { fieldKey: 'cardThermalTarget', label: '标卡控温目标' },
-    { fieldKey: 'slotId', label: '插槽ID' },
+    { fieldKey: 'ocpMainChipTemp', label: 'OCP卡主芯片温度' },
+    { fieldKey: 'ocpOpticalMaxTemp', label: 'OCP卡光模块最高温度' },
   ],
   sensor: [
     { fieldKey: 'temperature', label: '板级其他温度监测点温度' },
@@ -106,11 +96,16 @@ export const FIXED_FIELD_DEFS: Record<string, FixedFieldDef[]> = {
     { fieldKey: 'temperature', label: '温度' },
     { fieldKey: 'temperatureStatus', label: '温度状态' },
   ],
-  // source 类型 (ac, psu, vr, psip) 使用 sourceData
+  // source 类型 (ac, psu, vr, psip, busbar) 使用 sourceData
   ac: [
     { fieldKey: 'outputVoltage', label: 'AC输出电压' },
     { fieldKey: 'current', label: 'AC输出电流' },
     { fieldKey: 'outputPower', label: 'AC输出功率' },
+  ],
+  busbar: [
+    { fieldKey: 'busbarVoltage', label: '母线电压' },
+    { fieldKey: 'busbarCurrent', label: '母线电流' },
+    { fieldKey: 'busbarPower', label: '母线功耗' },
   ],
   psu: [
     { fieldKey: 'inputVoltage', label: 'PSU输入电压' },
@@ -119,9 +114,9 @@ export const FIXED_FIELD_DEFS: Record<string, FixedFieldDef[]> = {
     { fieldKey: 'outputVoltage', label: 'PSU输出电压' },
     { fieldKey: 'outputCurrent', label: 'PSU输出电流' },
     { fieldKey: 'outputPower', label: 'PSU输出功率' },
-    { fieldKey: 'psuOutputVoltageControl', label: 'PSU输出电压调节接口' },
-    { fieldKey: 'efficiency', label: '效率' },
-    { fieldKey: 'temperature', label: '温度' },
+    { fieldKey: 'psuIntakeTemp', label: 'PSU(入风口)温度' },
+    { fieldKey: 'psuMosTemp', label: 'PSU(主功率MOS)温度' },
+    { fieldKey: 'psuRearIntakeTemp', label: '后扩PSU位置(PSU入风)温度' },
   ],
   vr: [
     { fieldKey: 'inputVoltage', label: 'VR输入电压' },
@@ -220,7 +215,15 @@ export const DEFAULT_FIELD_THRESHOLDS: Record<string, FieldThreshold[]> = {
   // source 类型阈值
   psu: [
     {
-      fieldKey: 'temperature',
+      fieldKey: 'psuIntakeTemp',
+      ranges: [
+        { min: 0, max: 45, color: '#52c41a', label: '正常' },
+        { min: 45, max: 60, color: '#faad14', label: '警告' },
+        { min: 60, max: 150, color: '#ff4d4f', label: '危险' },
+      ],
+    },
+    {
+      fieldKey: 'psuMosTemp',
       ranges: [
         { min: 0, max: 55, color: '#52c41a', label: '正常' },
         { min: 55, max: 75, color: '#faad14', label: '警告' },
@@ -228,11 +231,11 @@ export const DEFAULT_FIELD_THRESHOLDS: Record<string, FieldThreshold[]> = {
       ],
     },
     {
-      fieldKey: 'efficiency',
+      fieldKey: 'psuRearIntakeTemp',
       ranges: [
-        { min: 0, max: 85, color: '#ff4d4f', label: '低效' },
-        { min: 85, max: 90, color: '#faad14', label: '一般' },
-        { min: 90, max: 100, color: '#52c41a', label: '高效' },
+        { min: 0, max: 45, color: '#52c41a', label: '正常' },
+        { min: 45, max: 60, color: '#faad14', label: '警告' },
+        { min: 60, max: 150, color: '#ff4d4f', label: '危险' },
       ],
     },
   ],
@@ -268,6 +271,8 @@ export interface ApiConfig {
   sensorName?: string;
   /** 字段级映射配置（优先级高于 sensorName） */
   fieldMappings?: FieldMapping[];
+  /** CPU电源域字段映射配置（用于"电源域详情"弹窗内的固定字段） */
+  powerDomainFieldMappings?: FieldMapping[];
   /** 字段阈值配置（用于监控界面颜色显示） */
   fieldThresholds?: FieldThreshold[];
   /** 用户自定义字段定义（fieldKey + 显示名） */
@@ -290,6 +295,7 @@ export type HardwareNodeData = {
   | { nodeType: 'psu'; sourceData: SourceData }
   | { nodeType: 'vr'; sourceData: SourceData }
   | { nodeType: 'psip'; sourceData: SourceData }
+  | { nodeType: 'busbar'; sourceData: SourceData }
   | { nodeType: 'cpu'; cpuData: CPUData }
   | { nodeType: 'memory'; memoryData: MemoryData }
   | { nodeType: 'fan'; fanData: FanData }

@@ -358,7 +358,7 @@ interface TopologyEdge {
 ### HardwareNodeType
 ```typescript
 type HardwareNodeType = 
-  | 'ac' | 'psu' | 'vr' | 'psip' 
+  | 'ac' | 'psu' | 'vr' | 'psip' | 'busbar'
   | 'cpu' | 'memory' | 'fan' | 'disk' 
   | 'io' | 'card' | 'sensor' | 'mgmtBoard' | 'chassis';
 ```

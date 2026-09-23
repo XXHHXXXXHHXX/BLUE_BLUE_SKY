@@ -36,6 +36,10 @@ const DiskNode: React.FC<NodeProps> = (props) => {
       power: number | null;
       temperature?: number | null;
       status: 'normal' | 'warning' | 'error' | null;
+      diskInputVoltage?: number | null;
+      diskInputCurrent?: number | null;
+      nvmeInternalTemp?: number | null;
+      nvmeMaxTemp?: number | null;
     };
   };
   const disk = data.diskData;
@@ -46,6 +50,10 @@ const DiskNode: React.FC<NodeProps> = (props) => {
   const power = disk?.power ?? null;
   const temperature = disk?.temperature ?? null;
   const status = disk?.status ?? null;
+  const diskInputVoltage = disk?.diskInputVoltage ?? null;
+  const diskInputCurrent = disk?.diskInputCurrent ?? null;
+  const nvmeInternalTemp = disk?.nvmeInternalTemp ?? null;
+  const nvmeMaxTemp = disk?.nvmeMaxTemp ?? null;
   const st = status ? (statusMap[status] ?? statusMap.normal) : null;
 
   const tempLevel = getTemperatureLevel(temperature ?? undefined);
@@ -69,6 +77,22 @@ const DiskNode: React.FC<NodeProps> = (props) => {
             </span>
           </div>
         );
+      case 'diskInputVoltage':
+        return <div key={fieldKey}>{getFieldLabel('diskInputVoltage')}: {formatVoltage(diskInputVoltage)}</div>;
+      case 'diskInputCurrent':
+        return <div key={fieldKey}>{getFieldLabel('diskInputCurrent')}: {formatCurrent(diskInputCurrent)}</div>;
+      case 'nvmeInternalTemp':
+      case 'nvmeMaxTemp': {
+        const value = fieldKey === 'nvmeInternalTemp' ? nvmeInternalTemp : nvmeMaxTemp;
+        return (
+          <div key={fieldKey}>
+            {getFieldLabel(fieldKey)}:{' '}
+            <span style={{ color: value !== null ? getTemperatureColor(value) : '#999' }}>
+              {formatTemperature(value)}
+            </span>
+          </div>
+        );
+      }
       case 'status':
         return (
           <div key={fieldKey}>

@@ -5,6 +5,7 @@ import type { SensorData } from '../../bmc/sensors/route';
 import type { TopologyNode, TopologyEdge, FieldMapping, BMCConfig } from '../../../../src/types/topology';
 import { FIXED_FIELD_DEFS } from '../../../../src/types/topology';
 import type { CPUData, MemoryData, DiskData, FanData, IOData, CardData, SensorData as SensorNodeData, MgmtBoardData, SourceData } from '../../../../src/types/power';
+import { CPU_POWER_DOMAIN_FIELD_DEFS, buildCPUPowerDomains } from '../../../../src/types/power';
 
 /** 获取 BMC Sensor 数据（直接使用传入的配置） */
 async function fetchBMCSensorsWithConfig(bmcConfig: BMCConfig | null | undefined): Promise<{ sensors?: SensorData[]; error?: string; errorCode?: string }> {
@@ -86,10 +87,12 @@ function evaluateBmcExpression(expression: string, sensors: SensorData[]): numbe
 function updateNodesWithFieldMappings(nodes: TopologyNode[], sensors: SensorData[]): TopologyNode[] {
   return nodes.map(node => {
     const fieldMappings = node.data.apiConfig?.fieldMappings;
+    const powerDomainFieldMappings = node.data.apiConfig?.powerDomainFieldMappings;
     const nodeType = node.data.nodeType;
     
     // 如果没有配置字段映射，返回原节点（保持原有数据结构）
-    if (!fieldMappings || fieldMappings.length === 0) {
+    if ((!fieldMappings || fieldMappings.length === 0) &&
+        (!powerDomainFieldMappings || powerDomainFieldMappings.length === 0)) {
       return node;
     }
     
@@ -101,7 +104,7 @@ function updateNodesWithFieldMappings(nodes: TopologyNode[], sensors: SensorData
     console.log(`[Poll] Processing node ${node.id} (${nodeType}), fieldMappings:`, fieldMappings);
     console.log(`[Poll] Available sensors:`, sensors.map(s => s.sensorName));
     
-    for (const mapping of fieldMappings) {
+    for (const mapping of fieldMappings || []) {
       const { fieldKey, bmcField } = mapping;
       
       const value = evaluateBmcExpression(bmcField, sensors);
@@ -110,6 +113,13 @@ function updateNodesWithFieldMappings(nodes: TopologyNode[], sensors: SensorData
       
       mappedData[fieldKey] = value;
       console.log(`[Poll]   -> assigned value=${value}`);
+    }
+    
+    // CPU 电源域字段映射同样求值（用于"电源域详情"弹窗）
+    for (const mapping of powerDomainFieldMappings || []) {
+      const { fieldKey, bmcField } = mapping;
+      const value = evaluateBmcExpression(bmcField, sensors);
+      mappedData[fieldKey] = value;
     }
     
     // 过滤所有 NaN 值，统一转为 null
@@ -149,6 +159,7 @@ function updateNodesWithFieldMappings(nodes: TopologyNode[], sensors: SensorData
       case 'psu':
       case 'vr':
       case 'psip':
+      case 'busbar':
         newNode.data.sourceData = buildSourceData(newNode.data.sourceData, mappedData);
         break;
       case 'custom':
@@ -156,9 +167,10 @@ function updateNodesWithFieldMappings(nodes: TopologyNode[], sensors: SensorData
         break;
     }
 
-    // 将自定义字段（不在 FIXED_FIELD_DEFS 中的字段）的值写入 displayMetrics
+    // 将自定义字段（不在 FIXED_FIELD_DEFS 中、且非电源域字段）的值写入 displayMetrics
     const fixedKeys = new Set((FIXED_FIELD_DEFS[nodeType || ''] || []).map((d) => d.fieldKey));
-    const customMappings = fieldMappings.filter((m) => !fixedKeys.has(m.fieldKey));
+    const domainKeys = new Set(CPU_POWER_DOMAIN_FIELD_DEFS.map((d) => d.fieldKey));
+    const customMappings = (fieldMappings || []).filter((m) => !fixedKeys.has(m.fieldKey) && !domainKeys.has(m.fieldKey));
     if (customMappings.length > 0) {
       newNode.data.displayMetrics = newNode.data.displayMetrics || {};
       for (const m of customMappings) {
@@ -182,7 +194,7 @@ function buildCPUData(existing: CPUData | undefined, mapped: Record<string, numb
   return {
     power,
     temperature,
-    powerDomains: existing?.powerDomains ?? [],
+    powerDomains: buildCPUPowerDomains(mapped, existing?.powerDomains),
     amuEvents: existing?.amuEvents ?? [],
   };
 }
@@ -213,7 +225,19 @@ function buildDiskData(existing: DiskData | undefined, mapped: Record<string, nu
   const status = mapped.hasOwnProperty('status')
     ? (mapped.status !== null ? (mapped.status === 1 || mapped.status === 'normal' ? 'normal' : 'warning') : null)
     : (existing?.status ?? null);
-  return { power, temperature, status: status as 'normal' | 'warning' | 'error' | null };
+  const diskInputVoltage = mapped.hasOwnProperty('diskInputVoltage')
+    ? (mapped.diskInputVoltage !== null ? Number(mapped.diskInputVoltage) : null)
+    : (existing?.diskInputVoltage ?? null);
+  const diskInputCurrent = mapped.hasOwnProperty('diskInputCurrent')
+    ? (mapped.diskInputCurrent !== null ? Number(mapped.diskInputCurrent) : null)
+    : (existing?.diskInputCurrent ?? null);
+  const nvmeInternalTemp = mapped.hasOwnProperty('nvmeInternalTemp')
+    ? (mapped.nvmeInternalTemp !== null ? Number(mapped.nvmeInternalTemp) : null)
+    : (existing?.nvmeInternalTemp ?? null);
+  const nvmeMaxTemp = mapped.hasOwnProperty('nvmeMaxTemp')
+    ? (mapped.nvmeMaxTemp !== null ? Number(mapped.nvmeMaxTemp) : null)
+    : (existing?.nvmeMaxTemp ?? null);
+  return { power, temperature, status: status as 'normal' | 'warning' | 'error' | null, diskInputVoltage, diskInputCurrent, nvmeInternalTemp, nvmeMaxTemp };
 }
 
 /** 构建 FanData */
@@ -230,7 +254,13 @@ function buildFanData(existing: FanData | undefined, mapped: Record<string, numb
   const speedPercent = mapped.hasOwnProperty('speedPercent')
     ? (mapped.speedPercent !== null ? Number(mapped.speedPercent) : null)
     : (existing?.speedPercent ?? null);
-  return { power, temperature, rpm, speedPercent };
+  const fanInputVoltage = mapped.hasOwnProperty('fanInputVoltage')
+    ? (mapped.fanInputVoltage !== null ? Number(mapped.fanInputVoltage) : null)
+    : (existing?.fanInputVoltage ?? null);
+  const fanInputCurrent = mapped.hasOwnProperty('fanInputCurrent')
+    ? (mapped.fanInputCurrent !== null ? Number(mapped.fanInputCurrent) : null)
+    : (existing?.fanInputCurrent ?? null);
+  return { power, temperature, rpm, speedPercent, fanInputVoltage, fanInputCurrent };
 }
 
 /** 构建 IOData */
@@ -258,7 +288,19 @@ function buildCardData(existing: CardData | undefined, mapped: Record<string, nu
   const slotId = mapped.hasOwnProperty('slotId')
     ? (mapped.slotId !== null ? String(mapped.slotId) : null)
     : (existing?.slotId ?? null);
-  return { power, temperature, slotId };
+  const cardInputVoltage = mapped.hasOwnProperty('cardInputVoltage')
+    ? (mapped.cardInputVoltage !== null ? Number(mapped.cardInputVoltage) : null)
+    : (existing?.cardInputVoltage ?? null);
+  const cardInputCurrent = mapped.hasOwnProperty('cardInputCurrent')
+    ? (mapped.cardInputCurrent !== null ? Number(mapped.cardInputCurrent) : null)
+    : (existing?.cardInputCurrent ?? null);
+  const ocpMainChipTemp = mapped.hasOwnProperty('ocpMainChipTemp')
+    ? (mapped.ocpMainChipTemp !== null ? Number(mapped.ocpMainChipTemp) : null)
+    : (existing?.ocpMainChipTemp ?? null);
+  const ocpOpticalMaxTemp = mapped.hasOwnProperty('ocpOpticalMaxTemp')
+    ? (mapped.ocpOpticalMaxTemp !== null ? Number(mapped.ocpOpticalMaxTemp) : null)
+    : (existing?.ocpOpticalMaxTemp ?? null);
+  return { power, temperature, slotId, cardInputVoltage, cardInputCurrent, ocpMainChipTemp, ocpOpticalMaxTemp };
 }
 
 /** 构建 SensorData */
@@ -313,6 +355,24 @@ function buildSourceData(existing: SourceData | undefined, mapped: Record<string
     temperature: mapped.hasOwnProperty('temperature')
       ? (mapped.temperature !== null ? Number(mapped.temperature) : null)
       : existing?.temperature,
+    psuIntakeTemp: mapped.hasOwnProperty('psuIntakeTemp')
+      ? (mapped.psuIntakeTemp !== null ? Number(mapped.psuIntakeTemp) : null)
+      : existing?.psuIntakeTemp,
+    psuMosTemp: mapped.hasOwnProperty('psuMosTemp')
+      ? (mapped.psuMosTemp !== null ? Number(mapped.psuMosTemp) : null)
+      : existing?.psuMosTemp,
+    psuRearIntakeTemp: mapped.hasOwnProperty('psuRearIntakeTemp')
+      ? (mapped.psuRearIntakeTemp !== null ? Number(mapped.psuRearIntakeTemp) : null)
+      : existing?.psuRearIntakeTemp,
+    busbarVoltage: mapped.hasOwnProperty('busbarVoltage')
+      ? (mapped.busbarVoltage !== null ? Number(mapped.busbarVoltage) : null)
+      : existing?.busbarVoltage,
+    busbarCurrent: mapped.hasOwnProperty('busbarCurrent')
+      ? (mapped.busbarCurrent !== null ? Number(mapped.busbarCurrent) : null)
+      : existing?.busbarCurrent,
+    busbarPower: mapped.hasOwnProperty('busbarPower')
+      ? (mapped.busbarPower !== null ? Number(mapped.busbarPower) : null)
+      : existing?.busbarPower,
   };
 }
 
@@ -323,12 +383,16 @@ function getNodeSourcePower(node: TopologyNode): number | null {
   const data = node.data as Record<string, unknown>;
   const nodeType = data.nodeType as string;
   
-  // 源类型节点（ac, psu, vr, psip）使用 outputPower
-  if (['ac', 'psu', 'vr', 'psip'].includes(nodeType)) {
+  // 源类型节点（ac, psu, vr, psip, busbar）使用 sourceData
+  if (['ac', 'psu', 'vr', 'psip', 'busbar'].includes(nodeType)) {
     const sourceData = data.sourceData as SourceData | undefined;
     // AC 节点使用 inputPower 作为输出功率（供电给 PSU）
     if (nodeType === 'ac') {
       return sourceData?.inputPower ?? null;
+    }
+    // busbar 节点使用 busbarPower 作为唯一链路功率（双向计算）
+    if (nodeType === 'busbar') {
+      return sourceData?.busbarPower ?? null;
     }
     return sourceData?.outputPower ?? null;
   }
@@ -358,8 +422,12 @@ function getNodeTargetPower(node: TopologyNode): number | null {
   const nodeType = data.nodeType as string;
   
   // 源类型节点作为 target 时，使用 inputPower（接收到的功率）
-  if (['ac', 'psu', 'vr', 'psip'].includes(nodeType)) {
+  if (['ac', 'psu', 'vr', 'psip', 'busbar'].includes(nodeType)) {
     const sourceData = data.sourceData as SourceData | undefined;
+    // busbar 节点使用 busbarPower 作为唯一链路功率（双向计算）
+    if (nodeType === 'busbar') {
+      return sourceData?.busbarPower ?? null;
+    }
     return sourceData?.inputPower ?? null;
   }
   
@@ -383,9 +451,16 @@ function getNodeTargetPower(node: TopologyNode): number | null {
 /** 计算边的损耗（基于真实功率）
  * 损耗 = 源节点输出功率 - 目标节点输入功率
  * 损耗百分比 = 损耗 / 源节点输出功率 * 100
- * 
+ *
+ * 链路损耗标注：连线后按以下规则计算
+ *   - 对于源节点 PSU：输入功耗与上游节点作差（上游输出功率 - PSU输入功率）
+ *   - 对于源节点 PSU：输出功耗与下游组件作差（PSU输出功率 - 下游输入功率）
+ *   - 对于母线节点 busbar：母线功耗作为链路损耗的双向计算，上游和下游的损失
+ *     都使用母线功耗作为唯一链路计算（上游损失 = 上游输出功率 - 母线功耗，
+ *     下游损失 = 母线功耗 - 下游输入功率）
+ *
  * 对于一对多的连接，按各子节点输入功率比例分配总损耗
- * 
+ *
  * 注意：如果边的 _reversed 为 true，表示方向已翻转，需要交换 source/target 计算
  */
 function calculateEdgeLosses(nodes: TopologyNode[], edges: TopologyEdge[]): TopologyEdge[] {

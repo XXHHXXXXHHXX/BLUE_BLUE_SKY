@@ -29,6 +29,10 @@ const CardNode: React.FC<NodeProps> = (props) => {
       power: number | null;
       temperature?: number | null;
       slotId: string | null;
+      cardInputVoltage?: number | null;
+      cardInputCurrent?: number | null;
+      ocpMainChipTemp?: number | null;
+      ocpOpticalMaxTemp?: number | null;
     };
   };
   const card = data.cardData;
@@ -50,6 +54,22 @@ const CardNode: React.FC<NodeProps> = (props) => {
             </span>
           </div>
         ) : null;
+      case 'cardInputVoltage':
+        return <div key={fieldKey}>{getFieldLabel('cardInputVoltage')}: {formatVoltage(cardInputVoltage)}</div>;
+      case 'cardInputCurrent':
+        return <div key={fieldKey}>{getFieldLabel('cardInputCurrent')}: {formatCurrent(cardInputCurrent)}</div>;
+      case 'ocpMainChipTemp':
+      case 'ocpOpticalMaxTemp': {
+        const value = fieldKey === 'ocpMainChipTemp' ? ocpMainChipTemp : ocpOpticalMaxTemp;
+        return (
+          <div key={fieldKey}>
+            {getFieldLabel(fieldKey)}:{' '}
+            <span style={{ color: value !== null ? getTemperatureColor(value) : '#999' }}>
+              {formatTemperature(value)}
+            </span>
+          </div>
+        );
+      }
       default: {
         const value = displayMetrics?.[fieldKey] ?? null;
         if (value === null || value === undefined || Number.isNaN(value)) {
@@ -99,6 +119,10 @@ const CardNode: React.FC<NodeProps> = (props) => {
   const power = card?.power ?? null;
   const temperature = card?.temperature ?? null;
   const slotId = card?.slotId ?? null;
+  const cardInputVoltage = card?.cardInputVoltage ?? null;
+  const cardInputCurrent = card?.cardInputCurrent ?? null;
+  const ocpMainChipTemp = card?.ocpMainChipTemp ?? null;
+  const ocpOpticalMaxTemp = card?.ocpOpticalMaxTemp ?? null;
 
   const tempLevel = getTemperatureLevel(temperature ?? undefined);
   const tempClass = tempLevel === 'critical' 

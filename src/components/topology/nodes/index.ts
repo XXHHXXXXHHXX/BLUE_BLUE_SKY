@@ -4,6 +4,7 @@ import ACNode from './ACNode';
 import PSUNode from './PSUNode';
 import VRNode from './VRNode';
 import PSIPNode from './PSIPNode';
+import BusbarNode from './BusbarNode';
 import CPUNode from './CPUNode';
 import MemoryNode from './MemoryNode';
 import FanNode from './FanNode';
@@ -24,6 +25,7 @@ export const nodeTypes: NodeTypes = {
   psu: withScalable(PSUNode),
   vr: withScalable(VRNode),
   psip: withScalable(PSIPNode),
+  busbar: withScalable(BusbarNode),
   cpu: withScalable(CPUNode),
   memory: withScalable(MemoryNode),
   fan: withScalable(FanNode),
@@ -45,6 +47,7 @@ export const staticNodeTypes: NodeTypes = {
   psu: withoutScalable(PSUNode),
   vr: withoutScalable(VRNode),
   psip: withoutScalable(PSIPNode),
+  busbar: withoutScalable(BusbarNode),
   cpu: withoutScalable(CPUNode),
   memory: withoutScalable(MemoryNode),
   fan: withoutScalable(FanNode),

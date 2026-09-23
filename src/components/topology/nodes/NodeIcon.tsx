@@ -9,6 +9,7 @@ const defaultIconMap: Record<HardwareNodeType, string> = {
   psu: 'ApiOutlined',
   vr: 'ControlOutlined',
   psip: 'NodeIndexOutlined',
+  busbar: 'ClusterOutlined',
   cpu: 'DesktopOutlined',
   memory: 'DatabaseOutlined',
   fan: 'FanOutlined',

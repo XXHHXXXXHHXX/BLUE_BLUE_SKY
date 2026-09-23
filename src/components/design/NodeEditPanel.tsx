@@ -13,9 +13,11 @@ import {
   PlusOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons';
 import { useDesignTopologyStore } from '../../stores/designTopologyStore';
-import { defaultFieldMappings } from '../../services/mockData';
+import { defaultFieldMappings, defaultPowerDomainFieldMappings } from '../../services/mockData';
+import { CPU_POWER_DOMAIN_FIELD_DEFS } from '../../types/power';
 import type { TopologyNode, HardwareNodeType, ApiConfig, FieldMapping, FieldThreshold } from '../../types/topology';
 import { FIXED_FIELD_DEFS, DEFAULT_FIELD_THRESHOLDS } from '../../types/topology';
 
@@ -23,7 +25,7 @@ const { Text, Title } = Typography;
 
 /** 模块类型大写缩写 */
 const typeTagMap: Record<HardwareNodeType, string> = {
-  ac: 'AC', psu: 'PSU', vr: 'VR', psip: 'PSIP',
+  ac: 'AC', psu: 'PSU', vr: 'VR', psip: 'PSIP', busbar: 'BUSBAR',
   cpu: 'CPU', memory: 'MEM', fan: 'FAN', disk: 'DISK',
   io: 'IO', card: 'CARD', sensor: 'SENSOR', mgmtBoard: 'MGMT', chassis: 'CHASSIS',
   thermometer: 'THERM', custom: 'CUSTOM',
@@ -46,13 +48,14 @@ const defaultRanges: Record<string, { min: number; max: number; step: number; un
 };
 
 const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) => {
-  const { updateNodeAlias, updateNodeCustomIconUrl, updateNodeApiConfig, updateNodeFieldMappings } = useDesignTopologyStore();
+  const { updateNodeAlias, updateNodeCustomIconUrl, updateNodeApiConfig, updateNodeFieldMappings, updateNodePowerDomainFieldMappings } = useDesignTopologyStore();
 
   const [alias, setAlias] = useState('');
   const [controlShell, setControlShell] = useState('');
   const [rangeMin, setRangeMin] = useState<number | null>(null);
   const [rangeMax, setRangeMax] = useState<number | null>(null);
   const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([]);
+  const [powerDomainFieldMappings, setPowerDomainFieldMappings] = useState<FieldMapping[]>([]);
   const [customFieldDefs, setCustomFieldDefs] = useState<{ fieldKey: string; label: string }[]>([]);
   const [fieldThresholds, setFieldThresholds] = useState<FieldThreshold[]>([]);
   const [activeThresholdField, setActiveThresholdField] = useState<string | null>(null);
@@ -66,6 +69,9 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
       // 使用节点已有的字段映射，或该类型的默认映射
       const existingMappings = node.data.apiConfig?.fieldMappings;
       setFieldMappings(existingMappings || []);
+      // 使用节点已有的电源域字段映射
+      const existingDomainMappings = node.data.apiConfig?.powerDomainFieldMappings;
+      setPowerDomainFieldMappings(existingDomainMappings || []);
       // 使用节点已有的自定义字段定义
       setCustomFieldDefs(node.data.apiConfig?.customFieldDefs || []);
       // 使用节点已有的阈值配置，或该类型的默认阈值
@@ -159,13 +165,15 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     config.controlShell = controlShell.trim();
     // 保存字段映射（只要 fieldKey 存在即可，BMC 字段名可为空）
     config.fieldMappings = fieldMappings.filter(m => m.fieldKey);
+    // 保存电源域字段映射（用于"电源域详情"弹窗）
+    config.powerDomainFieldMappings = powerDomainFieldMappings.filter(m => m.fieldKey);
     // 保存自定义字段定义
     config.customFieldDefs = customFieldDefs.filter(d => d.fieldKey && d.label);
     // 保存阈值配置（过滤掉空范围）
     config.fieldThresholds = fieldThresholds.filter(t => t.fieldKey && t.ranges.length > 0);
     updateNodeApiConfig(node.id, config);
     message.success('字段映射配置已保存');
-  }, [node, controlShell, fieldMappings, customFieldDefs, fieldThresholds, updateNodeApiConfig]);
+  }, [node, controlShell, fieldMappings, powerDomainFieldMappings, customFieldDefs, fieldThresholds, updateNodeApiConfig]);
 
   // 添加字段映射（选择指定字段）
   const [fieldToAdd, setFieldToAdd] = useState<string | null>(null);
@@ -251,6 +259,18 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
       if (node) {
         updateNodeFieldMappings(node.id, newMappings);
       }
+      // CPU 额外恢复"电源域详情"内的固定字段映射
+      if (nodeType === 'cpu') {
+        const domainDefaults = defaultPowerDomainFieldMappings.cpu || [];
+        const domainMappings: FieldMapping[] = domainDefaults.map(m => ({
+          fieldKey: m.fieldKey,
+          bmcField: m.bmcField || '',
+        }));
+        setPowerDomainFieldMappings(domainMappings);
+        if (node) {
+          updateNodePowerDomainFieldMappings(node.id, domainMappings);
+        }
+      }
       message.success('已恢复默认字段映射');
     } else if (defaults && defaults.length > 0) {
       // 对于自定义模块等无固定字段但有默认映射的类型
@@ -267,7 +287,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     } else {
       message.info('该模块类型没有默认字段映射');
     }
-  }, [nodeType, node, updateNodeFieldMappings]);
+  }, [nodeType, node, updateNodeFieldMappings, updateNodePowerDomainFieldMappings]);
 
   // 清空所有字段映射
   const handleClearAllFieldMappings = useCallback(() => {
@@ -278,6 +298,84 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     }
     message.success('已清空所有字段');
   }, [node, updateNodeFieldMappings]);
+
+  // ==================== 电源域字段映射（CPU 专用） ====================
+  const [powerDomainFieldToAdd, setPowerDomainFieldToAdd] = useState<string | null>(null);
+
+  const getPowerDomainFieldLabel = useCallback((fieldKey: string): string => {
+    const def = CPU_POWER_DOMAIN_FIELD_DEFS.find(d => d.fieldKey === fieldKey);
+    return def?.label || fieldKey;
+  }, []);
+
+  const handleAddPowerDomainFieldMapping = useCallback(() => {
+    if (!powerDomainFieldToAdd) return;
+    const usedKeys = new Set(powerDomainFieldMappings.map(m => m.fieldKey));
+    if (usedKeys.has(powerDomainFieldToAdd)) {
+      message.info('该字段已存在');
+      return;
+    }
+    const def = CPU_POWER_DOMAIN_FIELD_DEFS.find(d => d.fieldKey === powerDomainFieldToAdd);
+    if (def) {
+      const next = [...powerDomainFieldMappings, { fieldKey: def.fieldKey, bmcField: '' }];
+      setPowerDomainFieldMappings(next);
+      setPowerDomainFieldToAdd(null);
+      if (node) {
+        updateNodePowerDomainFieldMappings(node.id, next);
+      }
+    }
+  }, [powerDomainFieldToAdd, powerDomainFieldMappings, node, updateNodePowerDomainFieldMappings]);
+
+  const handleRemovePowerDomainFieldMapping = useCallback((index: number) => {
+    const next = powerDomainFieldMappings.filter((_, i) => i !== index);
+    setPowerDomainFieldMappings(next);
+    if (node) {
+      updateNodePowerDomainFieldMappings(node.id, next);
+    }
+  }, [powerDomainFieldMappings, node, updateNodePowerDomainFieldMappings]);
+
+  const handleUpdatePowerDomainFieldMapping = useCallback((index: number, updates: Partial<FieldMapping>) => {
+    setPowerDomainFieldMappings(prev => {
+      const next = prev.map((m, i) => i === index ? { ...m, ...updates } : m);
+      if (node) {
+        updateNodePowerDomainFieldMappings(node.id, next.filter(m => m.fieldKey));
+      }
+      return next;
+    });
+  }, [node, updateNodePowerDomainFieldMappings]);
+
+  const handleMovePowerDomainFieldMapping = useCallback((index: number, direction: -1 | 1) => {
+    setPowerDomainFieldMappings(prev => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      if (node) {
+        updateNodePowerDomainFieldMappings(node.id, next.filter(m => m.fieldKey));
+      }
+      return next;
+    });
+  }, [node, updateNodePowerDomainFieldMappings]);
+
+  const handleRestorePowerDomainDefaults = useCallback(() => {
+    const domainDefaults = defaultPowerDomainFieldMappings.cpu || [];
+    const domainMappings: FieldMapping[] = domainDefaults.map(m => ({
+      fieldKey: m.fieldKey,
+      bmcField: m.bmcField || '',
+    }));
+    setPowerDomainFieldMappings(domainMappings);
+    if (node) {
+      updateNodePowerDomainFieldMappings(node.id, domainMappings);
+    }
+    message.success('已恢复电源域默认字段映射');
+  }, [node, updateNodePowerDomainFieldMappings]);
+
+  const handleClearPowerDomainMappings = useCallback(() => {
+    setPowerDomainFieldMappings([]);
+    if (node) {
+      updateNodePowerDomainFieldMappings(node.id, []);
+    }
+    message.success('已清空电源域字段');
+  }, [node, updateNodePowerDomainFieldMappings]);
 
   const renderBasicTab = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -615,6 +713,116 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
           </div>
         </div>
 
+        {/* CPU 电源域详情字段映射（仅在"电源域详情"弹窗内使用） */}
+        {nodeType === 'cpu' && (
+          <>
+            <Divider style={{ margin: '4px 0' }} />
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Title level={5} style={{ margin: 0 }}>
+                  <ApartmentOutlined /> 电源域详情字段映射
+                </Title>
+                <Space>
+                  <Button size="small" danger onClick={handleClearPowerDomainMappings}>
+                    清空所有
+                  </Button>
+                  <Button size="small" onClick={handleRestorePowerDomainDefaults}>
+                    恢复默认
+                  </Button>
+                </Space>
+              </div>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+                配置"电源域详情"按钮内各电源域的输出电压 / 输出电流 / 输出功率对应的 BMC Sensor 名称
+              </Text>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {powerDomainFieldMappings.length === 0 && (
+                  <div style={{
+                    padding: 24,
+                    textAlign: 'center',
+                    background: '#f5f5f5',
+                    borderRadius: 6,
+                    color: '#8c8c8c',
+                  }}>
+                    暂无电源域字段映射，点击"恢复默认"开始使用
+                  </div>
+                )}
+                {powerDomainFieldMappings.map((mapping, index) => (
+                  <div key={index} style={{
+                    display: 'flex',
+                    gap: 8,
+                    alignItems: 'center',
+                    padding: 12,
+                    background: '#f6f8fa',
+                    borderRadius: 6,
+                    border: '1px solid #e8e8e8',
+                  }}>
+                    <div style={{ flex: '0 0 220px' }}>
+                      <Text style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#595959' }}>字段名</Text>
+                      <Text strong style={{ fontSize: 12 }}>{getPowerDomainFieldLabel(mapping.fieldKey)}</Text>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>BMC Sensor 名称</Text>
+                      <Input
+                        placeholder="如：TA_CORE_DVFS_VOUT"
+                        value={mapping.bmcField}
+                        onChange={(e) => handleUpdatePowerDomainFieldMapping(index, { bmcField: e.target.value })}
+                        size="small"
+                      />
+                    </div>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<ArrowUpOutlined />}
+                      onClick={() => handleMovePowerDomainFieldMapping(index, -1)}
+                      disabled={index === 0}
+                      style={{ marginTop: 20 }}
+                    />
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<ArrowDownOutlined />}
+                      onClick={() => handleMovePowerDomainFieldMapping(index, 1)}
+                      disabled={index === powerDomainFieldMappings.length - 1}
+                      style={{ marginTop: 20 }}
+                    />
+                    <Button
+                      type="text"
+                      danger
+                      size="small"
+                      icon={<DeleteOutlined />}
+                      onClick={() => handleRemovePowerDomainFieldMapping(index)}
+                      style={{ marginTop: 20 }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                <div style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#595959' }}>添加电源域字段</Text>
+                  <Select
+                    size="small"
+                    style={{ width: '100%' }}
+                    placeholder="选择要添加的电源域字段"
+                    value={powerDomainFieldToAdd}
+                    onChange={(v) => setPowerDomainFieldToAdd(v)}
+                    options={(() => {
+                      const usedKeys = new Set(powerDomainFieldMappings.map(m => m.fieldKey));
+                      return CPU_POWER_DOMAIN_FIELD_DEFS
+                        .filter(d => !usedKeys.has(d.fieldKey))
+                        .map(d => ({ value: d.fieldKey, label: `${d.label} (${d.fieldKey})` }));
+                    })()}
+                  />
+                </div>
+                <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleAddPowerDomainFieldMapping} disabled={!powerDomainFieldToAdd}>
+                  添加
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
+
         <Divider style={{ margin: '4px 0' }} />
 
         {/* 字段阈值配置 */}
@@ -629,9 +837,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
 
             {/* 字段选择 */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-              {fieldMappings
-                .filter(m => ['power', 'temperature', 'efficiency', 'rpm', 'speedPercent', 'current', 'voltage'].includes(m.fieldKey))
-                .map(mapping => {
+              {fieldMappings.map(mapping => {
                   const hasThreshold = fieldThresholds.some(t => t.fieldKey === mapping.fieldKey);
                   return (
                     <Button

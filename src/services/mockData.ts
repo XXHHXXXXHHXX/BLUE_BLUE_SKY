@@ -4,6 +4,7 @@ import type {
   AMUEvent, SensorData, MemoryData, DiskData, IOData,
   CardData, MgmtBoardData, ThermometerData,
 } from '../types/power';
+import { CPU_POWER_DOMAINS, CPU_POWER_DOMAIN_FIELD_DEFS } from '../types/power';
 import type { TopologyNode, TopologyEdge, PowerEdgeData, HardwareNodeData, FieldMapping } from '../types/topology';
 import { FIXED_FIELD_DEFS } from '../types/topology';
 
@@ -27,42 +28,49 @@ export function mockSourceData(base: Partial<SourceData> = {}): SourceData {
     inputVoltage, outputVoltage, current, inputCurrent, outputCurrent,
     inputPower, outputPower, efficiency,
     temperature: fluctuate(base.temperature ?? 45, 3),
+    psuIntakeTemp: fluctuate(base.psuIntakeTemp ?? 35, 3),
+    psuMosTemp: fluctuate(base.psuMosTemp ?? 55, 3),
+    psuRearIntakeTemp: fluctuate(base.psuRearIntakeTemp ?? 38, 3),
+    busbarVoltage: fluctuate(base.busbarVoltage ?? outputVoltage, 2),
+    busbarCurrent: fluctuate(base.busbarCurrent ?? current, 5),
+    busbarPower: fluctuate(base.busbarPower ?? outputPower, 5),
   };
 }
 
 /** 生成风扇Mock数据 */
 export function mockFanData(base: Partial<FanData> = {}): FanData {
   const speedPercent = base.speedPercent ?? 60;
+  const rpm = Math.round(fluctuate(base.rpm ?? 5000, 3));
   return {
     power: fluctuate(base.power ?? 15, 5),
-    rpm: Math.round(fluctuate(base.rpm ?? 5000, 3)),
+    rpm,
     speedPercent,
     temperature: fluctuate(40, 5),
+    fanInputVoltage: fluctuate(base.fanInputVoltage ?? 12, 2),
+    fanInputCurrent: fluctuate(base.fanInputCurrent ?? 1.25, 5),
   };
 }
 
-/** CPU电源域名称 */
-export const CPU_POWER_DOMAINS = [
-  'TA_CORE_DVFS', 'DDRIO', 'TB_CORE_DVFS',
-  'IO_NB_AVS', 'UNCORE_DVFS', 'IO_NA_AVS',
-] as const;
-
 /** 生成CPU电源域数据 */
 function mockPowerDomains(): CPUPowerDomain[] {
-  const configs: Array<{ name: string; v: number; a: number }> = [
-    { name: 'TA_CORE_DVFS', v: 0.85, a: 80 },
-    { name: 'DDRIO', v: 1.1, a: 15 },
-    { name: 'TB_CORE_DVFS', v: 0.85, a: 75 },
-    { name: 'IO_NB_AVS', v: 0.95, a: 10 },
-    { name: 'UNCORE_DVFS', v: 0.9, a: 25 },
-    { name: 'IO_NA_AVS', v: 0.95, a: 8 },
-  ];
-  return configs.map(c => ({
-    name: c.name,
-    voltage: fluctuate(c.v, 3),
-    current: fluctuate(c.a, 5),
-    power: +(fluctuate(c.v, 3) * fluctuate(c.a, 5)).toFixed(2),
-  }));
+  const configs: Record<string, { v: number; a: number }> = {
+    TA_CORE_DVFS: { v: 0.85, a: 80 },
+    DDRIO: { v: 1.1, a: 15 },
+    TB_CORE_DVFS: { v: 0.85, a: 75 },
+    IO_NB_AVS: { v: 0.95, a: 10 },
+    UNCORE_DVFS: { v: 0.9, a: 25 },
+    IO_NA_AVS: { v: 0.95, a: 8 },
+    SERDES: { v: 0.9, a: 12 },
+  };
+  return CPU_POWER_DOMAINS.map(name => {
+    const c = configs[name] || { v: 0.9, a: 10 };
+    return {
+      name,
+      voltage: fluctuate(c.v, 3),
+      current: fluctuate(c.a, 5),
+      power: +(fluctuate(c.v, 3) * fluctuate(c.a, 5)).toFixed(2),
+    };
+  });
 }
 
 /** 生成AMU事件 */
@@ -114,8 +122,12 @@ export function mockMemoryData(): MemoryData {
 export function mockDiskData(): DiskData {
   return {
     power: fluctuate(12, 5),
-    temperature: fluctuate(38, 5),
-    status: Math.random() < 0.9 ? 'normal' : 'warning',
+    temperature: fluctuate(45, 5),
+    status: 'normal',
+    diskInputVoltage: fluctuate(12, 2),
+    diskInputCurrent: fluctuate(1.0, 5),
+    nvmeInternalTemp: fluctuate(52, 5),
+    nvmeMaxTemp: fluctuate(58, 5),
   };
 }
 
@@ -134,6 +146,10 @@ export function mockCardData(slotId: string): CardData {
     power: fluctuate(25, 5),
     temperature: fluctuate(50, 5),
     slotId,
+    cardInputVoltage: fluctuate(12, 2),
+    cardInputCurrent: fluctuate(2.1, 5),
+    ocpMainChipTemp: fluctuate(58, 5),
+    ocpOpticalMaxTemp: fluctuate(62, 5),
   };
 }
 
@@ -165,6 +181,7 @@ export function mockThermometerData(base: Partial<ThermometerData> = {}): Thermo
 export const nodeTypeLabels: Record<string, string> = {
   ac: 'AC电源',
   psu: 'PSU',
+  busbar: '母线',
   vr: 'VR',
   psip: 'PSIP',
   cpu: 'CPU',
@@ -183,14 +200,7 @@ export const nodeTypeLabels: Record<string, string> = {
 /** 各模块类型的默认字段映射配置（使用 fieldKey，显示名固定） */
 export const defaultFieldMappings: Record<string, FieldMapping[]> = {
   cpu: [
-    { fieldKey: 'cpuInputVoltage', bmcField: 'CPU输入电压' },
-    { fieldKey: 'cpuInputCurrent', bmcField: 'CPU输入电流' },
-    { fieldKey: 'power', bmcField: 'CPU输入功耗' },
-    { fieldKey: 'temperature', bmcField: 'CPU温度' },
-    { fieldKey: 'cpuDpmThreshold', bmcField: 'DPM双阈值配置（超功耗阈值水线和撤离超功耗阈值水线）' },
-    { fieldKey: 'cpuCfgTdp', bmcField: 'CPU CFG TDP' },
-    { fieldKey: 'cpuFreq', bmcField: 'CPU FREQ' },
-    { fieldKey: 'cpuThermalTarget', bmcField: 'CPU控温目标' },
+    { fieldKey: 'power', bmcField: 'CPU功耗' },
   ],
   memory: [
     { fieldKey: 'dimmInputVoltage', bmcField: '内存输入电压' },
@@ -200,20 +210,18 @@ export const defaultFieldMappings: Record<string, FieldMapping[]> = {
     { fieldKey: 'dimmThermalTarget', bmcField: 'DIMM控温目标' },
   ],
   disk: [
-    { fieldKey: 'diskInputVoltage', bmcField: '硬盘输入电压' },
-    { fieldKey: 'diskInputCurrent', bmcField: '硬盘输入电流' },
-    { fieldKey: 'power', bmcField: '硬盘功耗' },
-    { fieldKey: 'temperature', bmcField: '硬盘温度' },
-    { fieldKey: 'diskThermalTarget', bmcField: '硬盘控温目标' },
+    { fieldKey: 'diskInputVoltage', bmcField: '硬盘背板输入电压' },
+    { fieldKey: 'diskInputCurrent', bmcField: '硬盘背板输入电流' },
+    { fieldKey: 'power', bmcField: '硬盘背板功耗' },
+    { fieldKey: 'temperature', bmcField: '硬盘背板温度' },
+    { fieldKey: 'nvmeInternalTemp', bmcField: 'NVMe盘内置温度' },
+    { fieldKey: 'nvmeMaxTemp', bmcField: '所有NVMe盘最大温度' },
   ],
   fan: [
     { fieldKey: 'fanInputVoltage', bmcField: '风扇输入电压' },
     { fieldKey: 'fanInputCurrent', bmcField: '风扇输入电流' },
-    { fieldKey: 'power', bmcField: '风扇功耗' },
-    { fieldKey: 'temperature', bmcField: '风扇温度' },
-    { fieldKey: 'fanSpeedControl', bmcField: '风扇调速接口' },
-    { fieldKey: 'rpm', bmcField: 'FAN Speed' },
-    { fieldKey: 'speedPercent', bmcField: 'FAN Speed Percent' },
+    { fieldKey: 'power', bmcField: '风扇总功耗' },
+    { fieldKey: 'rpm', bmcField: '风扇风速' },
   ],
   io: [
     { fieldKey: 'power', bmcField: 'IO Power' },
@@ -224,9 +232,8 @@ export const defaultFieldMappings: Record<string, FieldMapping[]> = {
     { fieldKey: 'cardInputVoltage', bmcField: '标卡输入电压' },
     { fieldKey: 'cardInputCurrent', bmcField: '标卡输入电流' },
     { fieldKey: 'power', bmcField: '标卡功耗' },
-    { fieldKey: 'temperature', bmcField: '标卡温度' },
-    { fieldKey: 'cardThermalTarget', bmcField: '标卡控温目标' },
-    { fieldKey: 'slotId', bmcField: 'Card Slot ID' },
+    { fieldKey: 'ocpMainChipTemp', bmcField: 'OCP卡主芯片温度' },
+    { fieldKey: 'ocpOpticalMaxTemp', bmcField: 'OCP卡光模块最高温度' },
   ],
   sensor: [
     { fieldKey: 'temperature', bmcField: '板级其他温度监测点温度' },
@@ -242,6 +249,11 @@ export const defaultFieldMappings: Record<string, FieldMapping[]> = {
     { fieldKey: 'current', bmcField: 'AC输出电流' },
     { fieldKey: 'outputPower', bmcField: 'AC输出功率' },
   ],
+  busbar: [
+    { fieldKey: 'busbarVoltage', bmcField: '母线电压' },
+    { fieldKey: 'busbarCurrent', bmcField: '母线电流' },
+    { fieldKey: 'busbarPower', bmcField: '母线功耗' },
+  ],
   psu: [
     { fieldKey: 'inputVoltage', bmcField: 'PSU输入电压' },
     { fieldKey: 'inputCurrent', bmcField: 'PSU输入电流' },
@@ -249,9 +261,9 @@ export const defaultFieldMappings: Record<string, FieldMapping[]> = {
     { fieldKey: 'outputVoltage', bmcField: 'PSU输出电压' },
     { fieldKey: 'outputCurrent', bmcField: 'PSU输出电流' },
     { fieldKey: 'outputPower', bmcField: 'PSU输出功率' },
-    { fieldKey: 'psuOutputVoltageControl', bmcField: 'PSU输出电压调节接口' },
-    { fieldKey: 'efficiency', bmcField: 'PSU Efficiency' },
-    { fieldKey: 'temperature', bmcField: 'PSU Temperature' },
+    { fieldKey: 'psuIntakeTemp', bmcField: 'PSU(入风口)温度' },
+    { fieldKey: 'psuMosTemp', bmcField: 'PSU(主功率MOS)温度' },
+    { fieldKey: 'psuRearIntakeTemp', bmcField: '后扩PSU位置(PSU入风)温度' },
   ],
   vr: [
     { fieldKey: 'inputVoltage', bmcField: 'VR输入电压' },
@@ -303,12 +315,23 @@ export const defaultFieldMappings: Record<string, FieldMapping[]> = {
   ],
 };
 
+/** 各模块类型的默认电源域字段映射配置（仅 CPU 使用，用于"电源域详情"弹窗） */
+export const defaultPowerDomainFieldMappings: Record<string, FieldMapping[]> = {
+  cpu: CPU_POWER_DOMAIN_FIELD_DEFS.map(def => ({
+    fieldKey: def.fieldKey,
+    bmcField: def.label,
+  })),
+};
+
 /** 根据模块类型创建默认节点数据（用于设计模式添加新模块） */
 export function createDefaultNodeData(type: string): HardwareNodeData {
   const label = nodeTypeLabels[type] ?? type;
-  const category = (['ac', 'psu', 'vr', 'psip'].includes(type) ? 'source' : ['cpu', 'memory', 'fan', 'disk', 'io', 'card'].includes(type) ? 'load' : 'other') as 'source' | 'path' | 'load' | 'other';
+  const category = (['ac', 'psu', 'vr', 'psip', 'busbar'].includes(type) ? 'source' : ['cpu', 'memory', 'fan', 'disk', 'io', 'card'].includes(type) ? 'load' : 'other') as 'source' | 'path' | 'load' | 'other';
   const fieldMappings = defaultFieldMappings[type] || [];
-  const apiConfig = fieldMappings.length > 0 ? { fieldMappings } : undefined;
+  const powerDomainMappings = defaultPowerDomainFieldMappings[type] || [];
+  const apiConfig = (fieldMappings.length > 0 || powerDomainMappings.length > 0)
+    ? { fieldMappings, ...(powerDomainMappings.length > 0 ? { powerDomainFieldMappings: powerDomainMappings } : {}) }
+    : undefined;
 
   switch (type) {
     case 'ac':
@@ -319,6 +342,8 @@ export function createDefaultNodeData(type: string): HardwareNodeData {
       return { label, nodeType: 'vr' as const, category, apiConfig, sourceData: mockSourceData({ inputVoltage: 12, outputVoltage: 0.85, current: 100, efficiency: 90 }) };
     case 'psip':
       return { label, nodeType: 'psip' as const, category, apiConfig, sourceData: mockSourceData({ inputVoltage: 12, outputVoltage: 1.8, current: 5, efficiency: 91 }) };
+    case 'busbar':
+      return { label, nodeType: 'busbar' as const, category, apiConfig, sourceData: mockSourceData({ inputVoltage: 12, outputVoltage: 12, current: 50, efficiency: 99, busbarPower: 600 }) };
     case 'cpu':
       return { label, nodeType: 'cpu' as const, category, apiConfig, cpuData: mockCPUData() };
     case 'memory':
@@ -366,7 +391,7 @@ export function getDefaultNodes(): TopologyNode[] {
   const psuApiConfig = { fieldMappings: defaultFieldMappings.psu };
   const vrApiConfig = { fieldMappings: defaultFieldMappings.vr };
   const psipApiConfig = { fieldMappings: defaultFieldMappings.psip };
-  const cpuApiConfig = { fieldMappings: defaultFieldMappings.cpu };
+  const cpuApiConfig = { fieldMappings: defaultFieldMappings.cpu, powerDomainFieldMappings: defaultPowerDomainFieldMappings.cpu };
   const memoryApiConfig = { fieldMappings: defaultFieldMappings.memory };
   const fanApiConfig = { fieldMappings: defaultFieldMappings.fan };
   const diskApiConfig = { fieldMappings: defaultFieldMappings.disk };
@@ -455,6 +480,7 @@ export function refreshNodeData(nodes: TopologyNode[]): TopologyNode[] {
       case 'psu':
       case 'vr':
       case 'psip':
+      case 'busbar':
         data.sourceData = mockSourceData(data.sourceData);
         break;
       case 'cpu':

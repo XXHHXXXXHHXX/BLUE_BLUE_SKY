@@ -135,6 +135,11 @@ const defaultFieldMappings: Record<string, Array<{ fieldKey: string; bmcField: s
     { fieldKey: 'current', bmcField: 'AC输出电流' },
     { fieldKey: 'outputPower', bmcField: 'AC输出功率' },
   ],
+  busbar: [
+    { fieldKey: 'busbarVoltage', bmcField: '母线电压' },
+    { fieldKey: 'busbarCurrent', bmcField: '母线电流' },
+    { fieldKey: 'busbarPower', bmcField: '母线功耗' },
+  ],
   psu: [
     { fieldKey: 'inputVoltage', bmcField: 'PSU输入电压' },
     { fieldKey: 'inputCurrent', bmcField: 'PSU输入电流' },
@@ -142,9 +147,9 @@ const defaultFieldMappings: Record<string, Array<{ fieldKey: string; bmcField: s
     { fieldKey: 'outputVoltage', bmcField: 'PSU输出电压' },
     { fieldKey: 'outputCurrent', bmcField: 'PSU输出电流' },
     { fieldKey: 'outputPower', bmcField: 'PSU输出功率' },
-    { fieldKey: 'psuOutputVoltageControl', bmcField: 'PSU输出电压调节接口' },
-    { fieldKey: 'efficiency', bmcField: 'PSU Efficiency' },
-    { fieldKey: 'temperature', bmcField: 'PSU Temperature' },
+    { fieldKey: 'psuIntakeTemp', bmcField: 'PSU(入风口)温度' },
+    { fieldKey: 'psuMosTemp', bmcField: 'PSU(主功率MOS)温度' },
+    { fieldKey: 'psuRearIntakeTemp', bmcField: '后扩PSU位置(PSU入风)温度' },
   ],
   vr: [
     { fieldKey: 'inputVoltage', bmcField: 'VR输入电压' },
@@ -189,21 +194,11 @@ const defaultFieldMappings: Record<string, Array<{ fieldKey: string; bmcField: s
   fan: [
     { fieldKey: 'fanInputVoltage', bmcField: '风扇输入电压' },
     { fieldKey: 'fanInputCurrent', bmcField: '风扇输入电流' },
-    { fieldKey: 'power', bmcField: '风扇功耗' },
-    { fieldKey: 'temperature', bmcField: '风扇温度' },
-    { fieldKey: 'fanSpeedControl', bmcField: '风扇调速接口' },
-    { fieldKey: 'rpm', bmcField: 'FAN Speed' },
-    { fieldKey: 'speedPercent', bmcField: 'FAN Speed Percent' },
+    { fieldKey: 'power', bmcField: '风扇总功耗' },
+    { fieldKey: 'rpm', bmcField: '风扇风速' },
   ],
   cpu: [
-    { fieldKey: 'cpuInputVoltage', bmcField: 'CPU输入电压' },
-    { fieldKey: 'cpuInputCurrent', bmcField: 'CPU输入电流' },
-    { fieldKey: 'power', bmcField: 'CPU输入功耗' },
-    { fieldKey: 'temperature', bmcField: 'CPU温度' },
-    { fieldKey: 'cpuDpmThreshold', bmcField: 'DPM双阈值配置（超功耗阈值水线和撤离超功耗阈值水线）' },
-    { fieldKey: 'cpuCfgTdp', bmcField: 'CPU CFG TDP' },
-    { fieldKey: 'cpuFreq', bmcField: 'CPU FREQ' },
-    { fieldKey: 'cpuThermalTarget', bmcField: 'CPU控温目标' },
+    { fieldKey: 'power', bmcField: 'CPU功耗' },
   ],
   memory: [
     { fieldKey: 'dimmInputVoltage', bmcField: '内存输入电压' },
@@ -213,19 +208,19 @@ const defaultFieldMappings: Record<string, Array<{ fieldKey: string; bmcField: s
     { fieldKey: 'dimmThermalTarget', bmcField: 'DIMM控温目标' },
   ],
   disk: [
-    { fieldKey: 'diskInputVoltage', bmcField: '硬盘输入电压' },
-    { fieldKey: 'diskInputCurrent', bmcField: '硬盘输入电流' },
-    { fieldKey: 'power', bmcField: '硬盘功耗' },
-    { fieldKey: 'temperature', bmcField: '硬盘温度' },
-    { fieldKey: 'diskThermalTarget', bmcField: '硬盘控温目标' },
+    { fieldKey: 'diskInputVoltage', bmcField: '硬盘背板输入电压' },
+    { fieldKey: 'diskInputCurrent', bmcField: '硬盘背板输入电流' },
+    { fieldKey: 'power', bmcField: '硬盘背板功耗' },
+    { fieldKey: 'temperature', bmcField: '硬盘背板温度' },
+    { fieldKey: 'nvmeInternalTemp', bmcField: 'NVMe盘内置温度' },
+    { fieldKey: 'nvmeMaxTemp', bmcField: '所有NVMe盘最大温度' },
   ],
   card: [
     { fieldKey: 'cardInputVoltage', bmcField: '标卡输入电压' },
     { fieldKey: 'cardInputCurrent', bmcField: '标卡输入电流' },
     { fieldKey: 'power', bmcField: '标卡功耗' },
-    { fieldKey: 'temperature', bmcField: '标卡温度' },
-    { fieldKey: 'cardThermalTarget', bmcField: '标卡控温目标' },
-    { fieldKey: 'slotId', bmcField: 'Card Slot ID' },
+    { fieldKey: 'ocpMainChipTemp', bmcField: 'OCP卡主芯片温度' },
+    { fieldKey: 'ocpOpticalMaxTemp', bmcField: 'OCP卡光模块最高温度' },
   ],
   sensor: [
     { fieldKey: 'temperature', bmcField: '板级其他温度监测点温度' },
@@ -239,6 +234,31 @@ const defaultFieldMappings: Record<string, Array<{ fieldKey: string; bmcField: s
     { fieldKey: 'power', bmcField: '自定义模块功耗' },
   ],
 };
+
+// CPU电源域默认字段映射配置（用于"电源域详情"弹窗内的固定字段）
+const defaultPowerDomainFieldMappings: Array<{ fieldKey: string; bmcField: string }> = [
+  { fieldKey: 'cpuDomainTaCoreDvfsOutputVoltage', bmcField: 'CPU电源域TA_CORE_DVFS输出电压' },
+  { fieldKey: 'cpuDomainTaCoreDvfsOutputCurrent', bmcField: 'CPU电源域TA_CORE_DVFS输出电流' },
+  { fieldKey: 'cpuDomainTaCoreDvfsOutputPower', bmcField: 'CPU电源域TA_CORE_DVFS输出功率' },
+  { fieldKey: 'cpuDomainDdrioOutputVoltage', bmcField: 'CPU电源域DDRIO输出电压' },
+  { fieldKey: 'cpuDomainDdrioOutputCurrent', bmcField: 'CPU电源域DDRIO输出电流' },
+  { fieldKey: 'cpuDomainDdrioOutputPower', bmcField: 'CPU电源域DDRIO输出功率' },
+  { fieldKey: 'cpuDomainTbCoreDvfsOutputVoltage', bmcField: 'CPU电源域TB_CORE_DVFS输出电压' },
+  { fieldKey: 'cpuDomainTbCoreDvfsOutputCurrent', bmcField: 'CPU电源域TB_CORE_DVFS输出电流' },
+  { fieldKey: 'cpuDomainTbCoreDvfsOutputPower', bmcField: 'CPU电源域TB_CORE_DVFS输出功率' },
+  { fieldKey: 'cpuDomainIoNbAvsOutputVoltage', bmcField: 'CPU电源域IO_NB_AVS输出电压' },
+  { fieldKey: 'cpuDomainIoNbAvsOutputCurrent', bmcField: 'CPU电源域IO_NB_AVS输出电流' },
+  { fieldKey: 'cpuDomainIoNbAvsOutputPower', bmcField: 'CPU电源域IO_NB_AVS输出功率' },
+  { fieldKey: 'cpuDomainUncoreDvfsOutputVoltage', bmcField: 'CPU电源域UNCORE_DVFS输出电压' },
+  { fieldKey: 'cpuDomainUncoreDvfsOutputCurrent', bmcField: 'CPU电源域UNCORE_DVFS输出电流' },
+  { fieldKey: 'cpuDomainUncoreDvfsOutputPower', bmcField: 'CPU电源域UNCORE_DVFS输出功率' },
+  { fieldKey: 'cpuDomainIoNaAvsOutputVoltage', bmcField: 'CPU电源域IO_NA_AVS输出电压' },
+  { fieldKey: 'cpuDomainIoNaAvsOutputCurrent', bmcField: 'CPU电源域IO_NA_AVS输出电流' },
+  { fieldKey: 'cpuDomainIoNaAvsOutputPower', bmcField: 'CPU电源域IO_NA_AVS输出功率' },
+  { fieldKey: 'cpuDomainSerdesOutputVoltage', bmcField: 'CPU电源域SERDES输出电压' },
+  { fieldKey: 'cpuDomainSerdesOutputCurrent', bmcField: 'CPU电源域SERDES输出电流' },
+  { fieldKey: 'cpuDomainSerdesOutputPower', bmcField: 'CPU电源域SERDES输出功率' },
+];
 
 // 默认拓扑数据
 export const defaultTopology: TopologyExportData = {
@@ -266,7 +286,7 @@ export const defaultTopology: TopologyExportData = {
         label: '电源模块1',
         category: 'source',
         apiConfig: { fieldMappings: defaultFieldMappings.psu },
-        sourceData: { inputVoltage: 220, outputVoltage: 12, current: 30, inputCurrent: 30, outputCurrent: 30, inputPower: 400, outputPower: 376, efficiency: 94, temperature: 48 }
+        sourceData: { inputVoltage: 220, outputVoltage: 12, current: 30, inputCurrent: 30, outputCurrent: 30, inputPower: 400, outputPower: 376, efficiency: 94, temperature: 48, psuIntakeTemp: 35, psuMosTemp: 55, psuRearIntakeTemp: 38 }
       }
     },
     {
@@ -278,7 +298,7 @@ export const defaultTopology: TopologyExportData = {
         label: '风扇1',
         category: 'load',
         apiConfig: { fieldMappings: defaultFieldMappings.fan },
-        fanData: { power: 15, rpm: 5000, speedPercent: 60, temperature: 40 }
+        fanData: { power: 15, rpm: 5000, speedPercent: 60, temperature: 40, fanInputVoltage: 12, fanInputCurrent: 1.25 }
       }
     },
     {
@@ -289,7 +309,7 @@ export const defaultTopology: TopologyExportData = {
         nodeType: 'cpu',
         label: 'CPU0',
         category: 'load',
-        apiConfig: { fieldMappings: defaultFieldMappings.cpu },
+        apiConfig: { fieldMappings: defaultFieldMappings.cpu, powerDomainFieldMappings: defaultPowerDomainFieldMappings },
         cpuData: { 
           power: 150, 
           temperature: 72, 
@@ -299,7 +319,8 @@ export const defaultTopology: TopologyExportData = {
             { name: 'TB_CORE_DVFS', voltage: 0.85, current: 75, power: 63.75 },
             { name: 'IO_NB_AVS', voltage: 0.95, current: 10, power: 9.5 },
             { name: 'UNCORE_DVFS', voltage: 0.9, current: 25, power: 22.5 },
-            { name: 'IO_NA_AVS', voltage: 0.95, current: 8, power: 7.6 }
+            { name: 'IO_NA_AVS', voltage: 0.95, current: 8, power: 7.6 },
+            { name: 'SERDES', voltage: 0.9, current: 12, power: 10.8 }
           ], 
           amuEvents: [
             { id: 'amu-1', timestamp: new Date(Date.now() - 60000).toISOString(), type: 'info', domain: 'TA_CORE_DVFS', message: '电源域功耗正常', value: 68 },
@@ -689,6 +710,13 @@ export function updateNodeData(nodes: TopologyNode[]): TopologyNode[] {
           sourceData.outputPower = generateFluctuation(sourceData.outputPower, 5);
           sourceData.efficiency = generateFluctuation(sourceData.efficiency, 2);
           sourceData.temperature = generateFluctuation(sourceData.temperature, 3);
+        }
+        break;
+      }
+      case 'busbar': {
+        const sourceData = data.sourceData as { busbarPower: number } | undefined;
+        if (sourceData) {
+          sourceData.busbarPower = generateFluctuation(sourceData.busbarPower, 5);
         }
         break;
       }

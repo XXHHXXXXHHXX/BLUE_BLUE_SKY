@@ -3,6 +3,7 @@ import type { BMCResponse, BMCControlResponse } from '../types/bmc';
 import type { TopologyNode, TopologyEdge, BMCConfig, FieldMapping } from '../types/topology';
 import { FIXED_FIELD_DEFS } from '../types/topology';
 import type { CPUData, MemoryData, DiskData, FanData, IOData, CardData, MgmtBoardData, SourceData } from '../types/power';
+import { CPU_POWER_DOMAIN_FIELD_DEFS, buildCPUPowerDomains } from '../types/power';
 import type { SensorData as BMCSensorData } from '../../app/api/bmc/sensors/route';
 import { refreshNodeData, refreshEdgeData } from './mockData';
 import { sendControlCommand } from './backendApi';
@@ -66,9 +67,11 @@ async function fetchAllNodeDataFromBMC(
 
   for (const node of currentNodes) {
     const fieldMappings = node.data.apiConfig?.fieldMappings;
+    const powerDomainFieldMappings = node.data.apiConfig?.powerDomainFieldMappings;
     
-    // 如果有字段映射配置，使用新的字段映射方式
-    if (fieldMappings && fieldMappings.length > 0) {
+    // 如果有字段映射配置（含电源域字段映射），使用新的字段映射方式
+    if ((fieldMappings && fieldMappings.length > 0) ||
+        (powerDomainFieldMappings && powerDomainFieldMappings.length > 0)) {
       const updatedNode = applyFieldMappings(node, sensors);
       updatedNodes.push(updatedNode);
       continue;
@@ -125,6 +128,7 @@ function evaluateBmcExpression(expression: string, sensors: BMCSensorData[]): nu
 /** 应用字段映射到节点 - 根据节点类型映射到对应的数据结构 */
 function applyFieldMappings(node: TopologyNode, sensors: BMCSensorData[]): TopologyNode {
   const fieldMappings = node.data.apiConfig?.fieldMappings || [];
+  const powerDomainFieldMappings = node.data.apiConfig?.powerDomainFieldMappings || [];
   const nodeType = node.data.nodeType;
   
   // 深拷贝节点
@@ -137,6 +141,13 @@ function applyFieldMappings(node: TopologyNode, sensors: BMCSensorData[]): Topol
   for (const mapping of fieldMappings) {
     const { fieldKey, bmcField } = mapping;
     
+    const value = evaluateBmcExpression(bmcField, sensors);
+    mappedData[fieldKey] = value;
+  }
+  
+  // CPU 电源域字段映射同样求值（用于"电源域详情"弹窗）
+  for (const mapping of powerDomainFieldMappings) {
+    const { fieldKey, bmcField } = mapping;
     const value = evaluateBmcExpression(bmcField, sensors);
     mappedData[fieldKey] = value;
   }
@@ -171,6 +182,7 @@ function applyFieldMappings(node: TopologyNode, sensors: BMCSensorData[]): Topol
     case 'psu':
     case 'vr':
     case 'psip':
+    case 'busbar':
       newNode.data.sourceData = buildSourceData(newNode.data.sourceData, mappedData);
       break;
     case 'custom':
@@ -179,9 +191,12 @@ function applyFieldMappings(node: TopologyNode, sensors: BMCSensorData[]): Topol
   }
 
   // 将所有已配置字段的值写入 displayMetrics，确保前端能渲染任何字段（包括固定字段和自定义字段）
+  // 电源域字段仅在"电源域详情"弹窗显示，不写入 displayMetrics
+  const domainKeys = new Set(CPU_POWER_DOMAIN_FIELD_DEFS.map((d) => d.fieldKey));
   if (fieldMappings.length > 0) {
     newNode.data.displayMetrics = newNode.data.displayMetrics || {};
     for (const m of fieldMappings) {
+      if (domainKeys.has(m.fieldKey)) continue;
       newNode.data.displayMetrics[m.fieldKey] = mappedData[m.fieldKey] ?? null;
     }
   }
@@ -200,7 +215,7 @@ function buildCPUData(existing: CPUData | undefined, mapped: Record<string, numb
   return {
     power,
     temperature,
-    powerDomains: existing?.powerDomains ?? [],
+    powerDomains: buildCPUPowerDomains(mapped, existing?.powerDomains),
     amuEvents: existing?.amuEvents ?? [],
   };
 }
@@ -230,7 +245,19 @@ function buildDiskData(existing: DiskData | undefined, mapped: Record<string, nu
   const status = mapped.hasOwnProperty('status')
     ? (mapped.status !== null ? (mapped.status === 1 || mapped.status === 'normal' ? 'normal' : 'warning') : null)
     : (existing?.status ?? null);
-  return { power, temperature, status: status as 'normal' | 'warning' | 'error' | null };
+  const diskInputVoltage = mapped.hasOwnProperty('diskInputVoltage')
+    ? (mapped.diskInputVoltage !== null ? Number(mapped.diskInputVoltage) : null)
+    : (existing?.diskInputVoltage ?? null);
+  const diskInputCurrent = mapped.hasOwnProperty('diskInputCurrent')
+    ? (mapped.diskInputCurrent !== null ? Number(mapped.diskInputCurrent) : null)
+    : (existing?.diskInputCurrent ?? null);
+  const nvmeInternalTemp = mapped.hasOwnProperty('nvmeInternalTemp')
+    ? (mapped.nvmeInternalTemp !== null ? Number(mapped.nvmeInternalTemp) : null)
+    : (existing?.nvmeInternalTemp ?? null);
+  const nvmeMaxTemp = mapped.hasOwnProperty('nvmeMaxTemp')
+    ? (mapped.nvmeMaxTemp !== null ? Number(mapped.nvmeMaxTemp) : null)
+    : (existing?.nvmeMaxTemp ?? null);
+  return { power, temperature, status: status as 'normal' | 'warning' | 'error' | null, diskInputVoltage, diskInputCurrent, nvmeInternalTemp, nvmeMaxTemp };
 }
 
 /** 构建 FanData */
@@ -247,7 +274,13 @@ function buildFanData(existing: FanData | undefined, mapped: Record<string, numb
   const speedPercent = mapped.hasOwnProperty('speedPercent')
     ? (mapped.speedPercent !== null ? Number(mapped.speedPercent) : null)
     : (existing?.speedPercent ?? null);
-  return { power, temperature, rpm, speedPercent };
+  const fanInputVoltage = mapped.hasOwnProperty('fanInputVoltage')
+    ? (mapped.fanInputVoltage !== null ? Number(mapped.fanInputVoltage) : null)
+    : (existing?.fanInputVoltage ?? null);
+  const fanInputCurrent = mapped.hasOwnProperty('fanInputCurrent')
+    ? (mapped.fanInputCurrent !== null ? Number(mapped.fanInputCurrent) : null)
+    : (existing?.fanInputCurrent ?? null);
+  return { power, temperature, rpm, speedPercent, fanInputVoltage, fanInputCurrent };
 }
 
 /** 构建 IOData */
@@ -275,7 +308,19 @@ function buildCardData(existing: CardData | undefined, mapped: Record<string, nu
   const slotId = mapped.hasOwnProperty('slotId')
     ? (mapped.slotId !== null ? String(mapped.slotId) : null)
     : (existing?.slotId ?? null);
-  return { power, temperature, slotId };
+  const cardInputVoltage = mapped.hasOwnProperty('cardInputVoltage')
+    ? (mapped.cardInputVoltage !== null ? Number(mapped.cardInputVoltage) : null)
+    : (existing?.cardInputVoltage ?? null);
+  const cardInputCurrent = mapped.hasOwnProperty('cardInputCurrent')
+    ? (mapped.cardInputCurrent !== null ? Number(mapped.cardInputCurrent) : null)
+    : (existing?.cardInputCurrent ?? null);
+  const ocpMainChipTemp = mapped.hasOwnProperty('ocpMainChipTemp')
+    ? (mapped.ocpMainChipTemp !== null ? Number(mapped.ocpMainChipTemp) : null)
+    : (existing?.ocpMainChipTemp ?? null);
+  const ocpOpticalMaxTemp = mapped.hasOwnProperty('ocpOpticalMaxTemp')
+    ? (mapped.ocpOpticalMaxTemp !== null ? Number(mapped.ocpOpticalMaxTemp) : null)
+    : (existing?.ocpOpticalMaxTemp ?? null);
+  return { power, temperature, slotId, cardInputVoltage, cardInputCurrent, ocpMainChipTemp, ocpOpticalMaxTemp };
 }
 
 /** 构建 SensorData（温度传感器） */
@@ -330,6 +375,24 @@ function buildSourceData(existing: SourceData | undefined, mapped: Record<string
     temperature: mapped.hasOwnProperty('temperature')
       ? (mapped.temperature !== null ? Number(mapped.temperature) : null)
       : existing?.temperature,
+    psuIntakeTemp: mapped.hasOwnProperty('psuIntakeTemp')
+      ? (mapped.psuIntakeTemp !== null ? Number(mapped.psuIntakeTemp) : null)
+      : existing?.psuIntakeTemp,
+    psuMosTemp: mapped.hasOwnProperty('psuMosTemp')
+      ? (mapped.psuMosTemp !== null ? Number(mapped.psuMosTemp) : null)
+      : existing?.psuMosTemp,
+    psuRearIntakeTemp: mapped.hasOwnProperty('psuRearIntakeTemp')
+      ? (mapped.psuRearIntakeTemp !== null ? Number(mapped.psuRearIntakeTemp) : null)
+      : existing?.psuRearIntakeTemp,
+    busbarVoltage: mapped.hasOwnProperty('busbarVoltage')
+      ? (mapped.busbarVoltage !== null ? Number(mapped.busbarVoltage) : null)
+      : existing?.busbarVoltage,
+    busbarCurrent: mapped.hasOwnProperty('busbarCurrent')
+      ? (mapped.busbarCurrent !== null ? Number(mapped.busbarCurrent) : null)
+      : existing?.busbarCurrent,
+    busbarPower: mapped.hasOwnProperty('busbarPower')
+      ? (mapped.busbarPower !== null ? Number(mapped.busbarPower) : null)
+      : existing?.busbarPower,
   };
 }
 

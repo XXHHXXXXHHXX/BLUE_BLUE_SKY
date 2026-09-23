@@ -84,7 +84,8 @@ function computePowerSummary(nodes: TopologyNode[], edges: TopologyEdge[]) {
     }
     if ('sourceData' in d && d.sourceData) {
       // Track source module output power for ranking
-      modulePowers.push({ name: displayName, type: d.nodeType, power: d.sourceData.outputPower || 0 });
+      const sourcePower = d.nodeType === 'busbar' ? d.sourceData.busbarPower || 0 : d.sourceData.outputPower || 0;
+      modulePowers.push({ name: displayName, type: d.nodeType, power: sourcePower });
       if (d.sourceData.temperature && d.sourceData.temperature > maxTemp) maxTemp = d.sourceData.temperature;
     }
   }

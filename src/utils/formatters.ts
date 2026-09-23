@@ -100,7 +100,7 @@ export function getEfficiencyLevel(eff?: number | null): 'normal' | 'warning' | 
 
 /** 模块类型大写缩写 */
 const typeUpperMap: Record<string, string> = {
-  ac: 'AC', psu: 'PSU', vr: 'VR', psip: 'PSIP',
+  ac: 'AC', psu: 'PSU', vr: 'VR', psip: 'PSIP', busbar: 'BUSBAR',
   cpu: 'CPU', memory: 'MEM', fan: 'FAN', disk: 'DISK',
   io: 'IO', card: 'CARD', sensor: 'SENSOR', mgmtBoard: 'MGMT', chassis: 'CHASSIS',
   thermometer: 'THERM', custom: 'CUSTOM',

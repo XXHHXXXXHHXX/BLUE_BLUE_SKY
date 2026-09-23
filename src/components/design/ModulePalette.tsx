@@ -11,9 +11,9 @@ interface ModuleCategory {
 }
 
 const categories: ModuleCategory[] = [
-  { label: '电源类', types: ['ac', 'psu', 'vr', 'psip'] },
+  { label: '电源类', types: ['ac', 'psu', 'vr', 'psip', 'busbar'] },
   { label: '负载类', types: ['cpu', 'memory', 'fan', 'disk', 'io', 'card'] },
-  { label: '其他', types: ['sensor', 'mgmtBoard', 'chassis', 'thermometer'] },
+  { label: '其他', types: ['sensor'] },
   { label: '自定义', types: ['custom'] },
 ];
 

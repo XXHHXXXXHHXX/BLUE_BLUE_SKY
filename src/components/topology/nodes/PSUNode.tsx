@@ -36,6 +36,9 @@ const PSUNode: React.FC<NodeProps> = (props) => {
       outputPower: number | null;
       efficiency: number | null;
       temperature?: number | null;
+      psuIntakeTemp?: number | null;
+      psuMosTemp?: number | null;
+      psuRearIntakeTemp?: number | null;
     };
   };
 
@@ -52,8 +55,17 @@ const PSUNode: React.FC<NodeProps> = (props) => {
   const outputPower = sourceData?.outputPower ?? null;
   const efficiency = sourceData?.efficiency ?? null;
   const temperature = sourceData?.temperature ?? null;
+  const psuIntakeTemp = sourceData?.psuIntakeTemp ?? null;
+  const psuMosTemp = sourceData?.psuMosTemp ?? null;
+  const psuRearIntakeTemp = sourceData?.psuRearIntakeTemp ?? null;
 
-  const tempLevel = getTemperatureLevel(temperature ?? undefined);
+  // 节点边框警告级别取多个温度点中的最大值
+  const maxTemp = Math.max(
+    ...[temperature, psuIntakeTemp, psuMosTemp, psuRearIntakeTemp].filter(
+      (t): t is number => t !== null && t !== undefined && !Number.isNaN(t)
+    ),
+  );
+  const tempLevel = getTemperatureLevel(Number.isFinite(maxTemp) ? maxTemp : undefined);
   const effLevel = getEfficiencyLevel(efficiency ?? undefined);
   
   const tempClass = tempLevel === 'critical' 
@@ -97,6 +109,33 @@ const PSUNode: React.FC<NodeProps> = (props) => {
             {getFieldLabel('temperature')}:{' '}
             <span style={{ color: temperature !== null ? getTemperatureColor(temperature) : '#999' }}>
               {formatTemperature(temperature)}
+            </span>
+          </div>
+        );
+      case 'psuIntakeTemp':
+        return (
+          <div key={fieldKey}>
+            {getFieldLabel('psuIntakeTemp')}:{' '}
+            <span style={{ color: psuIntakeTemp !== null ? getTemperatureColor(psuIntakeTemp) : '#999' }}>
+              {formatTemperature(psuIntakeTemp)}
+            </span>
+          </div>
+        );
+      case 'psuMosTemp':
+        return (
+          <div key={fieldKey}>
+            {getFieldLabel('psuMosTemp')}:{' '}
+            <span style={{ color: psuMosTemp !== null ? getTemperatureColor(psuMosTemp) : '#999' }}>
+              {formatTemperature(psuMosTemp)}
+            </span>
+          </div>
+        );
+      case 'psuRearIntakeTemp':
+        return (
+          <div key={fieldKey}>
+            {getFieldLabel('psuRearIntakeTemp')}:{' '}
+            <span style={{ color: psuRearIntakeTemp !== null ? getTemperatureColor(psuRearIntakeTemp) : '#999' }}>
+              {formatTemperature(psuRearIntakeTemp)}
             </span>
           </div>
         );

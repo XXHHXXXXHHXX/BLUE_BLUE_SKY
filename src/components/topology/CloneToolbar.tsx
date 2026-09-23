@@ -138,6 +138,18 @@ const CloneToolbar: React.FC = () => {
           }
           break;
         }
+        case 'busbar': {
+          const busbarSourceData = (node.data as { sourceData?: { busbarPower: number; busbarVoltage: number; busbarCurrent: number } }).sourceData;
+          if (busbarSourceData) {
+            dataPoint = {
+              power: busbarSourceData.busbarPower,
+              voltage: busbarSourceData.busbarVoltage,
+              current: busbarSourceData.busbarCurrent,
+            };
+            hasData = true;
+          }
+          break;
+        }
         case 'fan': {
           const fanData = (node.data as { fanData?: { power: number; temperature: number; rpm: number; speedPercent: number } }).fanData;
           if (fanData) {

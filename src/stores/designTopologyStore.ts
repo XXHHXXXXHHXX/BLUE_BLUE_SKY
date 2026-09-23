@@ -92,6 +92,7 @@ interface DesignTopologyState {
   updateNodeCustomIconUrl: (nodeId: string, url: string | undefined) => void;
   updateNodeApiConfig: (nodeId: string, config: ApiConfig) => void;
   updateNodeFieldMappings: (nodeId: string, mappings: import('../types/topology').FieldMapping[]) => void;
+  updateNodePowerDomainFieldMappings: (nodeId: string, mappings: import('../types/topology').FieldMapping[]) => void;
 
   // 导入导出
   exportTopology: () => TopologyExportData;
@@ -389,6 +390,18 @@ export const useDesignTopologyStore = create<DesignTopologyState>((set, get) => 
       nodes: nodes.map(n =>
         n.id === nodeId
           ? { ...n, data: { ...n.data, apiConfig: { ...n.data.apiConfig, fieldMappings: mappings } } }
+          : n
+      ),
+      hasUnsavedChanges: true,
+    });
+  },
+
+  updateNodePowerDomainFieldMappings: (nodeId, mappings) => {
+    const { nodes } = get();
+    set({
+      nodes: nodes.map(n =>
+        n.id === nodeId
+          ? { ...n, data: { ...n.data, apiConfig: { ...n.data.apiConfig, powerDomainFieldMappings: mappings } } }
           : n
       ),
       hasUnsavedChanges: true,

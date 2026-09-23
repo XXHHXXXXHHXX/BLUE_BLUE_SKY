@@ -78,7 +78,8 @@ function computePowerSummary(nodes: TopologyNode[], edges: TopologyEdge[]) {
       if (d.sensorData.temperature && d.sensorData.temperature > maxTemp) maxTemp = d.sensorData.temperature;
     }
     if ('sourceData' in d && d.sourceData) {
-      modulePowers.push({ name: displayName, type: d.nodeType, power: d.sourceData.outputPower || 0 });
+      const sourcePower = d.nodeType === 'busbar' ? d.sourceData.busbarPower || 0 : d.sourceData.outputPower || 0;
+      modulePowers.push({ name: displayName, type: d.nodeType, power: sourcePower });
       if (d.sourceData.temperature && d.sourceData.temperature > maxTemp) maxTemp = d.sourceData.temperature;
     }
   }
