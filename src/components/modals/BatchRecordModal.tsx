@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Modal, Checkbox, Button, List, Tag, Space, Typography, Alert } from 'antd';
-import { VideoCameraOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { Modal, Checkbox, Button, List, Tag, Space, Typography, Alert, Input, Tooltip } from 'antd';
+import { VideoCameraOutlined, CheckCircleOutlined, TagOutlined } from '@ant-design/icons';
 import type { TopologyNode } from '../../types/topology';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 
@@ -14,6 +14,7 @@ interface BatchRecordModalProps {
   onConfirm: (selectedIds: string[]) => void;
   isRecording: boolean;
   nodes: TopologyNode[]; // 传入节点列表，支持主页面和分身页面
+  onUpdateAlias?: (nodeId: string, alias: string) => void; // 更新节点别名
 }
 
 /** 可录像的节点类型 */
@@ -56,6 +57,7 @@ const BatchRecordModal: React.FC<BatchRecordModalProps> = ({
   onClose,
   onConfirm,
   nodes,
+  onUpdateAlias,
 }) => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
@@ -123,7 +125,7 @@ const BatchRecordModal: React.FC<BatchRecordModalProps> = ({
     >
       <Alert
         message="批量录像说明"
-        description="选择需要同时录像的模块，系统将同时记录所有选中模块的数据。录像期间固定保留最近 60 秒的数据。"
+        description="选择需要同时录像的模块，系统将同时记录所有选中模块的数据。录像期间固定保留最近 60 秒的数据。若存在同名模块，可为每个模块设置别名以区分，录像导出时将以别名命名文件夹。"
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
@@ -146,29 +148,62 @@ const BatchRecordModal: React.FC<BatchRecordModalProps> = ({
         size="small"
         style={{ maxHeight: modal.isMaximized ? 600 : 400, overflow: 'auto' }}
         dataSource={recordableNodes}
-        renderItem={(node: TopologyNode) => (
-          <List.Item
-            key={node.id}
-            onClick={() => handleToggle(node.id)}
-            style={{
-              cursor: 'pointer',
-              background: selectedIds.includes(node.id) ? '#e6f7ff' : 'transparent',
-            }}
-          >
-            <Checkbox
-              checked={selectedIds.includes(node.id)}
-              onChange={() => handleToggle(node.id)}
-              onClick={(e) => e.stopPropagation()}
+        renderItem={(node: TopologyNode) => {
+          const displayName = node.data.displayAlias || node.data.label || node.id;
+          return (
+            <List.Item
+              key={node.id}
+              onClick={() => handleToggle(node.id)}
+              style={{
+                cursor: 'pointer',
+                background: selectedIds.includes(node.id) ? '#e6f7ff' : 'transparent',
+                display: 'block',
+                padding: '8px 12px',
+              }}
             >
-              <Space>
-                <Tag color={TYPE_COLORS[node.data.nodeType] || 'default'}>
-                  {TYPE_NAMES[node.data.nodeType] || node.data.nodeType}
-                </Tag>
-                <Text>{node.data.label || node.id}</Text>
-              </Space>
-            </Checkbox>
-          </List.Item>
-        )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                <Checkbox
+                  checked={selectedIds.includes(node.id)}
+                  onChange={() => handleToggle(node.id)}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Space>
+                    <Tag color={TYPE_COLORS[node.data.nodeType] || 'default'}>
+                      {TYPE_NAMES[node.data.nodeType] || node.data.nodeType}
+                    </Tag>
+                    <Text>{displayName}</Text>
+                  </Space>
+                </Checkbox>
+                <div
+                  style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {!node.data.displayAlias && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {node.data.label || node.id}
+                    </Text>
+                  )}
+                  <Tooltip title="设置别名以区分同名模块（录像导出时将使用该名称）">
+                    <Input
+                      size="small"
+                      style={{ width: 160 }}
+                      prefix={<TagOutlined style={{ color: '#bfbfbf' }} />}
+                      placeholder={node.data.label || node.id}
+                      defaultValue={node.data.displayAlias || ''}
+                      key={node.id}
+                      onPressEnter={(e) => {
+                        onUpdateAlias?.(node.id, (e.target as HTMLInputElement).value.trim());
+                      }}
+                      onBlur={(e) => {
+                        onUpdateAlias?.(node.id, e.target.value.trim());
+                      }}
+                    />
+                  </Tooltip>
+                </div>
+              </div>
+            </List.Item>
+          );
+        }}
       />
 
       {selectedIds.length > 0 && (

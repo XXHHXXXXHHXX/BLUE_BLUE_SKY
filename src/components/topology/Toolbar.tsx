@@ -23,7 +23,7 @@ import TopologySelector from './TopologySelector';
 
 const Toolbar: React.FC = () => {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
-  const { exportTopology, importTopology, nodes } = useTopologyStore();
+  const { exportTopology, importTopology, nodes, updateNodeAlias } = useTopologyStore();
   const { isPolling } = useMonitorStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -91,7 +91,7 @@ const Toolbar: React.FC = () => {
       const node = nodes.find((n) => n.id === id);
       if (!node) return null;
       return {
-        label: node.data.label || node.id,
+        label: node.data.displayAlias || node.data.label || node.id,
         type: node.data.nodeType,
       };
     };
@@ -343,6 +343,7 @@ const Toolbar: React.FC = () => {
         onConfirm={handleStartBatchRecord}
         isRecording={isBatchRecording}
         nodes={nodes}
+        onUpdateAlias={updateNodeAlias}
       />
 
       <BMCConfigPanel

@@ -23,7 +23,7 @@ import {
 } from '../../utils/formatters';
 import type { SourceData, FanData, LoadData, MemoryData, DiskData, IOData, CardData, SensorData } from '../../types/power';
 import { DEFAULT_FIELD_THRESHOLDS } from '../../types/topology';
-import type { TopologyNode, FieldThreshold } from '../../types/topology';
+import type { TopologyNode } from '../../types/topology';
 import { getThresholdColorForField } from '../../utils/formatters';
 import { 
   VideoCameraOutlined, 
@@ -36,6 +36,49 @@ import {
 } from '@ant-design/icons';
 
 const { Title } = Typography;
+
+/** 曲线颜色盘 */
+const CHART_COLORS = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc'];
+
+/** 根据字段名推断单位与分配曲线颜色 */
+function getFieldUnitInfo(fieldKey: string, index: number): { unit: string; color: string } {
+  const lower = fieldKey.toLowerCase();
+  let unit = '';
+  if (lower.includes('temp')) unit = '°C';
+  else if (lower.includes('voltage')) unit = 'V';
+  else if (lower.includes('current')) unit = 'A';
+  else if (lower.includes('power')) unit = 'W';
+  else if (lower.includes('efficiency')) unit = '%';
+  else if (lower.includes('rpm')) unit = 'RPM';
+  else if (lower.includes('speed') || lower.includes('percent')) unit = '%';
+  else if (lower.includes('loss')) unit = 'W';
+  return { unit, color: CHART_COLORS[index % CHART_COLORS.length] };
+}
+
+/** 从节点数据中提取所有数值字段（结构化数据 + displayMetrics），用于录像 */
+function getNodeNumericFieldValues(d: Record<string, unknown>): Record<string, number | null> {
+  const result: Record<string, number | null> = {};
+  const collect = (obj: Record<string, unknown> | undefined) => {
+    if (!obj) return;
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === 'number') {
+        result[k] = v;
+      }
+    }
+  };
+  collect(d.sourceData as Record<string, unknown> | undefined);
+  collect(d.fanData as Record<string, unknown> | undefined);
+  collect(d.cpuData as Record<string, unknown> | undefined);
+  collect(d.memoryData as Record<string, unknown> | undefined);
+  collect(d.diskData as Record<string, unknown> | undefined);
+  collect(d.ioData as Record<string, unknown> | undefined);
+  collect(d.cardData as Record<string, unknown> | undefined);
+  collect(d.sensorData as Record<string, unknown> | undefined);
+  collect(d.mgmtBoardData as Record<string, unknown> | undefined);
+  // displayMetrics 覆盖（包含自定义字段值）
+  collect(d.displayMetrics as Record<string, unknown> | undefined);
+  return result;
+}
 
 interface NodeDetailPanelProps {
   open: boolean;
@@ -87,111 +130,26 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
     }
   }, [node]);
 
-  // 当开启实时监控且正在录像时，记录数据点
+  // 当开启实时监控且正在录像时，记录数据点（只记录当前节点配置为显示的字段）
   useEffect(() => {
     if (!isRecording || !isPolling || !node?.data) return;
 
     const data = node.data as Record<string, unknown>;
-    const nodeType = data.nodeType as string;
-    const sourceData = data.sourceData as SourceData | undefined;
-    const fanData = data.fanData as FanData | undefined;
-    const cpuData = data.cpuData as LoadData | undefined;
-    const memoryData = data.memoryData as MemoryData | undefined;
-    const diskData = data.diskData as DiskData | undefined;
-    const ioData = data.ioData as IOData | undefined;
-    const cardData = data.cardData as CardData | undefined;
-    const sensorData = data.sensorData as SensorData | undefined;
+    const nodeFieldValues = getNodeNumericFieldValues(data);
 
-    // 根据节点类型提取数据
-    let dataPoint: Parameters<typeof addDataPoint>[0] = {};
-
-    switch (nodeType) {
-      case 'ac':
-      case 'psu':
-      case 'vr':
-      case 'psip':
-        if (sourceData) {
-          dataPoint = {
-            power: sourceData.outputPower,
-            temperature: sourceData.temperature,
-            voltage: sourceData.outputVoltage,
-            current: sourceData.current,
-          };
-        }
-        break;
-      case 'busbar':
-        if (sourceData) {
-          dataPoint = {
-            power: sourceData.busbarPower,
-            voltage: sourceData.busbarVoltage,
-            current: sourceData.busbarCurrent,
-          };
-        }
-        break;
-      case 'fan':
-        if (fanData) {
-          dataPoint = {
-            power: fanData.power,
-            temperature: fanData.temperature,
-            rpm: fanData.rpm,
-            speedPercent: fanData.speedPercent,
-          };
-        }
-        break;
-      case 'cpu':
-        if (cpuData) {
-          dataPoint = {
-            power: cpuData.power,
-            temperature: cpuData.temperature,
-          };
-        }
-        break;
-      case 'memory':
-        if (memoryData) {
-          dataPoint = {
-            power: memoryData.power,
-            temperature: memoryData.temperature,
-          };
-        }
-        break;
-      case 'disk':
-        if (diskData) {
-          dataPoint = {
-            power: diskData.power,
-            temperature: diskData.temperature,
-          };
-        }
-        break;
-      case 'io':
-        if (ioData) {
-          dataPoint = {
-            power: ioData.power,
-            temperature: ioData.temperature,
-          };
-        }
-        break;
-      case 'card':
-        if (cardData) {
-          dataPoint = {
-            power: cardData.power,
-            temperature: cardData.temperature,
-          };
-        }
-        break;
-      case 'sensor':
-        if (sensorData) {
-          dataPoint = {
-            temperature: sensorData.temperature,
-          };
-        }
-        break;
+    // 只记录配置为显示的字段，字段名保持与展示一致
+    const dataPoint: Parameters<typeof addDataPoint>[0] = {};
+    for (const key of orderedVisibleFieldKeys) {
+      if (Object.prototype.hasOwnProperty.call(nodeFieldValues, key)) {
+        dataPoint[key] = nodeFieldValues[key];
+      }
     }
 
     if (Object.keys(dataPoint).length > 0) {
       addDataPoint(dataPoint);
     }
   // 依赖项包含 nodes（从store订阅的实时数据），确保每次节点数据更新时都会记录
-  }, [isRecording, isPolling, nodes, node?.id, addDataPoint]);
+  }, [isRecording, isPolling, nodes, node?.id, orderedVisibleFieldKeys, addDataPoint]);
 
   const handleFanSpeedComplete = useCallback(async (value: number) => {
     if (!node) return;
@@ -785,64 +743,27 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
     return ['ac', 'psu', 'vr', 'psip', 'busbar', 'fan', 'cpu', 'memory', 'disk', 'io', 'card', 'sensor'].includes(nodeType);
   }, [node]);
 
-  // 获取历史曲线数据（按指标分组）
+  // 获取历史曲线数据（按录制的字段生成曲线，字段名与展示保持一致）
   const getHistoryChartData = useCallback(() => {
     if (!historyData.length) return [];
 
-    const charts: Array<{ title: string; data: Array<{ time: string; value: number }>; unit: string; color: string }> = [];
+    const first = historyData[0];
+    const fieldKeys = Object.keys(first).filter((k) => !['timestamp', 'timeStr'].includes(k));
 
-    // 功耗曲线
-    if (historyData[0].power !== undefined) {
-      charts.push({
-        title: '功耗趋势',
-        data: historyData.map(d => ({ time: d.timeStr, value: d.power || 0 })),
-        unit: 'W',
-        color: '#5470c6',
-      });
-    }
+    const charts: Array<{ title: string; data: Array<{ time: string; value: number | null }>; unit: string; color: string }> = [];
 
-    // 温度曲线
-    if (historyData[0].temperature !== undefined) {
+    fieldKeys.forEach((key, index) => {
+      const { unit, color } = getFieldUnitInfo(key, index);
       charts.push({
-        title: '温度趋势',
-        data: historyData.map(d => ({ time: d.timeStr, value: d.temperature || 0 })),
-        unit: '°C',
-        color: '#91cc75',
+        title: getFieldLabel(key),
+        data: historyData.map((d) => ({ time: d.timeStr, value: (d[key] as number | null | undefined) ?? null })),
+        unit,
+        color,
       });
-    }
-
-    // 电压曲线
-    if (historyData[0].voltage !== undefined) {
-      charts.push({
-        title: '电压趋势',
-        data: historyData.map(d => ({ time: d.timeStr, value: d.voltage || 0 })),
-        unit: 'V',
-        color: '#fac858',
-      });
-    }
-
-    // 电流曲线
-    if (historyData[0].current !== undefined) {
-      charts.push({
-        title: '电流趋势',
-        data: historyData.map(d => ({ time: d.timeStr, value: d.current || 0 })),
-        unit: 'A',
-        color: '#ee6666',
-      });
-    }
-
-    // 转速曲线（风扇）
-    if (historyData[0].rpm !== undefined) {
-      charts.push({
-        title: '转速趋势',
-        data: historyData.map(d => ({ time: d.timeStr, value: d.rpm || 0 })),
-        unit: 'RPM',
-        color: '#73c0de',
-      });
-    }
+    });
 
     return charts;
-  }, [historyData]);
+  }, [historyData, getFieldLabel]);
 
   return (
     <Drawer

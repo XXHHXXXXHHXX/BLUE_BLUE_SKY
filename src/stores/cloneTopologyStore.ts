@@ -72,6 +72,7 @@ interface CloneTopologyState {
   // 控制类操作
   updateFanSpeed: (nodeId: string, speed: number) => Promise<void>;
   updateSourceVoltage: (nodeId: string, voltage: number) => Promise<void>;
+  updateNodeAlias: (nodeId: string, alias: string) => void;
 }
 
 /** 从 localStorage 加载分身选择的拓扑ID - 使用独立的 key */
@@ -270,6 +271,18 @@ export const useCloneTopologyStore = create<CloneTopologyState>((set, get) => ({
       ),
     });
     // 分身页面只更新本地状态，不实际发送控制命令
+  },
+
+  /** 更新节点显示别名 - 仅本地更新 */
+  updateNodeAlias: (nodeId, alias) => {
+    const { nodes } = get();
+    set({
+      nodes: nodes.map(n =>
+        n.id === nodeId
+          ? { ...n, data: { ...n.data, displayAlias: alias || undefined } }
+          : n
+      ),
+    });
   },
 }));
 

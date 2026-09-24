@@ -6,7 +6,7 @@ import { bindYAxisWheelZoom } from '../../utils/chartWheelZoom';
 
 interface TrendChartProps {
   title: string;
-  data: Array<{ time: string; value: number }>;
+  data: Array<{ time: string; value: number | null }>;
   unit?: string;
   color?: string;
 }
@@ -17,8 +17,8 @@ const TrendChart: React.FC<TrendChartProps> = ({ title, data, unit = '', color =
     tooltip: {
       trigger: 'axis',
       formatter: (params: unknown) => {
-        const p = (params as Array<{ axisValue: string; seriesName: string; value: number }>)[0];
-        return `${p.axisValue}<br/>${p.seriesName}: ${p.value}${unit}`;
+        const p = (params as Array<{ axisValue: string; seriesName: string; value: number | null }>)[0];
+        return `${p.axisValue}<br/>${p.seriesName}: ${p.value ?? '-'}${unit}`;
       },
     },
     grid: { left: 50, right: 20, top: 40, bottom: 30 },

@@ -24,7 +24,7 @@ import BMCConfigPanel from '../monitor/BMCConfigPanel';
 
 const CloneToolbar: React.FC = () => {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
-  const { exportTopology, importTopology, nodes } = useCloneTopologyStore();
+  const { exportTopology, importTopology, nodes, updateNodeAlias } = useCloneTopologyStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // 概览面板状态
@@ -88,7 +88,7 @@ const CloneToolbar: React.FC = () => {
       const node = nodes.find((n) => n.id === id);
       if (!node) return null;
       return {
-        label: node.data.label || node.id,
+        label: node.data.displayAlias || node.data.label || node.id,
         type: node.data.nodeType,
       };
     };
@@ -372,6 +372,7 @@ const CloneToolbar: React.FC = () => {
         onConfirm={handleStartBatchRecord}
         isRecording={isBatchRecording}
         nodes={nodes}
+        onUpdateAlias={updateNodeAlias}
       />
 
       <BMCConfigPanel
