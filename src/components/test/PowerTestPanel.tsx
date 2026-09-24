@@ -129,7 +129,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     setPipelineCurrentStageIndex,
   } = useTestStore();
 
-  const { searchPackages, getPackageById, getPackageFile, fetchPackages } = useTestPackageStore();
+  const { searchPackages, getPackageById, fetchPackages } = useTestPackageStore();
   const { addReport, buildFolderTreeOptions, getSelectedFolderId, fetchFolders } = useTestReportStore();
   const { addDraft } = useTestDraftStore();
   const { startJob, abortJob } = useTestJobStore();
@@ -533,24 +533,19 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const packages = searchPackages(packageSearchKeyword);
   const searchedPackages = packages;
 
-  // 加载选中的测试包
+  // 加载选中的测试包（从用例包库选择：仅记录ID，部署时由服务器端直接加载，不下载到本机）
   const loadPackageFromLibrary = async (packageId: string) => {
     const pkg = packages.find(p => p.id === packageId);
     if (!pkg) return;
 
     setIsLoadingPackage(true);
     try {
-      addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 正在加载测试包: ${pkg.name}...`);
+      addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 已选用例包: ${pkg.name}（部署时由服务器直接加载，不会下载到本机）`);
 
-      const file = await getPackageFile(packageId);
-      if (!file) {
-        throw new Error('获取测试包文件失败');
-      }
-
-      setPowerTestConfig(tab.id, { packageFile: file });
+      setPowerTestConfig(tab.id, { packageFile: null });
       setSelectedLibraryPackageId(packageId);
-      message.success(`已加载测试包: ${pkg.name}`);
-      addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 测试包加载完成`);
+      message.success(`已选用例包: ${pkg.name}`);
+      addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 用例包选择完成`);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : '加载失败';
       message.error(`加载测试包失败: ${errorMsg}`);
@@ -690,8 +685,8 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       }
     }
 
-    if (!packageFile) {
-      message.error('请先从用例包库选择测试包');
+    if (!packageFile && !selectedLibraryPackageId) {
+      message.error('请先从用例包库选择测试包或上传测试包');
       return;
     }
 
@@ -725,7 +720,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     });
     addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 总迭代次数: ${totalIterations}`);
     addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 目标主机: ${tab.sshConfig.host}`);
-    addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 测试包: ${packageFile.name}`);
+    addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 测试包: ${selectedLibraryPackageId ? (getPackageById(selectedLibraryPackageId)?.name || selectedLibraryPackageId) : packageFile!.name}`);
 
     const envVars = tab.powerTestConfig.envVars.filter(e => e.key.trim());
     if (envVars.length > 0) {
@@ -746,7 +741,12 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 正在上传并部署测试包...`);
 
       const deployFormData = new FormData();
-      deployFormData.append('file', packageFile);
+      if (selectedLibraryPackageId) {
+        // 用例包来自库：由服务器端按ID直接加载部署，不经过浏览器下载
+        deployFormData.append('packageId', selectedLibraryPackageId);
+      } else {
+        deployFormData.append('file', packageFile as File);
+      }
       deployFormData.append('host', tab.sshConfig.host);
       deployFormData.append('port', tab.sshConfig.port.toString());
       deployFormData.append('username', tab.sshConfig.username);
@@ -820,7 +820,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       }
 
       const job = await startJob({
-        name: tab.powerTestConfig.jobName || `${uploadMode === 'library' && selectedLibraryPackageId ? getPackageById(selectedLibraryPackageId)?.name || '用例包' : packageFile.name} - ${new Date().toLocaleDateString()}`,
+        name: tab.powerTestConfig.jobName || `${selectedLibraryPackageId ? (getPackageById(selectedLibraryPackageId)?.name || '用例包') : (packageFile ? packageFile.name : '默认名称')} - ${new Date().toLocaleDateString()}`,
         tabId: tab.id,
         config: {
           host: tab.sshConfig.host,
@@ -919,16 +919,16 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         const stage = stages[i];
         addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 阶段 ${i + 1}/${stages.length}: ${stage.name} - 正在部署用例包...`);
 
-        let file: File | undefined;
-        if (stage.packageSource === 'library' && stage.packageLibraryId) {
-          file = await getPackageFile(stage.packageLibraryId);
-        }
-        if (!file) {
-          throw new Error(`阶段 [${stage.name}] 无法获取用例包`);
-        }
-
         const deployFormData = new FormData();
-        deployFormData.append('file', file);
+        if (stage.packageSource === 'library' && stage.packageLibraryId) {
+          // 用例包来自库：由服务器端按ID直接加载部署，不经过浏览器下载
+          deployFormData.append('packageId', stage.packageLibraryId);
+        } else {
+          if (!stage.packageFile) {
+            throw new Error(`阶段 [${stage.name}] 无法获取用例包`);
+          }
+          deployFormData.append('file', stage.packageFile);
+        }
         deployFormData.append('host', tab.sshConfig.host);
         deployFormData.append('port', tab.sshConfig.port.toString());
         deployFormData.append('username', tab.sshConfig.username);

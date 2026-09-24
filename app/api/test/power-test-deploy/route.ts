@@ -4,6 +4,7 @@ import { NodeSSH } from 'node-ssh';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { resolvePackage } from '../lib/packageStore';
 
 interface DeployConfig {
   host: string;
@@ -99,43 +100,66 @@ async function deployTestPackage(
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
-    
-    const file = formData.get('file') as File;
+
+    const file = formData.get('file') as File | null;
+    const packageId = formData.get('packageId') as string | null;
     const host = formData.get('host') as string;
     const port = parseInt(formData.get('port') as string) || 22;
     const username = formData.get('username') as string;
     const password = formData.get('password') as string;
-    
+
     // 验证参数
-    if (!file || !host || !username || !password) {
+    if (!host || !username || !password) {
       return NextResponse.json(
         { success: false, message: '缺少必要参数' },
         { status: 400 }
       );
     }
-    
-    // 验证文件类型
-    const validExtensions = ['.zip', '.tar', '.tar.gz'];
-    const hasValidExt = validExtensions.some(ext => file.name.endsWith(ext));
-    if (!hasValidExt) {
+
+    let fileBuffer: Buffer | null = null;
+    let fileName = '';
+
+    if (packageId) {
+      // 用例包来自服务器存储：按 ID 直接在服务器端读取，不经过浏览器下载
+      const resolved = await resolvePackage(packageId);
+      if (!resolved) {
+        return NextResponse.json(
+          { success: false, message: '用例包不存在或文件缺失' },
+          { status: 404 }
+        );
+      }
+      fileBuffer = resolved.buffer;
+      fileName = resolved.filename;
+    } else if (file) {
+      // 验证文件类型
+      const validExtensions = ['.zip', '.tar', '.tar.gz'];
+      const hasValidExt = validExtensions.some(ext => file.name.endsWith(ext));
+      if (!hasValidExt) {
+        return NextResponse.json(
+          { success: false, message: '只支持 .zip, .tar, .tar.gz 格式的压缩包' },
+          { status: 400 }
+        );
+      }
+
+      // 读取文件
+      fileBuffer = Buffer.from(await file.arrayBuffer());
+      fileName = file.name;
+    } else {
       return NextResponse.json(
-        { success: false, message: '只支持 .zip, .tar, .tar.gz 格式的压缩包' },
+        { success: false, message: '缺少测试包文件' },
         { status: 400 }
       );
     }
-    
-    // 读取文件
-    const fileBuffer = Buffer.from(await file.arrayBuffer());
-    
+
     const config: DeployConfig = {
       host,
       port,
       username,
       password,
     };
-    
-    const result = await deployTestPackage(config, fileBuffer, file.name);
-    
+
+    const result = await deployTestPackage(config, fileBuffer, fileName);
+
     return NextResponse.json({
       success: result.success,
       message: result.message,
