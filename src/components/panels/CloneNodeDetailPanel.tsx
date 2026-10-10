@@ -3,7 +3,8 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Drawer, Descriptions, Slider, Tag, Typography, Button, Space, Divider, Tooltip, Badge } from 'antd';
 import { useCloneTopologyStore } from '../../stores/cloneTopologyStore';
-import { useHistoryRecorder } from '../../hooks/useHistoryRecorder';
+import { useShallow } from 'zustand/react/shallow';
+import { useHistoryRecordStore, downloadHistoryCSV, downloadHistoryJSON } from '../../stores/historyRecordStore';
 import TrendChart from '../charts/TrendChart';
 import {
   formatVoltage,
@@ -29,6 +30,86 @@ import {
 
 const { Title } = Typography;
 
+/** 分身页面录像数据点：根据节点类型提取固定字段 */
+function buildCloneDataPoint(node: TopologyNode): Record<string, number | null | undefined> {
+  const data = node.data as Record<string, unknown>;
+  const nodeType = data.nodeType as string;
+  const sourceData = data.sourceData as SourceData | undefined;
+  const fanData = data.fanData as FanData | undefined;
+  const cpuData = data.cpuData as LoadData | undefined;
+  const memoryData = data.memoryData as MemoryData | undefined;
+  const diskData = data.diskData as DiskData | undefined;
+  const ioData = data.ioData as IOData | undefined;
+  const cardData = data.cardData as CardData | undefined;
+  const sensorData = data.sensorData as SensorData | undefined;
+
+  switch (nodeType) {
+    case 'ac':
+    case 'psu':
+    case 'vr':
+    case 'psip':
+      if (sourceData) {
+        return {
+          power: sourceData.outputPower,
+          temperature: sourceData.temperature,
+          voltage: sourceData.outputVoltage,
+          current: sourceData.current,
+        };
+      }
+      break;
+    case 'busbar':
+      if (sourceData) {
+        return {
+          power: sourceData.busbarPower,
+          voltage: sourceData.busbarVoltage,
+          current: sourceData.busbarCurrent,
+        };
+      }
+      break;
+    case 'fan':
+      if (fanData) {
+        return {
+          power: fanData.power,
+          temperature: fanData.temperature,
+          rpm: fanData.rpm,
+          speedPercent: fanData.speedPercent,
+        };
+      }
+      break;
+    case 'cpu':
+      if (cpuData) {
+        return { power: cpuData.power, temperature: cpuData.temperature };
+      }
+      break;
+    case 'memory':
+      if (memoryData) {
+        return { power: memoryData.power, temperature: memoryData.temperature };
+      }
+      break;
+    case 'disk':
+      if (diskData) {
+        return { power: diskData.power, temperature: diskData.temperature };
+      }
+      break;
+    case 'io':
+      if (ioData) {
+        return { power: ioData.power, temperature: ioData.temperature };
+      }
+      break;
+    case 'card':
+      if (cardData) {
+        return { power: cardData.power, temperature: cardData.temperature };
+      }
+      break;
+    case 'sensor':
+      if (sensorData) {
+        return { temperature: sensorData.temperature };
+      }
+      break;
+  }
+  return {};
+}
+
 interface CloneNodeDetailPanelProps {
   open: boolean;
   onClose: () => void;
@@ -50,17 +131,36 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
   const [fanSpeed, setFanSpeedLocal] = useState<number>(50);
   const [voltageValue, setVoltageValue] = useState<number>(1.0);
 
-  // 历史曲线录像功能
-  const {
-    isRecording,
-    historyData,
-    startRecording,
-    stopRecording,
-    clearHistory,
-    downloadCSV,
-    downloadJSON,
-    addDataPoint,
-  } = useHistoryRecorder({ maxDuration: 60, sampleInterval: 2000 });
+  // 历史曲线录像功能（按模块分别保存，互不干扰）
+  const activeNodeId = node?.id ?? null;
+  const activeRecording = useHistoryRecordStore((s) => (activeNodeId ? s.recordings[activeNodeId] : undefined));
+  const isRecording = activeRecording?.isRecording ?? false;
+  const historyData = useMemo(() => activeRecording?.data ?? [], [activeRecording]);
+
+  // 当前正在录像的所有节点 id（用于后台持续记录数据）
+  const recordingNodeIds = useHistoryRecordStore(
+    useShallow((s) => Object.values(s.recordings).filter((r) => r.isRecording).map((r) => r.nodeId))
+  );
+
+  const addDataPoint = useHistoryRecordStore((s) => s.addDataPoint);
+  const startRecordingAction = useHistoryRecordStore((s) => s.startRecording);
+  const stopRecordingAction = useHistoryRecordStore((s) => s.stopRecording);
+  const clearHistoryAction = useHistoryRecordStore((s) => s.clearHistory);
+
+  const handleStartRecording = useCallback(() => {
+    if (!node) return;
+    startRecordingAction(node.id, 60);
+  }, [node, startRecordingAction]);
+
+  const handleStopRecording = useCallback(() => {
+    if (!node) return;
+    stopRecordingAction(node.id);
+  }, [node, stopRecordingAction]);
+
+  const handleClearHistory = useCallback(() => {
+    if (!node) return;
+    clearHistoryAction(node.id);
+  }, [node, clearHistoryAction]);
 
   // 当节点变化时，同步初始值
   useEffect(() => {
@@ -74,109 +174,19 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
     }
   }, [node]);
 
-  // 当正在录像时，记录数据点
+  // 当正在录像时，为所有正在录像的模块记录数据点（后台录像持续获取最新数据）
   useEffect(() => {
-    if (!isRecording || !node?.data) return;
+    if (recordingNodeIds.length === 0) return;
 
-    const data = node.data as Record<string, unknown>;
-    const nodeType = data.nodeType as string;
-    const sourceData = data.sourceData as SourceData | undefined;
-    const fanData = data.fanData as FanData | undefined;
-    const cpuData = data.cpuData as LoadData | undefined;
-    const memoryData = data.memoryData as MemoryData | undefined;
-    const diskData = data.diskData as DiskData | undefined;
-    const ioData = data.ioData as IOData | undefined;
-    const cardData = data.cardData as CardData | undefined;
-    const sensorData = data.sensorData as SensorData | undefined;
-
-    let dataPoint: Parameters<typeof addDataPoint>[0] = {};
-
-    switch (nodeType) {
-      case 'ac':
-      case 'psu':
-      case 'vr':
-      case 'psip':
-        if (sourceData) {
-          dataPoint = {
-            power: sourceData.outputPower,
-            temperature: sourceData.temperature,
-            voltage: sourceData.outputVoltage,
-            current: sourceData.current,
-          };
-        }
-        break;
-      case 'busbar':
-        if (sourceData) {
-          dataPoint = {
-            power: sourceData.busbarPower,
-            voltage: sourceData.busbarVoltage,
-            current: sourceData.busbarCurrent,
-          };
-        }
-        break;
-      case 'fan':
-        if (fanData) {
-          dataPoint = {
-            power: fanData.power,
-            temperature: fanData.temperature,
-            rpm: fanData.rpm,
-            speedPercent: fanData.speedPercent,
-          };
-        }
-        break;
-      case 'cpu':
-        if (cpuData) {
-          dataPoint = {
-            power: cpuData.power,
-            temperature: cpuData.temperature,
-          };
-        }
-        break;
-      case 'memory':
-        if (memoryData) {
-          dataPoint = {
-            power: memoryData.power,
-            temperature: memoryData.temperature,
-          };
-        }
-        break;
-      case 'disk':
-        if (diskData) {
-          dataPoint = {
-            power: diskData.power,
-            temperature: diskData.temperature,
-          };
-        }
-        break;
-      case 'io':
-        if (ioData) {
-          dataPoint = {
-            power: ioData.power,
-            temperature: ioData.temperature,
-          };
-        }
-        break;
-      case 'card':
-        if (cardData) {
-          dataPoint = {
-            power: cardData.power,
-            temperature: cardData.temperature,
-          };
-        }
-        break;
-      case 'sensor':
-        if (sensorData) {
-          dataPoint = {
-            temperature: sensorData.temperature,
-          };
-        }
-        break;
-    }
-
-    if (Object.keys(dataPoint).length > 0) {
-      addDataPoint(dataPoint);
-    }
-  }, [isRecording, nodes, node?.id, addDataPoint]);
+    recordingNodeIds.forEach((recordedNodeId) => {
+      const targetNode = nodes.find((n) => n.id === recordedNodeId);
+      if (!targetNode) return;
+      const dataPoint = buildCloneDataPoint(targetNode);
+      if (Object.keys(dataPoint).length > 0) {
+        addDataPoint(recordedNodeId, dataPoint);
+      }
+    });
+  }, [nodes, recordingNodeIds, addDataPoint]);
 
   // 分身页面只更新本地状态，不发送后端命令
   const handleFanSpeedComplete = useCallback(async (value: number) => {
@@ -563,7 +573,7 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
                     type="primary"
                     size="small"
                     icon={<PlayCircleOutlined />}
-                    onClick={startRecording}
+                    onClick={handleStartRecording}
                   >
                     开始录像
                   </Button>
@@ -573,7 +583,7 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
                     danger
                     size="small"
                     icon={<PauseCircleOutlined />}
-                    onClick={stopRecording}
+                    onClick={handleStopRecording}
                   >
                     停止录像
                   </Button>
@@ -583,7 +593,7 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
                   <Button
                     size="small"
                     icon={<FileTextOutlined />}
-                    onClick={downloadCSV}
+                    onClick={() => downloadHistoryCSV(historyData)}
                     disabled={historyData.length === 0}
                   >
                     CSV
@@ -594,7 +604,7 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
                   <Button
                     size="small"
                     icon={<CodeOutlined />}
-                    onClick={downloadJSON}
+                    onClick={() => downloadHistoryJSON(historyData, { maxDuration: 60, sampleInterval: 2000 })}
                     disabled={historyData.length === 0}
                   >
                     JSON
@@ -606,7 +616,7 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
                     size="small"
                     danger
                     icon={<DeleteOutlined />}
-                    onClick={clearHistory}
+                    onClick={handleClearHistory}
                     disabled={historyData.length === 0}
                   />
                 </Tooltip>

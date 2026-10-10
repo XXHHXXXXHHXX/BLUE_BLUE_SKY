@@ -8,7 +8,8 @@ import {
 } from '../../services/bmcApi';
 import { useTopologyStore } from '../../stores/topologyStore';
 import { useMonitorStore } from '../../stores/monitorStore';
-import { useHistoryRecorder } from '../../hooks/useHistoryRecorder';
+import { useShallow } from 'zustand/react/shallow';
+import { useHistoryRecordStore, downloadHistoryCSV, downloadHistoryJSON } from '../../stores/historyRecordStore';
 import { useNodeFieldConfig } from '../topology/nodes/useNodeFieldConfig';
 import TrendChart from '../charts/TrendChart';
 import {
@@ -22,7 +23,7 @@ import {
   getNodeDisplayLabel,
 } from '../../utils/formatters';
 import type { SourceData, FanData, LoadData, MemoryData, DiskData, IOData, CardData, SensorData } from '../../types/power';
-import { DEFAULT_FIELD_THRESHOLDS } from '../../types/topology';
+import { DEFAULT_FIELD_THRESHOLDS, FIXED_FIELD_DEFS } from '../../types/topology';
 import type { TopologyNode } from '../../types/topology';
 import { getThresholdColorForField } from '../../utils/formatters';
 import { 
@@ -80,6 +81,18 @@ function getNodeNumericFieldValues(d: Record<string, unknown>): Record<string, n
   return result;
 }
 
+/** 获取节点按配置应显示的字段 key 列表（与 useNodeFieldConfig 的 orderedVisibleFieldKeys 逻辑一致） */
+function getNodeVisibleFieldKeys(data: Record<string, unknown>): string[] {
+  const nodeType = data.nodeType as string | undefined;
+  const apiConfig = data.apiConfig as { fieldMappings?: Array<{ fieldKey: string }> } | undefined;
+  const fieldMappings = apiConfig?.fieldMappings || [];
+  if (fieldMappings.length > 0) {
+    return fieldMappings.map((m) => m.fieldKey);
+  }
+  const fixedDefs = FIXED_FIELD_DEFS[nodeType || ''] || [];
+  return fixedDefs.map((d) => d.fieldKey);
+}
+
 interface NodeDetailPanelProps {
   open: boolean;
   onClose: () => void;
@@ -106,17 +119,36 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
   const nodeDataForConfig = (node?.data || {}) as Record<string, unknown>;
   const { orderedVisibleFieldKeys, getFieldLabel } = useNodeFieldConfig(nodeDataForConfig);
 
-  // 历史曲线录像功能
-  const {
-    isRecording,
-    historyData,
-    startRecording,
-    stopRecording,
-    clearHistory,
-    downloadCSV,
-    downloadJSON,
-    addDataPoint,
-  } = useHistoryRecorder({ maxDuration: 60, sampleInterval: 2000 });
+  // 历史曲线录像功能（按模块分别保存，互不干扰）
+  const activeNodeId = node?.id ?? null;
+  const activeRecording = useHistoryRecordStore((s) => (activeNodeId ? s.recordings[activeNodeId] : undefined));
+  const isRecording = activeRecording?.isRecording ?? false;
+  const historyData = useMemo(() => activeRecording?.data ?? [], [activeRecording]);
+
+  // 当前正在录像的所有节点 id（用于后台持续记录数据）
+  const recordingNodeIds = useHistoryRecordStore(
+    useShallow((s) => Object.values(s.recordings).filter((r) => r.isRecording).map((r) => r.nodeId))
+  );
+
+  const addDataPoint = useHistoryRecordStore((s) => s.addDataPoint);
+  const startRecordingAction = useHistoryRecordStore((s) => s.startRecording);
+  const stopRecordingAction = useHistoryRecordStore((s) => s.stopRecording);
+  const clearHistoryAction = useHistoryRecordStore((s) => s.clearHistory);
+
+  const handleStartRecording = useCallback(() => {
+    if (!node) return;
+    startRecordingAction(node.id, 60);
+  }, [node, startRecordingAction]);
+
+  const handleStopRecording = useCallback(() => {
+    if (!node) return;
+    stopRecordingAction(node.id);
+  }, [node, stopRecordingAction]);
+
+  const handleClearHistory = useCallback(() => {
+    if (!node) return;
+    clearHistoryAction(node.id);
+  }, [node, clearHistoryAction]);
 
   // 当节点变化时，同步初始值
   useEffect(() => {
@@ -130,26 +162,32 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
     }
   }, [node]);
 
-  // 当开启实时监控且正在录像时，记录数据点（只记录当前节点配置为显示的字段）
+  // 当开启实时监控且正在录像时，为所有正在录像的模块记录数据点
+  // 每个模块使用自身的字段配置，后台录像时同样持续获取最新数据
   useEffect(() => {
-    if (!isRecording || !isPolling || !node?.data) return;
+    if (!isPolling || recordingNodeIds.length === 0) return;
 
-    const data = node.data as Record<string, unknown>;
-    const nodeFieldValues = getNodeNumericFieldValues(data);
+    recordingNodeIds.forEach((recordedNodeId) => {
+      const targetNode = nodes.find((n) => n.id === recordedNodeId);
+      if (!targetNode?.data) return;
 
-    // 只记录配置为显示的字段，字段名保持与展示一致
-    const dataPoint: Parameters<typeof addDataPoint>[0] = {};
-    for (const key of orderedVisibleFieldKeys) {
-      if (Object.prototype.hasOwnProperty.call(nodeFieldValues, key)) {
-        dataPoint[key] = nodeFieldValues[key];
+      const data = targetNode.data as Record<string, unknown>;
+      const nodeFieldValues = getNodeNumericFieldValues(data);
+
+      // 只记录该节点配置为显示的字段，字段名保持与展示一致
+      const dataPoint: Parameters<typeof addDataPoint>[1] = {};
+      for (const key of getNodeVisibleFieldKeys(data)) {
+        if (Object.prototype.hasOwnProperty.call(nodeFieldValues, key)) {
+          dataPoint[key] = nodeFieldValues[key];
+        }
       }
-    }
 
-    if (Object.keys(dataPoint).length > 0) {
-      addDataPoint(dataPoint);
-    }
+      if (Object.keys(dataPoint).length > 0) {
+        addDataPoint(recordedNodeId, dataPoint);
+      }
+    });
   // 依赖项包含 nodes（从store订阅的实时数据），确保每次节点数据更新时都会记录
-  }, [isRecording, isPolling, nodes, node?.id, orderedVisibleFieldKeys, addDataPoint]);
+  }, [isPolling, nodes, recordingNodeIds, addDataPoint]);
 
   const handleFanSpeedComplete = useCallback(async (value: number) => {
     if (!node) return;
@@ -802,7 +840,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
                       type="primary"
                       size="small"
                       icon={<PlayCircleOutlined />}
-                      onClick={startRecording}
+                      onClick={handleStartRecording}
                       disabled={!isPolling}
                     >
                       开始录像
@@ -814,7 +852,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
                     danger
                     size="small"
                     icon={<PauseCircleOutlined />}
-                    onClick={stopRecording}
+                    onClick={handleStopRecording}
                   >
                     停止录像
                   </Button>
@@ -824,7 +862,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
                   <Button
                     size="small"
                     icon={<FileTextOutlined />}
-                    onClick={downloadCSV}
+                    onClick={() => downloadHistoryCSV(historyData)}
                     disabled={historyData.length === 0}
                   >
                     CSV
@@ -835,7 +873,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
                   <Button
                     size="small"
                     icon={<CodeOutlined />}
-                    onClick={downloadJSON}
+                    onClick={() => downloadHistoryJSON(historyData, { maxDuration: 60, sampleInterval: 2000 })}
                     disabled={historyData.length === 0}
                   >
                     JSON
@@ -847,7 +885,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
                     size="small"
                     danger
                     icon={<DeleteOutlined />}
-                    onClick={clearHistory}
+                    onClick={handleClearHistory}
                     disabled={historyData.length === 0}
                   />
                 </Tooltip>
