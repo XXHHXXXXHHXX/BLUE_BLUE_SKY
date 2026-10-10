@@ -2,10 +2,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { topologyStore, updateNodeData } from '../../lib/store';
 import type { SensorData } from '../../bmc/sensors/route';
-import type { TopologyNode, TopologyEdge, FieldMapping, BMCConfig } from '../../../../src/types/topology';
+import type { TopologyNode, FieldMapping, BMCConfig } from '../../../../src/types/topology';
 import { FIXED_FIELD_DEFS } from '../../../../src/types/topology';
 import type { CPUData, MemoryData, DiskData, FanData, IOData, CardData, SensorData as SensorNodeData, MgmtBoardData, SourceData } from '../../../../src/types/power';
 import { CPU_POWER_DOMAIN_FIELD_DEFS, buildCPUPowerDomains } from '../../../../src/types/power';
+import { calculateEdgeLosses } from '../../../../src/services/lossCalculation';
 
 /** 获取 BMC Sensor 数据（直接使用传入的配置） */
 async function fetchBMCSensorsWithConfig(bmcConfig: BMCConfig | null | undefined): Promise<{ sensors?: SensorData[]; error?: string; errorCode?: string }> {
@@ -374,174 +375,6 @@ function buildSourceData(existing: SourceData | undefined, mapped: Record<string
       ? (mapped.busbarPower !== null ? Number(mapped.busbarPower) : null)
       : existing?.busbarPower,
   };
-}
-
-/** 获取节点作为 source 时的输出功率（用于损耗计算）
- * 对于源节点返回 outputPower，对于负载节点返回 power
- */
-function getNodeSourcePower(node: TopologyNode): number | null {
-  const data = node.data as Record<string, unknown>;
-  const nodeType = data.nodeType as string;
-  
-  // 源类型节点（ac, psu, vr, psip, busbar）使用 sourceData
-  if (['ac', 'psu', 'vr', 'psip', 'busbar'].includes(nodeType)) {
-    const sourceData = data.sourceData as SourceData | undefined;
-    // AC 节点使用 inputPower 作为输出功率（供电给 PSU）
-    if (nodeType === 'ac') {
-      return sourceData?.inputPower ?? null;
-    }
-    // busbar 节点使用 busbarPower 作为唯一链路功率（双向计算）
-    if (nodeType === 'busbar') {
-      return sourceData?.busbarPower ?? null;
-    }
-    return sourceData?.outputPower ?? null;
-  }
-  
-  // 负载类型节点使用 power
-  if (['cpu', 'memory', 'fan', 'disk', 'io', 'card'].includes(nodeType)) {
-    const loadData = (data.cpuData || data.memoryData || data.fanData || data.diskData || data.ioData || data.cardData) as 
-      (CPUData | MemoryData | FanData | DiskData | IOData | CardData) | undefined;
-    return loadData?.power ?? null;
-  }
-
-  // 自定义模块从 displayMetrics 中读取 power
-  if (nodeType === 'custom') {
-    const displayMetrics = data.displayMetrics as Record<string, number | null> | undefined;
-    return displayMetrics?.power ?? null;
-  }
-  
-  // 其他类型（sensor, mgmtBoard, chassis）无功率数据
-  return null;
-}
-
-/** 获取节点作为 target 时的输入功率（用于损耗计算）
- * 对于源节点返回 inputPower，对于负载节点返回 power
- */
-function getNodeTargetPower(node: TopologyNode): number | null {
-  const data = node.data as Record<string, unknown>;
-  const nodeType = data.nodeType as string;
-  
-  // 源类型节点作为 target 时，使用 inputPower（接收到的功率）
-  if (['ac', 'psu', 'vr', 'psip', 'busbar'].includes(nodeType)) {
-    const sourceData = data.sourceData as SourceData | undefined;
-    // busbar 节点使用 busbarPower 作为唯一链路功率（双向计算）
-    if (nodeType === 'busbar') {
-      return sourceData?.busbarPower ?? null;
-    }
-    return sourceData?.inputPower ?? null;
-  }
-  
-  // 负载类型节点使用 power
-  if (['cpu', 'memory', 'fan', 'disk', 'io', 'card'].includes(nodeType)) {
-    const loadData = (data.cpuData || data.memoryData || data.fanData || data.diskData || data.ioData || data.cardData) as 
-      (CPUData | MemoryData | FanData | DiskData | IOData | CardData) | undefined;
-    return loadData?.power ?? null;
-  }
-
-  // 自定义模块从 displayMetrics 中读取 power
-  if (nodeType === 'custom') {
-    const displayMetrics = data.displayMetrics as Record<string, number | null> | undefined;
-    return displayMetrics?.power ?? null;
-  }
-  
-  // 其他类型（sensor, mgmtBoard, chassis）无功率数据
-  return null;
-}
-
-/** 计算边的损耗（基于真实功率）
- * 损耗 = 源节点输出功率 - 目标节点输入功率
- * 损耗百分比 = 损耗 / 源节点输出功率 * 100
- *
- * 链路损耗标注：连线后按以下规则计算
- *   - 对于源节点 PSU：输入功耗与上游节点作差（上游输出功率 - PSU输入功率）
- *   - 对于源节点 PSU：输出功耗与下游组件作差（PSU输出功率 - 下游输入功率）
- *   - 对于母线节点 busbar：母线功耗作为链路损耗的双向计算，上游和下游的损失
- *     都使用母线功耗作为唯一链路计算（上游损失 = 上游输出功率 - 母线功耗，
- *     下游损失 = 母线功耗 - 下游输入功率）
- *
- * 对于一对多的连接，按各子节点输入功率比例分配总损耗
- *
- * 注意：如果边的 _reversed 为 true，表示方向已翻转，需要交换 source/target 计算
- */
-function calculateEdgeLosses(nodes: TopologyNode[], edges: TopologyEdge[]): TopologyEdge[] {
-  // 创建节点功率映射表
-  const nodeSourcePowerMap = new Map<string, number | null>();
-  const nodeTargetPowerMap = new Map<string, number | null>();
-  nodes.forEach(node => {
-    nodeSourcePowerMap.set(node.id, getNodeSourcePower(node));
-    nodeTargetPowerMap.set(node.id, getNodeTargetPower(node));
-  });
-  
-  // 按 actualSource 分组，用于处理一对多情况
-  const sourceToEdges = new Map<string, TopologyEdge[]>();
-  edges.forEach(edge => {
-    const isReversed = (edge.data as { _reversed?: boolean } | undefined)?._reversed === true;
-    const actualSource = isReversed ? edge.target : edge.source;
-    if (!sourceToEdges.has(actualSource)) {
-      sourceToEdges.set(actualSource, []);
-    }
-    sourceToEdges.get(actualSource)!.push(edge);
-  });
-  
-  return edges.map(edge => {
-    // 检查是否反转
-    const isReversed = (edge.data as { _reversed?: boolean } | undefined)?._reversed === true;
-    
-    // 如果反转，交换 source 和 target 进行计算
-    const actualSource = isReversed ? edge.target : edge.source;
-    const actualTarget = isReversed ? edge.source : edge.target;
-    
-    const sourcePower = nodeSourcePowerMap.get(actualSource);
-    const targetPower = nodeTargetPowerMap.get(actualTarget);
-    
-    // 如果无法获取功率数据，保持原值
-    if (sourcePower === null || sourcePower === undefined || Number.isNaN(sourcePower) ||
-        targetPower === null || targetPower === undefined || Number.isNaN(targetPower)) {
-      return edge;
-    }
-    
-    const siblings = sourceToEdges.get(actualSource) || [];
-    let loss: number;
-    
-    if (siblings.length <= 1) {
-      // 一对一连接：直接相减
-      loss = Math.max(0, sourcePower - targetPower);
-    } else {
-      // 一对多连接：按目标功率比例分配总损耗
-      const allTargetPowers = siblings
-        .map(e => {
-          const rev = (e.data as { _reversed?: boolean } | undefined)?._reversed === true;
-          const t = rev ? e.source : e.target;
-          return nodeTargetPowerMap.get(t);
-        })
-        .filter((p): p is number => p !== null && p !== undefined && !Number.isNaN(p));
-      
-      const totalTargetPower = allTargetPowers.reduce((sum, p) => sum + p, 0);
-      
-      if (totalTargetPower <= 0 || sourcePower <= totalTargetPower) {
-        // 测量误差或数据问题导致总目标功率不小于源功率，认为总损耗为0
-        loss = 0;
-      } else {
-        const totalLoss = sourcePower - totalTargetPower;
-        // 按目标功率比例分配
-        loss = totalLoss * (targetPower / totalTargetPower);
-      }
-    }
-    
-    const lossPercent = sourcePower > 0 ? (loss / sourcePower) * 100 : 0;
-    
-    // 保留原有的其他字段（animated, label, customData 等）
-    const prevData = edge.data || { loss: 0, lossPercent: 0 };
-    
-    return {
-      ...edge,
-      data: {
-        ...prevData,
-        loss: Number(loss.toFixed(2)),
-        lossPercent: Number(lossPercent.toFixed(2)),
-      },
-    };
-  });
 }
 
 // POST /api/data/poll - 从 body 接收 topologyId 和 bmcConfig

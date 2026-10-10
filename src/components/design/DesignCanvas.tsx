@@ -22,6 +22,7 @@ import ModulePalette from './ModulePalette';
 import IconPicker from './IconPicker';
 import NodeEditPanel from './NodeEditPanel';
 import { useDesignTopologyStore } from '../../stores/designTopologyStore';
+import { calculateEdgeLosses } from '../../services/lossCalculation';
 import type { HardwareNodeType, TopologyNode } from '../../types/topology';
 
 const edgeTypes = { powerEdge: PowerEdge };
@@ -80,9 +81,11 @@ const DesignCanvasInner: React.FC = () => {
   }, [edges, selectedNodeIds]);
 
   // 注入 design mode + 高亮标记到 edge data
+  // 同时用共享的链路损耗计算逻辑基于节点当前功率值重新计算 loss/lossPercent，
+  // 保证设计页面上连线数值与后端计算规则一致（如输出600W、输入300W → 损耗300W）
   const designEdges = useMemo(
     () =>
-      edges.map((e) => ({
+      calculateEdgeLosses(nodes, edges).map((e) => ({
         ...e,
         data: {
           ...e.data!,
@@ -90,7 +93,7 @@ const DesignCanvasInner: React.FC = () => {
           _highlighted: highlightedEdgeIds.has(e.id),
         },
       })) as typeof edges,
-    [edges, highlightedEdgeIds],
+    [edges, nodes, highlightedEdgeIds],
   );
 
   // 注入高亮标记到节点 data
@@ -100,6 +103,7 @@ const DesignCanvasInner: React.FC = () => {
         ...n,
         data: {
           ...n.data,
+          _mode: 'design' as const,
           _highlighted: highlightedNodeIds.has(n.id),
         },
       })),

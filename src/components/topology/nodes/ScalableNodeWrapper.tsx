@@ -3,6 +3,7 @@
 import React, { useCallback, useRef } from 'react';
 import { type NodeProps, Handle, Position } from '@xyflow/react';
 import { useTopologyStore } from '../../../stores/topologyStore';
+import { getNodeLossFieldAnnotation } from '../../../services/lossCalculation';
 
 /**
  * 四侧连接点组件：为节点提供上/下/左/右各方向的 source 和 target Handle。
@@ -26,6 +27,49 @@ const ScalableHandles: React.FC = () => (
   </>
 );
 
+/** 链路损耗计算字段标注徽标（仅设计模式显示） */
+const LossFieldBadge: React.FC<{ data: Record<string, unknown> }> = ({ data }) => {
+  if (data?._mode !== 'design') return null;
+  const annotation = getNodeLossFieldAnnotation(data?.nodeType as string | undefined);
+  if (!annotation?.source && !annotation?.target) return null;
+
+  let text: string;
+  let detail: string;
+  if (annotation.source && annotation.target) {
+    if (annotation.source.key === annotation.target.key) {
+      text = `链路损耗计算: ${annotation.source.key}`;
+      detail = `链路损耗计算字段：${annotation.source.label}（${annotation.source.key}）`;
+    } else {
+      text = `链路损耗: ${annotation.source.key} / ${annotation.target.key}`;
+      detail = `链路损耗计算：上游(源)用 ${annotation.source.label}(${annotation.source.key})，下游(目标)用 ${annotation.target.label}(${annotation.target.key})`;
+    }
+  } else {
+    const def = annotation.source ?? annotation.target!;
+    text = `链路损耗计算: ${def.key}`;
+    detail = `链路损耗计算字段：${def.label}（${def.key}）`;
+  }
+
+  return (
+    <div
+      className="node-loss-field-badge nodrag nopan"
+      title={detail}
+      style={{
+        marginTop: 6,
+        padding: '2px 6px',
+        fontSize: 10,
+        lineHeight: 1.4,
+        background: '#fff7e6',
+        border: '1px solid #ffd591',
+        borderRadius: 4,
+        color: '#d46b08',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {text}
+    </div>
+  );
+};
+
 /**
  * HOC: 给节点添加缩放功能和关联高亮
  * - transform: scale() 等比例缩放节点内容
@@ -39,7 +83,9 @@ export function withScalable(Component: React.FC<NodeProps>): React.FC<NodeProps
   const WrappedComponent: React.FC<NodeProps> = (props) => {
     const scale = useTopologyStore((s) => s.nodeScales[props.id] ?? 1);
     const setNodeScale = useTopologyStore((s) => s.setNodeScale);
-    const highlighted = (props.data as Record<string, unknown>)?._highlighted === true;
+    const data = props.data as Record<string, unknown>;
+    const highlighted = data?._highlighted === true;
+    const isDesignMode = data?._mode === 'design';
 
     const dragStartRef = useRef<{ startX: number; startY: number; startScale: number } | null>(null);
 
@@ -116,6 +162,8 @@ export function withScalable(Component: React.FC<NodeProps>): React.FC<NodeProps
         >
           {/* 渲染节点内容 - Handle 由 HOC 统一管理 */}
           <Component {...props} />
+          {/* 设计模式下标注链路损耗计算字段 */}
+          {isDesignMode && <LossFieldBadge data={data} />}
         </div>
         
         {/* 缩放手柄 */}

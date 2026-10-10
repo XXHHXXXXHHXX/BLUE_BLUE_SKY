@@ -17,6 +17,7 @@ import {
 } from '@ant-design/icons';
 import { useDesignTopologyStore } from '../../stores/designTopologyStore';
 import { defaultFieldMappings, defaultPowerDomainFieldMappings } from '../../services/mockData';
+import { getNodeLossFieldAnnotation } from '../../services/lossCalculation';
 import { CPU_POWER_DOMAIN_FIELD_DEFS } from '../../types/power';
 import type { TopologyNode, HardwareNodeType, ApiConfig, FieldMapping, FieldThreshold } from '../../types/topology';
 import { FIXED_FIELD_DEFS, DEFAULT_FIELD_THRESHOLDS } from '../../types/topology';
@@ -545,9 +546,46 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     return def?.label || fieldKey;
   };
 
+  // 判断字段是否为该模块用于链路损耗计算的字段，返回其角色标注
+  const getFieldLossRole = (fieldKey: string): { role: 'source' | 'target' | 'both'; label: string } | null => {
+    if (!nodeType) return null;
+    const annotation = getNodeLossFieldAnnotation(nodeType);
+    if (!annotation) return null;
+    if (annotation.source && annotation.target && annotation.source.key === annotation.target.key) {
+      return annotation.source.key === fieldKey ? { role: 'both', label: '链路损耗计算字段' } : null;
+    }
+    if (annotation.source?.key === fieldKey) return { role: 'source', label: '链路损耗·上游输出' };
+    if (annotation.target?.key === fieldKey) return { role: 'target', label: '链路损耗·下游输入' };
+    return null;
+  };
+
+  // 链路损耗计算字段说明（用于字段映射页顶部提示）
+  const lossAnnotation = nodeType ? getNodeLossFieldAnnotation(nodeType) : null;
+
   const renderApiTab = () => {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        {/* 链路损耗计算字段说明 */}
+        {lossAnnotation && (
+          <div style={{ padding: 12, background: '#fff7e6', borderRadius: 6, border: '1px solid #ffd591' }}>
+            <Text strong style={{ fontSize: 13, color: '#d46b08', display: 'block', marginBottom: 4 }}>
+              <InfoCircleOutlined /> 链路损耗计算字段
+            </Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              连线损耗 = 上游模块输出功率 − 下游模块输入功率。本模块参与计算的字段：
+              {lossAnnotation.source && lossAnnotation.target
+                ? lossAnnotation.source.key === lossAnnotation.target.key
+                  ? ` ${lossAnnotation.source.label}（${lossAnnotation.source.key}）`
+                  : ` 上游(源)用 ${lossAnnotation.source.label}（${lossAnnotation.source.key}），下游(目标)用 ${lossAnnotation.target.label}（${lossAnnotation.target.key}）`
+                : lossAnnotation.source
+                  ? ` ${lossAnnotation.source.label}（${lossAnnotation.source.key}）`
+                  : lossAnnotation.target
+                    ? ` ${lossAnnotation.target.label}（${lossAnnotation.target.key}）`
+                    : ' 无'}
+            </Text>
+          </div>
+        )}
 
         {/* 字段映射配置 */}
         <div>
@@ -581,7 +619,9 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                 暂无字段映射，点击"恢复默认"开始使用
               </div>
             )}
-            {fieldMappings.map((mapping, index) => (
+            {fieldMappings.map((mapping, index) => {
+              const lossRole = getFieldLossRole(mapping.fieldKey);
+              return (
               <div key={index} style={{ 
                 display: 'flex', 
                 gap: 8, 
@@ -589,7 +629,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                 padding: 12,
                 background: '#f6f8fa',
                 borderRadius: 6,
-                border: '1px solid #e8e8e8',
+                border: lossRole ? `1px solid ${lossRole.role === 'source' ? '#91caff' : lossRole.role === 'target' ? '#d3adf7' : '#ffe58f'}` : '1px solid #e8e8e8',
               }}>
                 <div style={{ flex: '0 0 120px' }}>
                   <Text style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#595959' }}>字段名</Text>
@@ -603,6 +643,14 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                     }}
                     style={{ color: '#000', fontWeight: 500 }}
                   />
+                  {lossRole && (
+                    <Tag
+                      color={lossRole.role === 'source' ? 'blue' : lossRole.role === 'target' ? 'purple' : 'gold'}
+                      style={{ marginTop: 4, fontSize: 10 }}
+                    >
+                      {lossRole.label}
+                    </Tag>
+                  )}
                 </div>
                 <div style={{ flex: 1 }}>
                   <Text style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>BMC Sensor 名称</Text>
@@ -638,7 +686,8 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                   style={{ marginTop: 20 }}
                 />
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* 添加固定字段 */}
