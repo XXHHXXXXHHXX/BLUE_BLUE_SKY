@@ -62,6 +62,28 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+/** 给 Promise 添加超时，超时后 reject，避免 SSH 连接/命令无限挂起 */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label}超时（超过 ${Math.round(timeoutMs / 1000)} 秒）`));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+/** 单轮主测试脚本的最大执行时长（秒）。超过后判定本轮卡死，终止远程进程并中止整个任务，避免静默挂起 */
+const MAIN_SCRIPT_TIMEOUT_SECONDS = 3600;
+
 /** 解析命令输出中的数字 */
 const parseNumericOutput = (stdout: string): { value: number; raw: string } => {
   const raw = stdout.trim().split('\n')[0] || '';
@@ -203,8 +225,8 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
 
   const cleanupMonitors = () => {
     for (const state of monitorStates.values()) {
-      clearInterval(state.intervalId);
-      state.ssh.dispose();
+      try { clearInterval(state.intervalId); } catch { /* ignore */ }
+      try { state.ssh.dispose(); } catch { /* ignore */ }
     }
     monitorStates.clear();
   };
@@ -239,21 +261,21 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
     logMonitorSsh = new NodeSSH();
     try {
       if (logConfig.target === 'host') {
-        await logMonitorSsh.connect({
+        await withTimeout(logMonitorSsh.connect({
           host,
           port: port || 22,
           username,
           password,
           readyTimeout: 30000,
-        });
+        }), 45000, '日志监控 SSH 连接');
       } else if (logConfig.target === 'bmc' && logConfig.bmcConfig) {
-        await logMonitorSsh.connect({
+        await withTimeout(logMonitorSsh.connect({
           host: logConfig.bmcConfig.host,
           port: logConfig.bmcConfig.port || 22,
           username: logConfig.bmcConfig.username,
           password: logConfig.bmcConfig.password,
           readyTimeout: 30000,
-        });
+        }), 45000, '日志监控 SSH 连接');
       } else {
         logMonitorSsh.dispose();
         logMonitorSsh = null;
@@ -262,6 +284,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       addJobLog(jobId, 'warning', `日志监控 SSH 连接失败: ${msg}`);
+      try { logMonitorSsh.dispose(); } catch { /* ignore */ }
       logMonitorSsh = null;
       return;
     }
@@ -279,7 +302,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
 
     const runLogCommand = async () => {
       try {
-        const result = await logMonitorSsh!.execCommand(logConfig.command);
+        const result = await withTimeout(logMonitorSsh!.execCommand(logConfig.command), 30000, '日志监控采样');
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
         const filename = `${timestamp}.log`;
         const content = (result.stdout || '') + (result.stderr ? `\n[stderr]\n${result.stderr}` : '');
@@ -385,13 +408,13 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
 
     heartbeatSsh = new NodeSSH();
     try {
-      await heartbeatSsh.connect({
+      await withTimeout(heartbeatSsh.connect({
         host,
         port: port || 22,
         username,
         password,
         readyTimeout: 10000,
-      });
+      }), 20000, '心跳检测 SSH 连接');
     } catch (err) {
       addJobLog(jobId, 'error', `心跳检测 SSH 连接失败: ${err instanceof Error ? err.message : String(err)}`);
       return;
@@ -404,7 +427,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
         return;
       }
       try {
-        const result = await heartbeatSsh!.execCommand('echo blue_sky_heartbeat');
+        const result = await withTimeout(heartbeatSsh!.execCommand('echo blue_sky_heartbeat'), 15000, '心跳检测');
         if (result.code === 0 && result.stdout.trim() === 'blue_sky_heartbeat') {
           heartbeatFailureCount = 0;
         } else {
@@ -460,17 +483,17 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
         try {
           addJobLog(jobId, 'info', '正在连接远程主机终止进程...');
           const killSsh = new NodeSSH();
-          await killSsh.connect({
+          await withTimeout(killSsh.connect({
             host,
             port: port || 22,
             username,
             password,
             readyTimeout: 10000,
-          });
+          }), 20000, '终止进程 SSH 连接');
 
           addJobLog(jobId, 'info', '正在查找并终止 run.sh 进程...');
           const killScript = `pkill -9 -f "run.sh"; sleep 1; pkill -9 -P $(pgrep -f "run.sh" 2>/dev/null || echo ""); echo "run.sh and children killed"`;
-          const killResult = await killSsh.execCommand(killScript);
+          const killResult = await withTimeout(killSsh.execCommand(killScript), 30000, '终止进程');
           if (killResult.stdout) {
             killResult.stdout.split('\n').forEach(line => {
               if (line.trim()) addJobLog(jobId, 'info', `[终止] ${line}`);
@@ -485,11 +508,11 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
           addJobLog(jobId, 'info', '正在执行 stop.sh 清理脚本...');
           const targetDir = knownScriptDir || '/tmp/blue_sky_power_test_0';
           const stopShCheck = `test -f "${targetDir}/stop.sh" && echo "found" || echo "not_found"`;
-          const checkResult = await killSsh.execCommand(stopShCheck);
+          const checkResult = await withTimeout(killSsh.execCommand(stopShCheck), 15000, 'stop.sh 检查');
           if (checkResult.stdout.trim() === 'found') {
             addJobLog(jobId, 'info', `执行 stop.sh: ${targetDir}/stop.sh`);
             const stopScript = `chmod +x "${targetDir}/stop.sh" && cd "${targetDir}" && ./stop.sh`;
-            const stopResult = await killSsh.execCommand(stopScript);
+            const stopResult = await withTimeout(killSsh.execCommand(stopScript), 30000, 'stop.sh 执行');
             if (stopResult.stdout) {
               stopResult.stdout.split('\n').forEach(line => {
                 if (line.trim()) addJobLog(jobId, 'info', `[stop.sh] ${line}`);
@@ -564,7 +587,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
     let remotePath = stage.remotePath;
     if (!remotePath) {
       addJobLog(jobId, 'info', '查找测试包...');
-      const findDirResult = await ssh.execCommand(`ls -td /tmp/blue_sky_power_test_* | head -1`);
+      const findDirResult = await withTimeout(ssh.execCommand(`ls -td /tmp/blue_sky_power_test_* | head -1`), 30000, '查找测试包');
 
       if (findDirResult.code !== 0 || !findDirResult.stdout.trim()) {
         addJobLog(jobId, 'error', '未找到已部署的测试包，请先部署');
@@ -576,7 +599,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
     addJobLog(jobId, 'info', `找到测试包: ${remotePath}`);
 
     // 查找 run.sh 路径
-    const findResult = await ssh.execCommand(`find ${remotePath} -name "run.sh" -type f | head -1`);
+    const findResult = await withTimeout(ssh.execCommand(`find ${remotePath} -name "run.sh" -type f | head -1`), 30000, '查找 run.sh');
     const runShPath = findResult.stdout.trim();
 
     if (!runShPath) {
@@ -620,21 +643,21 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
         const adjSsh = new NodeSSH();
         try {
           if (adjCmd.target === 'host') {
-            await adjSsh.connect({
+            await withTimeout(adjSsh.connect({
               host,
               port: port || 22,
               username,
               password,
               readyTimeout: 30000,
-            });
+            }), 45000, `调整命令 [${adjCmd.name}] SSH 连接`);
           } else if (adjCmd.target === 'bmc' && adjCmd.bmcConfig) {
-            await adjSsh.connect({
+            await withTimeout(adjSsh.connect({
               host: adjCmd.bmcConfig.host,
               port: adjCmd.bmcConfig.port || 22,
               username: adjCmd.bmcConfig.username,
               password: adjCmd.bmcConfig.password,
               readyTimeout: 30000,
-            });
+            }), 45000, `调整命令 [${adjCmd.name}] SSH 连接`);
           } else {
             addJobLog(jobId, 'info', `调整命令 [${adjCmd.name}] 配置不完整，跳过`);
             continue;
@@ -648,7 +671,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
 
           addJobLog(jobId, 'info', `[${adjCmd.name}] 命令: ${replacedCommand.substring(0, 100)}...`);
 
-          const adjResult = await adjSsh.execCommand(replacedCommand);
+          const adjResult = await withTimeout(adjSsh.execCommand(replacedCommand), 60000, `调整命令 [${adjCmd.name}] 执行`);
 
           if (isAborted()) {
             addJobLog(jobId, 'info', '测试已中止');
@@ -683,28 +706,32 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
 
       // ========== 启动监控命令 ==========
       const activeMonitors = (monitorCommands || []).filter((c) => c.enabled);
-      monitorStates.clear();
+      // 清理上一轮可能残留的监控连接（防止连接数累积导致新建连接挂起）
+      cleanupMonitors();
 
       for (const cmd of activeMonitors) {
+        let monitorSsh: NodeSSH | null = null;
         try {
-          const monitorSsh = new NodeSSH();
+          monitorSsh = new NodeSSH();
           if (cmd.target === 'host') {
-            await monitorSsh.connect({
+            await withTimeout(monitorSsh.connect({
               host,
               port: port || 22,
               username,
               password,
               readyTimeout: 30000,
-            });
+            }), 45000, `监控 [${cmd.name}] SSH 连接`);
           } else if (cmd.target === 'bmc' && cmd.bmcConfig) {
-            await monitorSsh.connect({
+            await withTimeout(monitorSsh.connect({
               host: cmd.bmcConfig.host,
               port: cmd.bmcConfig.port || 22,
               username: cmd.bmcConfig.username,
               password: cmd.bmcConfig.password,
               readyTimeout: 30000,
-            });
+            }), 45000, `监控 [${cmd.name}] SSH 连接`);
           } else {
+            monitorSsh.dispose();
+            monitorSsh = null;
             continue;
           }
 
@@ -718,7 +745,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
           } = {
             dataPoints: [],
             intervalId: null as unknown as ReturnType<typeof setInterval>,
-            ssh: monitorSsh,
+            ssh: monitorSsh!,
           };
 
           if (isListMode) {
@@ -727,7 +754,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
 
           const runMonitor = async () => {
             try {
-              const result = await monitorSsh.execCommand(cmd.command);
+              const result = await withTimeout(monitorSsh!.execCommand(cmd.command), 30000, `监控 [${cmd.name}] 采样`);
               const timestamp = new Date().toISOString();
 
               if (isListMode && state.columnDataPoints) {
@@ -767,6 +794,10 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
         } catch (monitorErr) {
           const errMsg = monitorErr instanceof Error ? monitorErr.message : String(monitorErr);
           addJobLog(jobId, 'info', `监控命令 [${cmd.name}] 启动失败: ${errMsg}`);
+          if (monitorSsh) {
+            try { monitorSsh.dispose(); } catch { /* ignore */ }
+            monitorSsh = null;
+          }
         }
       }
 
@@ -794,6 +825,40 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
         addJobLog(jobId, 'info', '测试已中止');
         return { success: false, results: stageResults, errorMessage: '测试已中止' };
       }
+
+      // 主脚本超时保护：超过 MAIN_SCRIPT_TIMEOUT_SECONDS 判定本轮卡死，
+      // 通过独立 SSH 连接终止远程 run.sh 进程，避免远程进程残留继续占用资源
+      let scriptTimeoutId: ReturnType<typeof setTimeout> | null = null;
+      const scriptTimeoutPromise = new Promise<never>((_, reject) => {
+        scriptTimeoutId = setTimeout(() => {
+          addJobLog(jobId, 'error', `主测试脚本执行超时（超过 ${MAIN_SCRIPT_TIMEOUT_SECONDS} 秒），正在终止远程进程...`);
+          try { ssh.dispose(); } catch { /* ignore */ }
+          (async () => {
+            try {
+              const killSsh = new NodeSSH();
+              await withTimeout(killSsh.connect({
+                host,
+                port: port || 22,
+                username,
+                password,
+                readyTimeout: 10000,
+              }), 20000, '超时终止 SSH 连接');
+              const killScript = `pkill -9 -f "run.sh"; sleep 1; pkill -9 -P $(pgrep -f "run.sh" 2>/dev/null || echo ""); echo "run.sh and children killed"`;
+              await withTimeout(killSsh.execCommand(killScript), 30000, '超时终止进程');
+              const stopShPath = `${scriptDir}/stop.sh`;
+              const checkResult = await withTimeout(killSsh.execCommand(`test -f "${stopShPath}" && echo "exists" || echo "not_found"`), 15000, 'stop.sh 检查');
+              if (checkResult.stdout.trim() === 'exists') {
+                await withTimeout(killSsh.execCommand(`chmod +x "${stopShPath}" && cd "${scriptDir}" && ./stop.sh`), 30000, 'stop.sh 执行');
+              }
+              killSsh.dispose();
+              addJobLog(jobId, 'info', '远程进程已终止');
+            } catch (err) {
+              addJobLog(jobId, 'warning', `超时终止远程进程失败: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          })();
+          reject(new Error(`主测试脚本执行超时（超过 ${MAIN_SCRIPT_TIMEOUT_SECONDS} 秒），已终止本轮`));
+        }, MAIN_SCRIPT_TIMEOUT_SECONDS * 1000);
+      });
 
       const result = await Promise.race([
         ssh.exec(
@@ -832,7 +897,13 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
           }
         ),
         abortPromise,
-      ]);
+        scriptTimeoutPromise,
+      ]).finally(() => {
+        if (scriptTimeoutId) {
+          clearTimeout(scriptTimeoutId);
+          scriptTimeoutId = null;
+        }
+      });
 
       const response = result as unknown as { code: number | null; stdout: string; stderr: string };
       const exitCode = response.code ?? 0;
@@ -846,8 +917,8 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       }> = {};
 
       for (const [cmdId, state] of monitorStates) {
-        clearInterval(state.intervalId);
-        state.ssh.dispose();
+        try { clearInterval(state.intervalId); } catch { /* ignore */ }
+        try { state.ssh.dispose(); } catch { /* ignore */ }
         const cmd = activeMonitors.find((c) => c.id === cmdId);
         if (!cmd) continue;
 
@@ -965,10 +1036,10 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       // 迭代完成后执行 stop.sh 清理（如存在）
       try {
         const stopShPath = `${scriptDir}/stop.sh`;
-        const checkResult = await ssh.execCommand(`test -f "${stopShPath}" && echo "exists" || echo "not_found"`);
+        const checkResult = await withTimeout(ssh.execCommand(`test -f "${stopShPath}" && echo "exists" || echo "not_found"`), 30000, 'stop.sh 检查');
         if (checkResult.stdout.trim() === 'exists') {
           addJobLog(jobId, 'info', `执行 stop.sh 清理脚本...`);
-          const stopResult = await ssh.execCommand(`chmod +x "${stopShPath}" && cd "${scriptDir}" && ./stop.sh`);
+          const stopResult = await withTimeout(ssh.execCommand(`chmod +x "${stopShPath}" && cd "${scriptDir}" && ./stop.sh`), 60000, 'stop.sh 执行');
           if (stopResult.stdout) {
             stopResult.stdout.split('\n').forEach(line => {
               if (line.trim()) addJobLog(jobId, 'info', `[stop.sh] ${line}`);
@@ -1004,13 +1075,13 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
 
     // 连接 SSH
     addJobLog(jobId, 'info', `正在连接 ${host}:${port || 22}...`);
-    await ssh.connect({
+    await withTimeout(ssh.connect({
       host,
       port: port || 22,
       username,
       password,
       readyTimeout: 30000,
-    });
+    }), 45000, 'SSH 连接');
     addJobLog(jobId, 'info', 'SSH连接成功');
 
     let finalErrorMessage: string | undefined;

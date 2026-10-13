@@ -32,3 +32,9 @@ tsconfig.tsbuildinfo
 
 # Temporary export files
 .data/exports/
+
+# codegraph index cache
+.codegraph/
+
+# CodeAgent local config
+.cac/
