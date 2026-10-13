@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "scripts": {
     "dev": "NODE_OPTIONS='--max-old-space-size=4096' next dev -p 5173",
-    "build": "next build",
-    "start": "NODE_OPTIONS='--max-old-space-size=4096' next start",
+    "build": "NODE_OPTIONS='--max-old-space-size=40960' next build",
+    "start": "NODE_OPTIONS='--max-old-space-size=40960' next start",
     "lint": "next lint"
   },
   "dependencies": {
