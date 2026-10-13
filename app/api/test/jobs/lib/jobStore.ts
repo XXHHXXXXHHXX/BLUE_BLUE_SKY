@@ -446,7 +446,9 @@ export function getMonitorDataPoints(
   if (stageId) {
     const stageResults = job.stageResults?.[stageId];
     if (stageResults) {
-      result = stageResults.results.find((r) => r.iteration === iteration);
+      // 优先查阶段结果；阶段未结束（任务运行中）时阶段结果为空，
+      // 回退到实时更新的 job.results，保证每轮完成后立即可查看采样详情
+      result = stageResults.results.find((r) => r.iteration === iteration) || result;
     }
   }
   if (!result) return undefined;
