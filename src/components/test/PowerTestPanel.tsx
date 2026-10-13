@@ -71,6 +71,7 @@ import { useTestIterationConfigStore } from '../../stores/testIterationConfigSto
 import { useBMCSessionStore } from '../../stores/bmcSessionStore';
 import { useTestDraftStore } from '../../stores/testDraftStore';
 import { useTestJobStore, type Job, type PipelineStage as ServerPipelineStage } from '../../stores/testJobStore';
+import { useTestPipelineTemplateStore, type PipelineStageTemplateData } from '../../stores/testPipelineTemplateStore';
 import TestPackageLibrary from './TestPackageLibrary';
 import TestReportManager from './TestReportManager';
 import TestDraftManager from './TestDraftManager';
@@ -135,6 +136,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const { addDraft } = useTestDraftStore();
   const { startJob, abortJob } = useTestJobStore();
   const { configs: savedConfigs, fetchConfigs, addConfig, removeConfig } = useTestIterationConfigStore();
+  const { templates: pipelineTemplates, isLoading: isLoadingTemplates, fetchTemplates, addTemplate, removeTemplate } = useTestPipelineTemplateStore();
   const { sessions: bmcSessions } = useBMCSessionStore();
 
   const [fileList, setFileList] = useState<UploadFile[]>([]);
@@ -157,6 +159,9 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const [saveConfigForm] = Form.useForm();
   const [isSaveConfigModalOpen, setIsSaveConfigModalOpen] = useState(false);
   const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
+  const [savePipelineTemplateForm] = Form.useForm();
+  const [isSavePipelineTemplateModalOpen, setIsSavePipelineTemplateModalOpen] = useState(false);
+  const [selectedPipelineTemplateId, setSelectedPipelineTemplateId] = useState<string | null>(null);
   const [isDraftManagerOpen, setIsDraftManagerOpen] = useState(false);
   const [monitorDetailModal, setMonitorDetailModal] = useState<{
     open: boolean;
@@ -200,6 +205,11 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   useEffect(() => {
     fetchConfigs('iteration');
   }, [fetchConfigs]);
+
+  // 加载流水线模板列表
+  useEffect(() => {
+    fetchTemplates();
+  }, [fetchTemplates]);
 
   // 预加载用例包库数据，避免页面刷新后下拉列表为空
   useEffect(() => {
@@ -261,6 +271,8 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     setEditingStageMonitor(null);
     setIsSaveConfigModalOpen(false);
     setSelectedConfigId(null);
+    setIsSavePipelineTemplateModalOpen(false);
+    setSelectedPipelineTemplateId(null);
     setIsDraftManagerOpen(false);
     setMonitorDetailModal(null);
     setActiveJobId(null);
@@ -273,7 +285,8 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     prevIsRunningRef.current = false;
     saveReportForm.resetFields();
     saveConfigForm.resetFields();
-  }, [tab.id, saveReportForm, saveConfigForm]);
+    savePipelineTemplateForm.resetFields();
+  }, [tab.id, saveReportForm, saveConfigForm, savePipelineTemplateForm]);
 
   // 保持 activeJobIdRef 与 activeJobId 同步，避免事件回调闭包捕获过期值
   useEffect(() => {
@@ -1304,6 +1317,83 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     }
   };
 
+  // 序列化流水线阶段（去掉 File 等运行时对象，保留可复用配置）
+  const serializePipelineStages = (): PipelineStageTemplateData[] => {
+    return (tab.pipelineStages || []).map((stage) => ({
+      id: `stage-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: stage.name,
+      order: stage.order,
+      packageSource: stage.packageSource,
+      packageLibraryId: stage.packageLibraryId,
+      packageFileName: stage.packageFileName,
+      configTemplateId: stage.configTemplateId ?? null,
+      monitorCommands: stage.monitorCommands,
+      envVars: stage.envVars,
+      requiredEnvVarValues: stage.requiredEnvVarValues,
+    }));
+  };
+
+  // 加载流水线模板到当前标签页
+  const handleLoadPipelineTemplate = (templateId: string) => {
+    const template = pipelineTemplates.find((t) => t.id === templateId);
+    if (!template) return;
+    if (template.stages.length === 0) {
+      message.error('模板中没有流水线阶段');
+      return;
+    }
+    const stages: PipelineStage[] = template.stages.map((s) => ({
+      id: s.id,
+      name: s.name,
+      order: s.order,
+      packageSource: s.packageSource,
+      packageLibraryId: s.packageLibraryId,
+      packageFileName: s.packageFileName,
+      configTemplateId: s.configTemplateId ?? null,
+      monitorCommands: s.monitorCommands,
+      envVars: s.envVars,
+      requiredEnvVarValues: s.requiredEnvVarValues,
+    }));
+    setPipelineStages(tab.id, stages);
+    setSelectedPipelineTemplateId(templateId);
+    message.success(`已加载流水线模板: ${template.name}`);
+  };
+
+  // 保存当前流水线为模板
+  const handleSavePipelineTemplate = async () => {
+    const values = await savePipelineTemplateForm.validateFields();
+    const stages = serializePipelineStages();
+    if (stages.length === 0) {
+      message.error('当前没有可保存的流水线阶段');
+      return;
+    }
+    try {
+      await addTemplate({
+        name: values.name,
+        description: values.description,
+        stages,
+      });
+      message.success('流水线模板已保存');
+      setIsSavePipelineTemplateModalOpen(false);
+      savePipelineTemplateForm.resetFields();
+      await fetchTemplates();
+    } catch {
+      message.error('保存流水线模板失败');
+    }
+  };
+
+  // 删除流水线模板
+  const handleDeletePipelineTemplate = async (templateId: string) => {
+    try {
+      await removeTemplate(templateId);
+      if (selectedPipelineTemplateId === templateId) {
+        setSelectedPipelineTemplateId(null);
+      }
+      message.success('流水线模板已删除');
+    } catch {
+      message.error('删除流水线模板失败');
+    }
+  };
+
   const totalIterations = calculateTotalIterations(tab.powerTestConfig.iterationParams);
 
   // 流水线模式下进度按当前阶段的迭代总数计算；优先从运行中的任务读取阶段配置
@@ -2286,6 +2376,66 @@ echo "{\"score\": \${SCORE}}"`}
 
             {tab.pipelineMode ? (
               <div>
+                {/* 流水线模板：保存/选择/删除 */}
+                <Card size="small" style={{ marginBottom: 12, background: '#fafafa' }}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <div style={{ fontWeight: 'bold', fontSize: 13 }}>
+                      流水线模板
+                    </div>
+                    <Select
+                      size="small"
+                      placeholder="选择已保存的流水线模板"
+                      value={selectedPipelineTemplateId || undefined}
+                      onChange={(value) => {
+                        if (value) {
+                          handleLoadPipelineTemplate(value);
+                        } else {
+                          setSelectedPipelineTemplateId(null);
+                        }
+                      }}
+                      allowClear
+                      showSearch
+                      optionFilterProp="label"
+                      loading={isLoadingTemplates}
+                      notFoundContent={<Empty description="暂无流水线模板" />}
+                      style={{ width: '100%' }}
+                    >
+                      {pipelineTemplates.map((template) => (
+                        <Option key={template.id} value={template.id} label={template.name}>
+                          <Space>
+                            <span>{template.name}</span>
+                            <Tag style={{ fontSize: 10 }}>{template.stages.length} 阶段</Tag>
+                            {template.description && (
+                              <span style={{ color: '#999', fontSize: 12 }}>{template.description}</span>
+                            )}
+                          </Space>
+                        </Option>
+                      ))}
+                    </Select>
+                    <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                      <Button
+                        type="dashed"
+                        size="small"
+                        icon={<SaveOutlined />}
+                        disabled={tab.isRunningTest || (tab.pipelineStages || []).length === 0}
+                        onClick={() => setIsSavePipelineTemplateModalOpen(true)}
+                      >
+                        保存当前流水线为模板
+                      </Button>
+                      {selectedPipelineTemplateId && (
+                        <Button
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          onClick={() => handleDeletePipelineTemplate(selectedPipelineTemplateId)}
+                        >
+                          删除模板
+                        </Button>
+                      )}
+                    </Space>
+                  </Space>
+                </Card>
+
                 <div style={{ marginBottom: 8, fontWeight: 'bold' }}>
                   流水线阶段（共 {(tab.pipelineStages || []).length} 个）
                 </div>
@@ -3165,6 +3315,36 @@ echo "{\"score\": \${SCORE}}"`}
               <div>迭代参数: {tab.powerTestConfig.iterationParams.map(p => p.name).join(', ')}</div>
             </div>
           </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 保存流水线模板弹窗 */}
+      <Modal
+        title="保存流水线模板"
+        open={isSavePipelineTemplateModalOpen}
+        onCancel={() => setIsSavePipelineTemplateModalOpen(false)}
+        onOk={handleSavePipelineTemplate}
+        width={500}
+      >
+        <Form form={savePipelineTemplateForm} layout="vertical">
+          <Form.Item
+            name="name"
+            label="模板名称"
+            rules={[{ required: true, message: '请输入模板名称' }]}
+          >
+            <Input placeholder="例如：标准功耗+电压流水线" />
+          </Form.Item>
+          <Form.Item
+            name="description"
+            label="描述"
+          >
+            <Input.TextArea placeholder="可选：添加模板说明" rows={3} />
+          </Form.Item>
+          <Alert
+            type="info"
+            showIcon
+            message={`将保存当前 ${(tab.pipelineStages || []).length} 个流水线阶段配置（用例包选择、环境变量、监控命令、必填环境变量值等）`}
+          />
         </Form>
       </Modal>
 
