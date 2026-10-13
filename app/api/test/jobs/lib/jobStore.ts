@@ -140,6 +140,8 @@ export interface PipelineStage {
 export interface Job {
   id: string;
   tabId?: string;
+  /** 创建任务的浏览器客户端 ID，用于多人共用时区分任务归属 */
+  clientId?: string;
   name: string;
   status: 'pending' | 'running' | 'completed' | 'aborted' | 'error';
   config: JobConfig;
@@ -337,10 +339,11 @@ export function getJob(id: string): Job | undefined {
   return jobs.get(id);
 }
 
-export function createJob(config: JobConfig, name: string, tabId?: string): Job {
+export function createJob(config: JobConfig, name: string, tabId?: string, clientId?: string): Job {
   const job: Job = {
     id: `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     tabId,
+    clientId,
     name,
     status: 'pending',
     config,

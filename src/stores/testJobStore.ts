@@ -134,6 +134,8 @@ export interface PipelineStage {
 export interface Job {
   id: string;
   tabId?: string;
+  /** 创建任务的浏览器客户端 ID，用于多人共用时区分任务归属 */
+  clientId?: string;
   name: string;
   status: 'pending' | 'running' | 'completed' | 'aborted' | 'error';
   config: JobConfig;
@@ -162,7 +164,7 @@ interface TestJobState {
   isLoading: boolean;
 
   fetchJobs: (opts?: { includeLogs?: boolean; includeDataPoints?: boolean }) => Promise<void>;
-  startJob: (payload: { name: string; tabId: string; config: JobConfig }) => Promise<Job | null>;
+  startJob: (payload: { name: string; tabId: string; clientId: string; config: JobConfig }) => Promise<Job | null>;
   abortJob: (id: string) => Promise<void>;
   resumeJob: (id: string) => Promise<void>;
   deleteJob: (id: string) => Promise<void>;
@@ -197,12 +199,12 @@ export const useTestJobStore = create<TestJobState>((set, get) => ({
     }
   },
 
-  startJob: async ({ name, tabId, config }) => {
+  startJob: async ({ name, tabId, clientId, config }) => {
     try {
       const res = await fetch('/api/test/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, tabId, config }),
+        body: JSON.stringify({ name, tabId, clientId, config }),
       });
       const data = await res.json();
       if (data.success && data.job) {

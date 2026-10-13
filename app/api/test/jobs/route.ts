@@ -28,9 +28,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, tabId, config } = body as {
+    const { name, tabId, clientId, config } = body as {
       name: string;
       tabId?: string;
+      clientId?: string;
       config: JobConfig;
     };
 
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const job = createJob(config, name || '未命名任务', tabId);
+    const job = createJob(config, name || '未命名任务', tabId, clientId);
 
     // 在后台启动任务，不阻塞 HTTP 响应
     runJob(job.id).catch((err) => {

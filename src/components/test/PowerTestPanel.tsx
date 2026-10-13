@@ -77,6 +77,7 @@ import TestDraftManager from './TestDraftManager';
 import BMCConfigPanel from '../monitor/BMCConfigPanel';
 import MonitorConfigPanel from './MonitorConfigPanel';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
+import { getClientId } from '../../utils/clientId';
 
 const { Dragger } = Upload;
 const { Option } = Select;
@@ -286,8 +287,11 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         const res = await fetch('/api/test/jobs');
         const data = await res.json();
         if (!data.success) return;
+        // 只恢复当前浏览器客户端自己创建的任务，避免多人共用同一后台任务导致混乱
+        const myClientId = getClientId();
         const runningJob = data.jobs.find(
           (j: Job) =>
+            j.clientId === myClientId &&
             j.config.host === tab.sshConfig.host &&
             (j.status === 'running' || j.status === 'pending')
         );
@@ -822,6 +826,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       const job = await startJob({
         name: tab.powerTestConfig.jobName || `${selectedLibraryPackageId ? (getPackageById(selectedLibraryPackageId)?.name || '用例包') : (packageFile ? packageFile.name : '默认名称')} - ${new Date().toLocaleDateString()}`,
         tabId: tab.id,
+        clientId: getClientId(),
         config: {
           host: tab.sshConfig.host,
           port: tab.sshConfig.port,
@@ -1032,6 +1037,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       const job = await startJob({
         name: tab.powerTestConfig.jobName || `${tab.name} - 流水线 - ${new Date().toLocaleString()}`,
         tabId: tab.id,
+        clientId: getClientId(),
         config: {
           host: tab.sshConfig.host,
           port: tab.sshConfig.port,
