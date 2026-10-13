@@ -250,7 +250,7 @@ const createNewTab = (id: string, name: string): TestTab => ({
     packageFile: null,
     envVars: [],
     monitorCommands: [],
-    heartbeatEnabled: false,
+    heartbeatEnabled: true,
     heartbeatInterval: 10,
     heartbeatMaxFailures: 3,
     alertWebhook: '',
