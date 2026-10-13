@@ -284,7 +284,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       addJobLog(jobId, 'warning', `日志监控 SSH 连接失败: ${msg}`);
-      try { logMonitorSsh.dispose(); } catch { /* ignore */ }
+      try { logMonitorSsh!.dispose(); } catch { /* ignore */ }
       logMonitorSsh = null;
       return;
     }
