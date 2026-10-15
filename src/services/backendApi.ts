@@ -149,6 +149,42 @@ export async function pollAllData(topologyId?: string | null, bmcConfig?: BMCCon
   }
 }
 
+// ==================== 控制命令下发 API ====================
+
+/** 控制命令执行结果 */
+export interface ControlExecuteResult {
+  success: boolean;
+  message: string;
+  command?: string;
+  stdout?: string;
+  stderr?: string;
+  timestamp?: string;
+}
+
+/** 通过 SSH 将控制命令下发到 BMC（{value} 占位符已在后端替换） */
+export async function executeControlCommand(
+  bmcConfig: BMCConfig,
+  shell: string,
+  value: number
+): Promise<ControlExecuteResult> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/control/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: bmcConfig, shell, value }),
+    });
+
+    const result: ControlExecuteResult = await response.json();
+    return result;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      message: `命令下发失败: ${errMsg}`,
+    };
+  }
+}
+
 // ==================== 拓扑结构 API ====================
 
 /** 获取指定拓扑结构 */
