@@ -181,26 +181,6 @@ app.get('/api/data/poll', async (req, res) => {
   });
 });
 
-// ==================== 控制命令 API ====================
-
-app.post('/api/control', (req, res) => {
-  const { nodeId, action, value } = req.body;
-  console.log(`[Control] ${action} for ${nodeId}: ${value}`);
-  
-  // 更新节点数据
-  const node = state.topology.nodes.find(n => n.id === nodeId);
-  if (node) {
-    if (action === 'setFanSpeed' && node.data.fanData) {
-      node.data.fanData.speedPercent = value;
-      node.data.fanData.rpm = Math.round(5000 * (value / 100));
-    } else if (action === 'setVoltage' && node.data.sourceData) {
-      node.data.sourceData.outputVoltage = value;
-    }
-  }
-  
-  res.json({ success: true });
-});
-
 // ==================== 拓扑 API ====================
 
 // 获取拓扑
@@ -300,7 +280,6 @@ app.listen(PORT, () => {
   - GET  /api/monitor/state   获取监控状态
   - POST /api/monitor/state   更新监控状态
   - GET  /api/data/poll       轮询数据
-  - POST /api/control         发送控制命令
   - GET  /api/topology        获取拓扑
   - POST /api/topology        保存拓扑
   - POST /api/topology/reset  重置拓扑

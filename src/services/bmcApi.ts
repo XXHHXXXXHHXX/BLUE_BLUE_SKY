@@ -1,14 +1,11 @@
 /** BMC API接口层 - 支持 Mock 数据和后端 Sensor 数据获取 */
-import type { BMCResponse, BMCControlResponse } from '../types/bmc';
+import type { BMCResponse } from '../types/bmc';
 import type { TopologyNode, TopologyEdge, BMCConfig, FieldMapping } from '../types/topology';
 import { FIXED_FIELD_DEFS } from '../types/topology';
 import type { CPUData, MemoryData, DiskData, FanData, IOData, CardData, MgmtBoardData, SourceData } from '../types/power';
 import { CPU_POWER_DOMAIN_FIELD_DEFS, buildCPUPowerDomains } from '../types/power';
 import type { SensorData as BMCSensorData } from '../../app/api/bmc/sensors/route';
 import { refreshNodeData, refreshEdgeData } from './mockData';
-import { sendControlCommand } from './backendApi';
-import { useBMCSessionStore } from '../stores/bmcSessionStore';
-import { useTopologyStore } from '../stores/topologyStore';
 
 
 /** 获取所有节点最新数据 */
@@ -410,44 +407,3 @@ export async function fetchAllEdgeData(
   };
 }
 
-/** 设置风扇转速（通过服务端 SSH 下发 Shell 命令） */
-export async function setFanSpeed(
-  nodeId: string,
-  speedPercent: number,
-): Promise<BMCControlResponse> {
-  const bmcConfig = useBMCSessionStore.getState().getConnectedConfig();
-  const topologyId = useTopologyStore.getState().currentTopologyId;
-  const success = await sendControlCommand(nodeId, 'setFanSpeed', speedPercent, topologyId, bmcConfig);
-  
-  if (!success) {
-    throw new Error('控制命令下发失败');
-  }
-  
-  return {
-    success: true,
-    nodeId,
-    action: 'setFanSpeed',
-    newValue: speedPercent,
-  };
-}
-
-/** 设置电压（通过服务端 SSH 下发 Shell 命令） */
-export async function setVoltage(
-  nodeId: string,
-  voltage: number,
-): Promise<BMCControlResponse> {
-  const bmcConfig = useBMCSessionStore.getState().getConnectedConfig();
-  const topologyId = useTopologyStore.getState().currentTopologyId;
-  const success = await sendControlCommand(nodeId, 'setVoltage', voltage, topologyId, bmcConfig);
-  
-  if (!success) {
-    throw new Error('控制命令下发失败');
-  }
-  
-  return {
-    success: true,
-    nodeId,
-    action: 'setVoltage',
-    newValue: voltage,
-  };
-}

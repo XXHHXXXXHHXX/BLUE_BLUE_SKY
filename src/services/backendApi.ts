@@ -149,32 +149,6 @@ export async function pollAllData(topologyId?: string | null, bmcConfig?: BMCCon
   }
 }
 
-/** 
- * 发送控制命令到后端
- */
-export async function sendControlCommand(
-  nodeId: string,
-  action: 'setFanSpeed' | 'setVoltage',
-  value: number,
-  topologyId?: string | null,
-  bmcConfig?: BMCConfig | null,
-): Promise<boolean> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/control`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodeId, action, value, topologyId, bmcConfig }),
-    });
-    
-    if (!response.ok) throw new Error('Failed to send control command');
-    const result: BackendResponse<void> = await response.json();
-    return result.success;
-  } catch (error) {
-    console.error('Send control command failed:', error);
-    return false;
-  }
-}
-
 // ==================== 拓扑结构 API ====================
 
 /** 获取指定拓扑结构 */

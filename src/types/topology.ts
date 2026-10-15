@@ -125,7 +125,6 @@ export const FIXED_FIELD_DEFS: Record<string, FixedFieldDef[]> = {
     { fieldKey: 'outputVoltage', label: 'VR输出电压' },
     { fieldKey: 'outputCurrent', label: 'VR输出电流' },
     { fieldKey: 'outputPower', label: 'VR输出功率' },
-    { fieldKey: 'vrOutputVoltageControl', label: 'VR输出电压调节接口' },
     { fieldKey: 'efficiency', label: '效率' },
     { fieldKey: 'temperature', label: '温度' },
   ],
@@ -154,7 +153,6 @@ export const FIXED_FIELD_DEFS: Record<string, FixedFieldDef[]> = {
     { fieldKey: 'psipOutputPowerNimbusLvcc', label: 'psip输出功率 - Nimbus LVCC' },
     { fieldKey: 'psipOutputPower3v3Drmos', label: 'psip输出功率 - 3.3 DRMOS' },
     { fieldKey: 'psipOutputPower1v8Gpio', label: 'psip输出功率 - 1V8 GPIO' },
-    { fieldKey: 'psipOutputVoltageControl', label: 'psip输出电压调节接口' },
     { fieldKey: 'efficiency', label: '效率' },
     { fieldKey: 'temperature', label: '温度' },
   ],
@@ -265,8 +263,6 @@ export interface ApiConfig {
     url: string;
     method: 'GET';
   };
-  /** 控制 Shell 命令，支持 {value} 占位符，如 ipmcset -t fan -d speed -v {value} */
-  controlShell?: string;
   /** Sensor 名称配置（用于 BMC ipmcget 数据匹配，兼容旧版） */
   sensorName?: string;
   /** 字段级映射配置（优先级高于 sensorName） */
@@ -288,7 +284,6 @@ export type HardwareNodeData = {
   displayAlias?: string;      // 用户自定义显示别名
   customIconUrl?: string;     // 用户上传的自定义图标 (Data URL)
   apiConfig?: ApiConfig;      // API 接口配置
-  controlRange?: { min: number; max: number };  // 控制范围（调速/调压的最小最大值）
   displayMetrics?: Record<string, number | null>;  // 用户配置的显示指标（字段映射）
 } & (
   | { nodeType: 'ac'; sourceData: SourceData }

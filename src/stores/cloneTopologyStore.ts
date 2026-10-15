@@ -69,9 +69,6 @@ interface CloneTopologyState {
   loadTopologiesList: () => Promise<void>;
   switchTopology: (id: string) => Promise<boolean>;
 
-  // 控制类操作
-  updateFanSpeed: (nodeId: string, speed: number) => Promise<void>;
-  updateSourceVoltage: (nodeId: string, voltage: number) => Promise<void>;
   updateNodeAlias: (nodeId: string, alias: string) => void;
 }
 
@@ -245,32 +242,6 @@ export const useCloneTopologyStore = create<CloneTopologyState>((set, get) => ({
       set({ error: (err as Error).message });
       return false;
     }
-  },
-
-  /** 风扇速度控制 - 仅本地更新，不发送后端命令 */
-  updateFanSpeed: async (nodeId, speed) => {
-    const { nodes } = get();
-    set({
-      nodes: nodes.map(n =>
-        n.id === nodeId && 'fanData' in n.data && n.data.fanData
-          ? { ...n, data: { ...n.data, fanData: { ...n.data.fanData, speedPercent: speed } } }
-          : n
-      ),
-    });
-    // 分身页面只更新本地状态，不实际发送控制命令
-  },
-
-  /** 电压控制 - 仅本地更新 */
-  updateSourceVoltage: async (nodeId, voltage) => {
-    const { nodes } = get();
-    set({
-      nodes: nodes.map(n =>
-        n.id === nodeId && 'sourceData' in n.data && n.data.sourceData
-          ? { ...n, data: { ...n.data, sourceData: { ...n.data.sourceData, outputVoltage: voltage } } }
-          : n
-      ),
-    });
-    // 分身页面只更新本地状态，不实际发送控制命令
   },
 
   /** 更新节点显示别名 - 仅本地更新 */

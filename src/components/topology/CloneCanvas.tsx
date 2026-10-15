@@ -36,8 +36,6 @@ const CloneCanvas: React.FC<CloneCanvasProps> = ({ initialTopologyId }) => {
     onNodesChange,
     onEdgesChange,
     setSelectedNodeIds,
-    updateFanSpeed,
-    updateSourceVoltage,
     overviewOpen,
     toggleOverview,
     selectedNodeId,
@@ -126,15 +124,9 @@ const CloneCanvas: React.FC<CloneCanvasProps> = ({ initialTopologyId }) => {
         const extra: Record<string, unknown> = {
           _highlighted: highlightedNodeIds.has(n.id),
         };
-        if (n.data.nodeType === 'fan') {
-          extra.onSpeedChange = (speed: number) => updateFanSpeed(n.id, speed);
-        }
-        if (n.data.nodeType === 'vr' || n.data.nodeType === 'psip') {
-          extra.onVoltageChange = (voltage: number) => updateSourceVoltage(n.id, voltage);
-        }
         return { ...n, data: { ...n.data, ...extra } };
       }),
-    [nodes, highlightedNodeIds, updateFanSpeed, updateSourceVoltage],
+    [nodes, highlightedNodeIds],
   );
 
   // 注入高亮标记到边 data

@@ -1,11 +1,7 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { Drawer, Descriptions, Slider, message, Tag, Typography, Button, Space, Divider, Tooltip, Badge } from 'antd';
-import { 
-  setFanSpeed, 
-  setVoltage 
-} from '../../services/bmcApi';
+import React, { useCallback, useEffect, useMemo } from 'react';
+import { Drawer, Descriptions, Tag, Typography, Button, Space, Divider, Tooltip, Badge } from 'antd';
 import { useTopologyStore } from '../../stores/topologyStore';
 import { useMonitorStore } from '../../stores/monitorStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -101,19 +97,14 @@ interface NodeDetailPanelProps {
 
 const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: propNode }) => {
   const nodes = useTopologyStore((s) => s.nodes);
-  const updateFanSpeed = useTopologyStore((s) => s.updateFanSpeed);
-  const updateSourceVoltage = useTopologyStore((s) => s.updateSourceVoltage);
   const isPolling = useMonitorStore((s) => s.isPolling);
-  
+
   // 从 store 获取实时节点数据
   const node = useMemo(() => {
     if (!propNode) return null;
     const liveNode = nodes.find((n) => n.id === propNode.id);
     return liveNode || propNode;
   }, [nodes, propNode]);
-
-  const [fanSpeed, setFanSpeedLocal] = useState<number>(50);
-  const [voltageValue, setVoltageValue] = useState<number>(1.0);
 
   // 使用节点字段配置，根据 apiConfig.fieldMappings 动态决定显示哪些字段
   const nodeDataForConfig = (node?.data || {}) as Record<string, unknown>;
@@ -150,18 +141,6 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
     clearHistoryAction(node.id);
   }, [node, clearHistoryAction]);
 
-  // 当节点变化时，同步初始值
-  useEffect(() => {
-    if (!node?.data) return;
-    const { nodeType } = node.data;
-    if (nodeType === 'fan' && node.data.fanData) {
-      setFanSpeedLocal(node.data.fanData.speedPercent ?? 50);
-    }
-    if ((nodeType === 'vr' || nodeType === 'psip') && node.data.sourceData) {
-      setVoltageValue(node.data.sourceData.outputVoltage ?? 1.0);
-    }
-  }, [node]);
-
   // 当开启实时监控且正在录像时，为所有正在录像的模块记录数据点
   // 每个模块使用自身的字段配置，后台录像时同样持续获取最新数据
   useEffect(() => {
@@ -189,40 +168,12 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
   // 依赖项包含 nodes（从store订阅的实时数据），确保每次节点数据更新时都会记录
   }, [isPolling, nodes, recordingNodeIds, addDataPoint]);
 
-  const handleFanSpeedComplete = useCallback(async (value: number) => {
-    if (!node) return;
-    setFanSpeedLocal(value);
-    // 更新 store 使拓扑节点显示同步
-    updateFanSpeed(node.id, value);
-    try {
-      await setFanSpeed(node.id, value);
-      message.success(`风扇转速已设置为 ${value}%`);
-    } catch {
-      message.error('设置风扇转速失败');
-    }
-  }, [node, updateFanSpeed]);
-
-  const handleVoltageComplete = useCallback(async (value: number) => {
-    if (!node) return;
-    setVoltageValue(value);
-    // 更新 store 使拓扑节点显示同步
-    updateSourceVoltage(node.id, value);
-    try {
-      await setVoltage(node.id, value);
-      message.success(`电压已设置为 ${value.toFixed(2)}V`);
-    } catch {
-      message.error('设置电压失败');
-    }
-  }, [node, updateSourceVoltage]);
-
   const renderContent = () => {
     if (!node?.data) return <div>暂无数据</div>;
 
     const d = node.data as Record<string, unknown>;
     const nodeType = d.nodeType as string;
 
-    // 读取 controlRange 配置
-    const controlRange = d.controlRange as { min: number; max: number } | undefined;
     const thresholds = node.data.apiConfig?.fieldThresholds;
     const displayMetrics = d.displayMetrics as Record<string, number | null> | undefined;
 
@@ -385,14 +336,6 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
       case 'vr': {
         const s = d.sourceData as SourceData;
         if (!s) return <div>暂无数据</div>;
-        const vMin = controlRange?.min ?? 0.5;
-        const vMax = controlRange?.max ?? 1.5;
-        const marks: Record<number, string> = {
-          [vMin]: `${vMin}V`,
-          [vMax]: `${vMax}V`,
-        };
-        const vMid = +((vMin + vMax) / 2).toFixed(2);
-        marks[vMid] = `${vMid}V`;
 
         const fieldValues: Record<string, React.ReactNode> = {
           inputVoltage: formatVoltage(s.inputVoltage),
@@ -428,37 +371,15 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         };
 
         return (
-          <>
-            <Descriptions column={1} bordered size="small">
-              {renderDynamicFields(fieldValues, rawValues, ['vrOutputVoltageControl'])}
-            </Descriptions>
-            <div style={{ marginTop: 16 }}>
-              <Title level={5}>VR输出电压调节接口</Title>
-              <Slider
-                min={vMin}
-                max={vMax}
-                step={0.01}
-                value={voltageValue}
-                onChange={setVoltageValue}
-                onChangeComplete={handleVoltageComplete}
-                marks={marks}
-              />
-            </div>
-          </>
+          <Descriptions column={1} bordered size="small">
+            {renderDynamicFields(fieldValues, rawValues)}
+          </Descriptions>
         );
       }
 
       case 'psip': {
         const s = d.sourceData as SourceData;
         if (!s) return <div>暂无数据</div>;
-        const vMin = controlRange?.min ?? 0.5;
-        const vMax = controlRange?.max ?? 1.5;
-        const marks: Record<number, string> = {
-          [vMin]: `${vMin}V`,
-          [vMax]: `${vMax}V`,
-        };
-        const vMid = +((vMin + vMax) / 2).toFixed(2);
-        marks[vMid] = `${vMid}V`;
 
         const fieldValues: Record<string, React.ReactNode> = {
           inputVoltage: formatVoltage(s.inputVoltage),
@@ -494,37 +415,15 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         };
 
         return (
-          <>
-            <Descriptions column={1} bordered size="small">
-              {renderDynamicFields(fieldValues, rawValues, ['psipOutputVoltageControl'])}
-            </Descriptions>
-            <div style={{ marginTop: 16 }}>
-              <Title level={5}>psip输出电压调节接口</Title>
-              <Slider
-                min={vMin}
-                max={vMax}
-                step={0.01}
-                value={voltageValue}
-                onChange={setVoltageValue}
-                onChangeComplete={handleVoltageComplete}
-                marks={marks}
-              />
-            </div>
-          </>
+          <Descriptions column={1} bordered size="small">
+            {renderDynamicFields(fieldValues, rawValues)}
+          </Descriptions>
         );
       }
 
       case 'fan': {
         const f = d.fanData as FanData;
         if (!f) return <div>暂无数据</div>;
-        const sMin = controlRange?.min ?? 0;
-        const sMax = controlRange?.max ?? 100;
-        const marks: Record<number, string> = {
-          [sMin]: `${sMin}%`,
-          [sMax]: `${sMax}%`,
-        };
-        const sMid = Math.round((sMin + sMax) / 2);
-        marks[sMid] = `${sMid}%`;
 
         const fieldValues: Record<string, React.ReactNode> = {
           power: (
@@ -550,22 +449,9 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         };
 
         return (
-          <>
-            <Descriptions column={1} bordered size="small">
-              {renderDynamicFields(fieldValues, rawValues, ['fanSpeedControl'])}
-            </Descriptions>
-            <div style={{ marginTop: 16 }}>
-              <Title level={5}>风扇调速接口</Title>
-              <Slider
-                min={sMin}
-                max={sMax}
-                value={fanSpeed}
-                onChange={setFanSpeedLocal}
-                onChangeComplete={handleFanSpeedComplete}
-                marks={marks}
-              />
-            </div>
-          </>
+          <Descriptions column={1} bordered size="small">
+            {renderDynamicFields(fieldValues, rawValues)}
+          </Descriptions>
         );
       }
 

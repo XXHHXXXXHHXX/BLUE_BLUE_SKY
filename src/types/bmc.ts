@@ -12,15 +12,3 @@ export interface BMCNodeDataResponse {
   values: Record<string, number>;
 }
 
-export interface BMCControlRequest {
-  nodeId: string;
-  action: 'setFanSpeed' | 'setVoltage';
-  value: number;
-}
-
-export interface BMCControlResponse {
-  success: boolean;
-  nodeId: string;
-  action: string;
-  newValue: number;
-}

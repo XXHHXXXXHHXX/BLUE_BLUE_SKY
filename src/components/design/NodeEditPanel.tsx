@@ -8,8 +8,6 @@ import {
   ApiOutlined,
   DeleteOutlined,
   InfoCircleOutlined,
-  ControlOutlined,
-  LinkOutlined,
   PlusOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
@@ -38,23 +36,10 @@ interface NodeEditPanelProps {
   node: TopologyNode | null;
 }
 
-/** 可控模块类型（支持调速/调压） */
-const controllableTypes: HardwareNodeType[] = ['fan', 'vr', 'psip'];
-
-/** 各可控类型的默认范围 */
-const defaultRanges: Record<string, { min: number; max: number; step: number; unit: string; label: string }> = {
-  fan:  { min: 0, max: 100, step: 1, unit: '%', label: '调速范围' },
-  vr:   { min: 0.5, max: 1.5, step: 0.01, unit: 'V', label: '调压范围' },
-  psip: { min: 0.5, max: 1.5, step: 0.01, unit: 'V', label: '调压范围' },
-};
-
 const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) => {
   const { updateNodeAlias, updateNodeCustomIconUrl, updateNodeApiConfig, updateNodeFieldMappings, updateNodePowerDomainFieldMappings } = useDesignTopologyStore();
 
   const [alias, setAlias] = useState('');
-  const [controlShell, setControlShell] = useState('');
-  const [rangeMin, setRangeMin] = useState<number | null>(null);
-  const [rangeMax, setRangeMax] = useState<number | null>(null);
   const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([]);
   const [powerDomainFieldMappings, setPowerDomainFieldMappings] = useState<FieldMapping[]>([]);
   const [customFieldDefs, setCustomFieldDefs] = useState<{ fieldKey: string; label: string }[]>([]);
@@ -66,7 +51,6 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
   useEffect(() => {
     if (node?.data) {
       setAlias(node.data.displayAlias || '');
-      setControlShell(node.data.apiConfig?.controlShell || '');
       // 使用节点已有的字段映射，或该类型的默认映射
       const existingMappings = node.data.apiConfig?.fieldMappings;
       setFieldMappings(existingMappings || []);
@@ -78,12 +62,6 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
       // 使用节点已有的阈值配置，或该类型的默认阈值
       const existingThresholds = node.data.apiConfig?.fieldThresholds;
       setFieldThresholds(existingThresholds || []);
-      const nt = node.data.nodeType as HardwareNodeType;
-      const defaults = defaultRanges[nt];
-      if (defaults) {
-        setRangeMin(node.data.controlRange?.min ?? defaults.min);
-        setRangeMax(node.data.controlRange?.max ?? defaults.max);
-      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node?.id]);  // 只在节点 ID 变化时同步，避免 node 对象引用变化导致重置
@@ -136,34 +114,10 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     message.success('已恢复默认图标');
   }, [node, updateNodeCustomIconUrl]);
 
-  // 保存控制范围（设计界面只保存在本地状态，不发送后端命令）
-  const handleSaveControlRange = useCallback(() => {
-    if (!node || !nodeType) return;
-    const defaults = defaultRanges[nodeType];
-    if (!defaults) return;
-    const min = rangeMin ?? defaults.min;
-    const max = rangeMax ?? defaults.max;
-    if (min >= max) {
-      message.error('最小值必须小于最大值');
-      return;
-    }
-    // 更新节点数据中的 controlRange
-    const store = useDesignTopologyStore.getState();
-    const { nodes } = store;
-    const updatedNodes = nodes.map(n =>
-      n.id === node.id
-        ? { ...n, data: { ...n.data, controlRange: { min, max } } }
-        : n
-    );
-    store.updateNodes(updatedNodes);
-    message.success('控制范围已保存');
-  }, [node, nodeType, rangeMin, rangeMax]);
-
   // 保存 API 配置
   const handleSaveApiConfig = useCallback(() => {
     if (!node) return;
     const config: ApiConfig = {};
-    config.controlShell = controlShell.trim();
     // 保存字段映射（只要 fieldKey 存在即可，BMC 字段名可为空）
     config.fieldMappings = fieldMappings.filter(m => m.fieldKey);
     // 保存电源域字段映射（用于"电源域详情"弹窗）
@@ -174,7 +128,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     config.fieldThresholds = fieldThresholds.filter(t => t.fieldKey && t.ranges.length > 0);
     updateNodeApiConfig(node.id, config);
     message.success('字段映射配置已保存');
-  }, [node, controlShell, fieldMappings, powerDomainFieldMappings, customFieldDefs, fieldThresholds, updateNodeApiConfig]);
+  }, [node, fieldMappings, powerDomainFieldMappings, customFieldDefs, fieldThresholds, updateNodeApiConfig]);
 
   // 添加字段映射（选择指定字段）
   const [fieldToAdd, setFieldToAdd] = useState<string | null>(null);
@@ -467,66 +421,6 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
       </div>
     </div>
   );
-
-  const renderControlTab = () => {
-    if (!nodeType) return null;
-    const defaults = defaultRanges[nodeType];
-    if (!defaults) return null;
-
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div>
-          <Title level={5} style={{ margin: 0 }}>
-            <ControlOutlined /> {defaults.label}
-          </Title>
-          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-            设置在拓扑监控界面中该模块滑块的最小值和最大值
-          </Text>
-
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
-            <div style={{ flex: 1 }}>
-              <Text style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>最小值 ({defaults.unit})</Text>
-              <InputNumber
-                style={{ width: '100%' }}
-                value={rangeMin}
-                onChange={(v) => setRangeMin(v)}
-                step={defaults.step}
-                placeholder={`默认 ${defaults.min}`}
-              />
-            </div>
-            <span style={{ marginTop: 20 }}>~</span>
-            <div style={{ flex: 1 }}>
-              <Text style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>最大值 ({defaults.unit})</Text>
-              <InputNumber
-                style={{ width: '100%' }}
-                value={rangeMax}
-                onChange={(v) => setRangeMax(v)}
-                step={defaults.step}
-                placeholder={`默认 ${defaults.max}`}
-              />
-            </div>
-          </div>
-
-          <div style={{
-            padding: '8px 12px',
-            background: '#f6f8fa',
-            border: '1px solid #e8e8e8',
-            borderRadius: 6,
-            marginBottom: 12,
-          }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              <InfoCircleOutlined /> 当前范围：{rangeMin ?? defaults.min}{defaults.unit} ~ {rangeMax ?? defaults.max}{defaults.unit}
-              （默认：{defaults.min}{defaults.unit} ~ {defaults.max}{defaults.unit}）
-            </Text>
-          </div>
-
-          <Button type="primary" onClick={handleSaveControlRange} block>
-            保存控制范围
-          </Button>
-        </div>
-      </div>
-    );
-  };
 
   // 获取固定字段定义
   const fixedFieldDefs = nodeType ? (FIXED_FIELD_DEFS[nodeType] || []) : [];
@@ -916,22 +810,6 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
 
         <Divider style={{ margin: '4px 0' }} />
 
-        {/* 控制 Shell 命令 */}
-        <div>
-          <Title level={5} style={{ margin: 0 }}>
-            <LinkOutlined /> 控制 Shell 命令
-          </Title>
-          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8, marginTop: 4 }}>
-            配置 BMC 控制 Shell 命令，使用 {'{value}'} 占位符表示调节值，系统将通过 SSH 下发到 BMC 执行
-          </Text>
-          <Input.TextArea
-            placeholder="如：ipmcset -t fan -d speed -v {value}"
-            value={controlShell}
-            onChange={(e) => setControlShell(e.target.value)}
-            rows={2}
-          />
-        </div>
-
         <Button type="primary" onClick={handleSaveApiConfig} block style={{ marginTop: 8 }}>
           保存配置
         </Button>
@@ -973,11 +851,6 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
               label: <span><EditOutlined /> 基本信息</span>,
               children: renderBasicTab(),
             },
-            ...(nodeType && controllableTypes.includes(nodeType) ? [{
-              key: 'control',
-              label: <span><ControlOutlined /> 控制范围</span>,
-              children: renderControlTab(),
-            }] : []),
             {
               key: 'api',
               label: <span><ApiOutlined /> 字段映射</span>,

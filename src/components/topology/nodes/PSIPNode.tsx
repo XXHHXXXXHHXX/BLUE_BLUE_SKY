@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useCallback } from 'react';
+import React from 'react';
 import { type NodeProps } from '@xyflow/react';
 import NodeIcon from './NodeIcon';
-import InteractiveZone from './InteractiveZone';
 import CustomFieldsRenderer from './CustomFieldsRenderer';
 import { useNodeFieldConfig } from './useNodeFieldConfig';
 import {
@@ -27,7 +26,6 @@ const PSIPNode: React.FC<NodeProps> = (props) => {
     displayAlias?: string;
     customIconUrl?: string;
     nodeType?: string;
-    controlRange?: { min: number; max: number };
     sourceData?: {
       inputVoltage: number | null;
       outputVoltage: number | null;
@@ -39,11 +37,9 @@ const PSIPNode: React.FC<NodeProps> = (props) => {
       efficiency: number | null;
       temperature?: number | null;
     };
-    onVoltageChange?: (voltage: number) => void;
   };
   const s = data.sourceData;
   const displayMetrics = (props.data as Record<string, unknown>)?.displayMetrics as Record<string, number | null> | undefined;
-  const range = data.controlRange ?? { min: 0.5, max: 1.5 };
   const { getFieldLabel, orderedVisibleFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
   
   // 处理 null 值
@@ -55,14 +51,6 @@ const PSIPNode: React.FC<NodeProps> = (props) => {
   const outputPower = s?.outputPower ?? null;
   const efficiency = s?.efficiency ?? null;
   const temperature = s?.temperature ?? null;
-
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      data.onVoltageChange?.(Number(e.target.value));
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data.onVoltageChange, data],
-  );
 
   const tempLevel = getTemperatureLevel(temperature ?? undefined);
   const effLevel = getEfficiencyLevel(efficiency ?? undefined);
@@ -110,21 +98,6 @@ const PSIPNode: React.FC<NodeProps> = (props) => {
               {formatTemperature(temperature)}
             </span>
           </div>
-        );
-      case 'psipOutputVoltageControl':
-        return (
-          <InteractiveZone key={fieldKey}>
-            <span style={{ fontSize: 11, color: '#666' }}>{getFieldLabel('psipOutputVoltageControl')}: {outputVoltage !== null && !Number.isNaN(outputVoltage) ? `${outputVoltage.toFixed(2)}V` : 'NA'}</span>
-            <input
-              type="range"
-              min={range.min}
-              max={range.max}
-              step={0.01}
-              value={outputVoltage ?? 0}
-              onChange={handleChange}
-              style={{ width: '100%', cursor: 'pointer' }}
-            />
-          </InteractiveZone>
         );
       default: {
         const value = displayMetrics?.[fieldKey] ?? null;

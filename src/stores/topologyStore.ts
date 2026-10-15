@@ -84,11 +84,6 @@ interface TopologyState {
   updateNodeCustomIconUrl: (nodeId: string, url: string | undefined) => Promise<void>;
   updateNodeApiConfig: (nodeId: string, config: ApiConfig) => Promise<void>;
 
-  // 控制类操作（发送到后端执行）
-  updateFanSpeed: (nodeId: string, speed: number) => Promise<void>;
-  updateSourceVoltage: (nodeId: string, voltage: number) => Promise<void>;
-  updateNodeControlRange: (nodeId: string, range: { min: number; max: number } | undefined) => Promise<void>;
-
   // 导入导出
   exportTopology: () => TopologyExportData;
   importTopology: (data: TopologyExportData) => Promise<boolean>;
@@ -338,44 +333,6 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
       nodes: nodes.map(n =>
         n.id === nodeId
           ? { ...n, data: { ...n.data, apiConfig: config } }
-          : n
-      ),
-    });
-    await get().saveToBackend();
-  },
-
-  updateFanSpeed: async (nodeId, speed) => {
-    const { nodes } = get();
-    set({
-      nodes: nodes.map(n =>
-        n.id === nodeId && 'fanData' in n.data && n.data.fanData
-          ? { ...n, data: { ...n.data, fanData: { ...n.data.fanData, speedPercent: speed } } }
-          : n
-      ),
-    });
-    
-    await get().saveToBackend();
-  },
-
-  updateSourceVoltage: async (nodeId, voltage) => {
-    const { nodes } = get();
-    set({
-      nodes: nodes.map(n =>
-        n.id === nodeId && 'sourceData' in n.data && n.data.sourceData
-          ? { ...n, data: { ...n.data, sourceData: { ...n.data.sourceData, outputVoltage: voltage } } }
-          : n
-      ),
-    });
-    
-    await get().saveToBackend();
-  },
-
-  updateNodeControlRange: async (nodeId, range) => {
-    const { nodes } = get();
-    set({
-      nodes: nodes.map(n =>
-        n.id === nodeId
-          ? { ...n, data: { ...n.data, controlRange: range } }
           : n
       ),
     });

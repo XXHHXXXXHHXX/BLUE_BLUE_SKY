@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useCallback } from 'react';
+import React from 'react';
 import { type NodeProps } from '@xyflow/react';
 import NodeIcon from './NodeIcon';
-import InteractiveZone from './InteractiveZone';
 import CustomFieldsRenderer from './CustomFieldsRenderer';
 import { useNodeFieldConfig } from './useNodeFieldConfig';
 import {
@@ -26,7 +25,6 @@ const FanNode: React.FC<NodeProps> = (props) => {
     displayAlias?: string;
     customIconUrl?: string;
     nodeType?: string;
-    controlRange?: { min: number; max: number };
     fanData?: {
       power: number | null;
       rpm: number | null;
@@ -35,12 +33,10 @@ const FanNode: React.FC<NodeProps> = (props) => {
       fanInputVoltage?: number | null;
       fanInputCurrent?: number | null;
     };
-    onSpeedChange?: (speed: number) => void;
   };
 
   const fanData = data.fanData;
   const displayMetrics = (props.data as Record<string, unknown>)?.displayMetrics as Record<string, number | null> | undefined;
-  const range = data.controlRange ?? { min: 0, max: 100 };
   const { hasField, getFieldLabel, orderedVisibleFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
 
   // 从 fanData 获取数据（支持 null 值显示为 NA）
@@ -52,19 +48,11 @@ const FanNode: React.FC<NodeProps> = (props) => {
   const fanInputCurrent = fanData?.fanInputCurrent ?? null;
 
   const tempLevel = getTemperatureLevel(temperature ?? undefined);
-  const tempClass = tempLevel === 'critical' 
-    ? ' critical-temp' 
-    : tempLevel === 'warning' 
-    ? ' warning-temp' 
+  const tempClass = tempLevel === 'critical'
+    ? ' critical-temp'
+    : tempLevel === 'warning'
+    ? ' warning-temp'
     : '';
-
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      data.onSpeedChange?.(Number(e.target.value));
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data.onSpeedChange, data],
-  );
 
   const renderField = (fieldKey: string) => {
     switch (fieldKey) {
@@ -86,21 +74,6 @@ const FanNode: React.FC<NodeProps> = (props) => {
               {formatTemperature(temperature)}
             </span>
           </div>
-        );
-      case 'fanSpeedControl':
-        return (
-          <InteractiveZone key={fieldKey}>
-            <span style={{ fontSize: 11, color: '#666' }}>{getFieldLabel('fanSpeedControl')}: {speedPercent !== null && !Number.isNaN(speedPercent) ? `${speedPercent.toFixed(0)}%` : 'NA'}</span>
-            <input
-              type="range"
-              min={range.min}
-              max={range.max}
-              step={1}
-              value={speedPercent ?? 0}
-              onChange={handleChange}
-              style={{ width: '100%', cursor: 'pointer' }}
-            />
-          </InteractiveZone>
         );
       default: {
         const value = displayMetrics?.[fieldKey] ?? null;

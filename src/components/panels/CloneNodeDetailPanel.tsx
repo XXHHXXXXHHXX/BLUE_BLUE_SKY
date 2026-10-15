@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { Drawer, Descriptions, Slider, Tag, Typography, Button, Space, Divider, Tooltip, Badge } from 'antd';
+import React, { useCallback, useEffect, useMemo } from 'react';
+import { Drawer, Descriptions, Tag, Typography, Button, Space, Divider, Tooltip, Badge } from 'antd';
 import { useCloneTopologyStore } from '../../stores/cloneTopologyStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useHistoryRecordStore, downloadHistoryCSV, downloadHistoryJSON } from '../../stores/historyRecordStore';
@@ -118,18 +118,13 @@ interface CloneNodeDetailPanelProps {
 
 const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClose, node: propNode }) => {
   const nodes = useCloneTopologyStore((s) => s.nodes);
-  const updateFanSpeed = useCloneTopologyStore((s) => s.updateFanSpeed);
-  const updateSourceVoltage = useCloneTopologyStore((s) => s.updateSourceVoltage);
-  
+
   // 从 store 获取实时节点数据
   const node = useMemo(() => {
     if (!propNode) return null;
     const liveNode = nodes.find((n) => n.id === propNode.id);
     return liveNode || propNode;
   }, [nodes, propNode]);
-
-  const [fanSpeed, setFanSpeedLocal] = useState<number>(50);
-  const [voltageValue, setVoltageValue] = useState<number>(1.0);
 
   // 历史曲线录像功能（按模块分别保存，互不干扰）
   const activeNodeId = node?.id ?? null;
@@ -162,18 +157,6 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
     clearHistoryAction(node.id);
   }, [node, clearHistoryAction]);
 
-  // 当节点变化时，同步初始值
-  useEffect(() => {
-    if (!node?.data) return;
-    const { nodeType } = node.data;
-    if (nodeType === 'fan' && node.data.fanData) {
-      setFanSpeedLocal(node.data.fanData.speedPercent ?? 50);
-    }
-    if ((nodeType === 'vr' || nodeType === 'psip') && node.data.sourceData) {
-      setVoltageValue(node.data.sourceData.outputVoltage ?? 1.0);
-    }
-  }, [node]);
-
   // 当正在录像时，为所有正在录像的模块记录数据点（后台录像持续获取最新数据）
   useEffect(() => {
     if (recordingNodeIds.length === 0) return;
@@ -188,27 +171,11 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
     });
   }, [nodes, recordingNodeIds, addDataPoint]);
 
-  // 分身页面只更新本地状态，不发送后端命令
-  const handleFanSpeedComplete = useCallback(async (value: number) => {
-    if (!node) return;
-    setFanSpeedLocal(value);
-    updateFanSpeed(node.id, value);
-    // 分身页面不实际发送控制命令，只做本地演示
-  }, [node, updateFanSpeed]);
-
-  const handleVoltageComplete = useCallback(async (value: number) => {
-    if (!node) return;
-    setVoltageValue(value);
-    updateSourceVoltage(node.id, value);
-    // 分身页面不实际发送控制命令，只做本地演示
-  }, [node, updateSourceVoltage]);
-
   const renderContent = () => {
     if (!node?.data) return <div>暂无数据</div>;
 
     const d = node.data as Record<string, unknown>;
     const nodeType = d.nodeType as string;
-    const controlRange = d.controlRange as { min: number; max: number } | undefined;
 
     switch (nodeType) {
       case 'ac': {
@@ -263,118 +230,53 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
       case 'vr': {
         const s = d.sourceData as SourceData;
         if (!s) return <div>暂无数据</div>;
-        const vMin = controlRange?.min ?? 0.5;
-        const vMax = controlRange?.max ?? 1.5;
-        const marks: Record<number, string> = {
-          [vMin]: `${vMin}V`,
-          [vMax]: `${vMax}V`,
-        };
-        const vMid = +((vMin + vMax) / 2).toFixed(2);
-        marks[vMid] = `${vMid}V`;
         return (
-          <>
-            <Descriptions column={1} bordered size="small">
-              <Descriptions.Item label="VR输入电压查询">{formatVoltage(s.inputVoltage)}</Descriptions.Item>
-              <Descriptions.Item label="VR输入电流查询">{formatCurrent(s.inputCurrent ?? s.current)}</Descriptions.Item>
-              <Descriptions.Item label="VR输入功率查询">{formatPower(s.inputPower)}</Descriptions.Item>
-              <Descriptions.Item label="VR输出电压查询">{formatVoltage(s.outputVoltage)}</Descriptions.Item>
-              <Descriptions.Item label="VR输出电流查询">{formatCurrent(s.outputCurrent ?? s.current)}</Descriptions.Item>
-              <Descriptions.Item label="VR输出功率查询">{formatPower(s.outputPower)}</Descriptions.Item>
-              <Descriptions.Item label="转换效率">{formatEfficiency(s.efficiency)}</Descriptions.Item>
-              {s.temperature != null && (
-                <Descriptions.Item label="温度">{formatTemperature(s.temperature)}</Descriptions.Item>
-              )}
-            </Descriptions>
-            <div style={{ marginTop: 16 }}>
-              <Title level={5}>VR输出电压调节接口（演示模式）</Title>
-              <Slider
-                min={vMin}
-                max={vMax}
-                step={0.01}
-                value={voltageValue}
-                onChange={setVoltageValue}
-                onChangeComplete={handleVoltageComplete}
-                marks={marks}
-              />
-            </div>
-          </>
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label="VR输入电压查询">{formatVoltage(s.inputVoltage)}</Descriptions.Item>
+            <Descriptions.Item label="VR输入电流查询">{formatCurrent(s.inputCurrent ?? s.current)}</Descriptions.Item>
+            <Descriptions.Item label="VR输入功率查询">{formatPower(s.inputPower)}</Descriptions.Item>
+            <Descriptions.Item label="VR输出电压查询">{formatVoltage(s.outputVoltage)}</Descriptions.Item>
+            <Descriptions.Item label="VR输出电流查询">{formatCurrent(s.outputCurrent ?? s.current)}</Descriptions.Item>
+            <Descriptions.Item label="VR输出功率查询">{formatPower(s.outputPower)}</Descriptions.Item>
+            <Descriptions.Item label="转换效率">{formatEfficiency(s.efficiency)}</Descriptions.Item>
+            {s.temperature != null && (
+              <Descriptions.Item label="温度">{formatTemperature(s.temperature)}</Descriptions.Item>
+            )}
+          </Descriptions>
         );
       }
 
       case 'psip': {
         const s = d.sourceData as SourceData;
         if (!s) return <div>暂无数据</div>;
-        const vMin = controlRange?.min ?? 0.5;
-        const vMax = controlRange?.max ?? 1.5;
-        const marks: Record<number, string> = {
-          [vMin]: `${vMin}V`,
-          [vMax]: `${vMax}V`,
-        };
-        const vMid = +((vMin + vMax) / 2).toFixed(2);
-        marks[vMid] = `${vMid}V`;
         return (
-          <>
-            <Descriptions column={1} bordered size="small">
-              <Descriptions.Item label="psip输入电压查询">{formatVoltage(s.inputVoltage)}</Descriptions.Item>
-              <Descriptions.Item label="psip输入电流查询">{formatCurrent(s.inputCurrent ?? s.current)}</Descriptions.Item>
-              <Descriptions.Item label="psip输入功率查询">{formatPower(s.inputPower)}</Descriptions.Item>
-              <Descriptions.Item label="psip输出电压查询">{formatVoltage(s.outputVoltage)}</Descriptions.Item>
-              <Descriptions.Item label="psip输出电流查询">{formatCurrent(s.outputCurrent ?? s.current)}</Descriptions.Item>
-              <Descriptions.Item label="psip输出功率查询">{formatPower(s.outputPower)}</Descriptions.Item>
-              <Descriptions.Item label="转换效率">{formatEfficiency(s.efficiency)}</Descriptions.Item>
-              {s.temperature != null && (
-                <Descriptions.Item label="温度">{formatTemperature(s.temperature)}</Descriptions.Item>
-              )}
-            </Descriptions>
-            <div style={{ marginTop: 16 }}>
-              <Title level={5}>psip输出电压调节接口（演示模式）</Title>
-              <Slider
-                min={vMin}
-                max={vMax}
-                step={0.01}
-                value={voltageValue}
-                onChange={setVoltageValue}
-                onChangeComplete={handleVoltageComplete}
-                marks={marks}
-              />
-            </div>
-          </>
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label="psip输入电压查询">{formatVoltage(s.inputVoltage)}</Descriptions.Item>
+            <Descriptions.Item label="psip输入电流查询">{formatCurrent(s.inputCurrent ?? s.current)}</Descriptions.Item>
+            <Descriptions.Item label="psip输入功率查询">{formatPower(s.inputPower)}</Descriptions.Item>
+            <Descriptions.Item label="psip输出电压查询">{formatVoltage(s.outputVoltage)}</Descriptions.Item>
+            <Descriptions.Item label="psip输出电流查询">{formatCurrent(s.outputCurrent ?? s.current)}</Descriptions.Item>
+            <Descriptions.Item label="psip输出功率查询">{formatPower(s.outputPower)}</Descriptions.Item>
+            <Descriptions.Item label="转换效率">{formatEfficiency(s.efficiency)}</Descriptions.Item>
+            {s.temperature != null && (
+              <Descriptions.Item label="温度">{formatTemperature(s.temperature)}</Descriptions.Item>
+            )}
+          </Descriptions>
         );
       }
 
       case 'fan': {
         const f = d.fanData as FanData;
         if (!f) return <div>暂无数据</div>;
-        const sMin = controlRange?.min ?? 0;
-        const sMax = controlRange?.max ?? 100;
-        const marks: Record<number, string> = {
-          [sMin]: `${sMin}%`,
-          [sMax]: `${sMax}%`,
-        };
-        const sMid = Math.round((sMin + sMax) / 2);
-        marks[sMid] = `${sMid}%`;
         return (
-          <>
-            <Descriptions column={1} bordered size="small">
-              <Descriptions.Item label="风扇功耗查询">{formatPower(f.power)}</Descriptions.Item>
-              {f.temperature != null && (
-                <Descriptions.Item label="风扇温度查询">{formatTemperature(f.temperature)}</Descriptions.Item>
-              )}
-              <Descriptions.Item label="转速">{formatRPM(f.rpm)}</Descriptions.Item>
-              <Descriptions.Item label="速度百分比">{f.speedPercent}%</Descriptions.Item>
-            </Descriptions>
-            <div style={{ marginTop: 16 }}>
-              <Title level={5}>风扇调速接口（演示模式）</Title>
-              <Slider
-                min={sMin}
-                max={sMax}
-                value={fanSpeed}
-                onChange={setFanSpeedLocal}
-                onChangeComplete={handleFanSpeedComplete}
-                marks={marks}
-              />
-            </div>
-          </>
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label="风扇功耗查询">{formatPower(f.power)}</Descriptions.Item>
+            {f.temperature != null && (
+              <Descriptions.Item label="风扇温度查询">{formatTemperature(f.temperature)}</Descriptions.Item>
+            )}
+            <Descriptions.Item label="转速">{formatRPM(f.rpm)}</Descriptions.Item>
+            <Descriptions.Item label="速度百分比">{f.speedPercent}%</Descriptions.Item>
+          </Descriptions>
         );
       }
 
