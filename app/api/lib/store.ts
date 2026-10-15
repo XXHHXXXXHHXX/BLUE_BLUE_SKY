@@ -692,11 +692,13 @@ export function updateNodeData(nodes: TopologyNode[]): TopologyNode[] {
           
           if (cpuData.powerDomains && cpuData.powerDomains.length > 0) {
             cpuData.powerDomains.forEach(domain => {
-              domain.voltage = generateFluctuation(domain.voltage, 3);
-              domain.current = generateFluctuation(domain.current, 5);
-              domain.power = +(domain.voltage * domain.current).toFixed(2);
+              if (domain.voltage !== undefined) domain.voltage = generateFluctuation(domain.voltage, 3);
+              if (domain.current !== undefined) domain.current = generateFluctuation(domain.current, 5);
+              if (domain.voltage !== undefined && domain.current !== undefined) {
+                domain.power = +(domain.voltage * domain.current).toFixed(2);
+              }
             });
-            cpuData.power = +cpuData.powerDomains.reduce((sum, d) => sum + d.power, 0).toFixed(2);
+            cpuData.power = +cpuData.powerDomains.reduce((sum, d) => sum + (d.power ?? 0), 0).toFixed(2);
           }
         }
         break;

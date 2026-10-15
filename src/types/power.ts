@@ -45,9 +45,9 @@ export interface FanData extends LoadData {
 /** CPU电源域 */
 export interface CPUPowerDomain {
   name: string;           // 域名称
-  voltage: number;        // 电压 V
-  current: number;        // 电流 A
-  power: number;          // 功耗 W
+  voltage?: number;       // 电压 V（未配置或无数据时缺省）
+  current?: number;       // 电流 A
+  power?: number;         // 功耗 W
 }
 
 /** CPU电源域字段定义：电源域详情弹窗内的固定字段 */
@@ -96,32 +96,31 @@ export const CPU_POWER_DOMAINS: string[] = Array.from(
 );
 
 /** 根据字段映射值构建 CPU 电源域数组
- * 优先使用映射值，未配置的域字段回退到已有数据
+ * 只返回用户配置了且取到实际值的域与测量项；
+ * 未配置任何电源域字段时返回空数组（详情弹窗显示暂无数据）
  */
 export function buildCPUPowerDomains(
   mapped: Record<string, number | string | boolean | null>,
-  existing: CPUPowerDomain[] | undefined
+  _existing: CPUPowerDomain[] | undefined
 ): CPUPowerDomain[] {
-  return CPU_POWER_DOMAINS.map((name) => {
+  return CPU_POWER_DOMAINS.flatMap((name) => {
     const defs = CPU_POWER_DOMAIN_FIELD_DEFS.filter((d) => d.domain === name);
-    const existingDomain = existing?.find((d) => d.name === name);
-    const getValue = (measure: 'voltage' | 'current' | 'power'): number => {
+    const domain: CPUPowerDomain = { name };
+    let hasValue = false;
+    for (const measure of ['voltage', 'current', 'power'] as const) {
       const def = defs.find((d) => d.measure === measure);
       if (def && Object.prototype.hasOwnProperty.call(mapped, def.fieldKey)) {
         const v = mapped[def.fieldKey];
         if (v !== null && v !== undefined && v !== '') {
           const num = Number(v);
-          if (!Number.isNaN(num)) return num;
+          if (!Number.isNaN(num)) {
+            domain[measure] = num;
+            hasValue = true;
+          }
         }
       }
-      return existingDomain?.[measure] ?? 0;
-    };
-    return {
-      name,
-      voltage: getValue('voltage'),
-      current: getValue('current'),
-      power: getValue('power'),
-    };
+    }
+    return hasValue ? [domain] : [];
   });
 }
 

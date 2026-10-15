@@ -97,7 +97,7 @@ function mockAMUEvents(): AMUEvent[] {
 export function mockCPUData(): CPUData {
   const domains = mockPowerDomains();
   return {
-    power: domains.reduce((sum, d) => sum + d.power, 0),
+    power: domains.reduce((sum, d) => sum + (d.power ?? 0), 0),
     temperature: fluctuate(72, 3),
     powerDomains: domains,
     amuEvents: mockAMUEvents(),

@@ -20,9 +20,9 @@ interface CPUPowerDomainProps {
 
 const columns: ColumnsType<CPUPowerDomainType> = [
   { title: '域名称', dataIndex: 'name', key: 'name' },
-  { title: '电压(V)', dataIndex: 'voltage', key: 'voltage', render: (v: number) => v.toFixed(3) },
-  { title: '电流(A)', dataIndex: 'current', key: 'current', render: (v: number) => v.toFixed(2) },
-  { title: '功耗(W)', dataIndex: 'power', key: 'power', render: (v: number) => v.toFixed(1) },
+  { title: '电压(V)', dataIndex: 'voltage', key: 'voltage', render: (v?: number) => (v !== undefined ? v.toFixed(3) : '--') },
+  { title: '电流(A)', dataIndex: 'current', key: 'current', render: (v?: number) => (v !== undefined ? v.toFixed(2) : '--') },
+  { title: '功耗(W)', dataIndex: 'power', key: 'power', render: (v?: number) => (v !== undefined ? v.toFixed(1) : '--') },
 ];
 
 const CPUPowerDomain: React.FC<CPUPowerDomainProps> = ({ open, onClose, nodeId, cpuData: initialCpuData }) => {
@@ -51,7 +51,7 @@ const CPUPowerDomain: React.FC<CPUPowerDomainProps> = ({ open, onClose, nodeId, 
       styles={{ body: modal.bodyStyle }}
       destroyOnClose
     >
-      {liveCpuData ? (
+      {liveCpuData && (liveCpuData.powerDomains?.length ?? 0) > 0 ? (
         <>
           <PowerDomainPie domains={liveCpuData.powerDomains} />
           <Divider />

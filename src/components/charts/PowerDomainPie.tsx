@@ -5,9 +5,9 @@ import ReactECharts from 'echarts-for-react';
 
 interface PowerDomain {
   name: string;
-  voltage: number;
-  current: number;
-  power: number;
+  voltage?: number;
+  current?: number;
+  power?: number;
 }
 
 interface PowerDomainPieProps {
@@ -30,7 +30,7 @@ const PowerDomainPie: React.FC<PowerDomainPieProps> = ({ domains }) => {
         type: 'pie',
         radius: ['30%', '60%'],
         center: ['50%', '45%'],
-        data: domains.map((d) => ({ name: d.name, value: d.power })),
+        data: domains.filter((d) => d.power !== undefined).map((d) => ({ name: d.name, value: d.power as number })),
         emphasis: {
           itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.3)' },
         },
