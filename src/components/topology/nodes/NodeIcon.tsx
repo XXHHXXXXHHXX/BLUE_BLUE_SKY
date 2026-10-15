@@ -21,6 +21,7 @@ const defaultIconMap: Record<HardwareNodeType, string> = {
   chassis: 'AppstoreOutlined',
   thermometer: 'DashboardOutlined',
   custom: 'BuildOutlined',
+  control: 'ControlOutlined',
 };
 
 /** Fan SVG icon (custom, since Ant Design doesn't have a fan icon) */

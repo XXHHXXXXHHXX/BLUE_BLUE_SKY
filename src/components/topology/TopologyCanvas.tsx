@@ -12,6 +12,7 @@ import '@xyflow/react/dist/style.css';
 
 import { staticNodeTypes } from './nodes';
 import PowerEdge from './edges/PowerEdge';
+import ControlEdge from './edges/ControlEdge';
 import Toolbar from './Toolbar';
 import NodeDetailPanel from '../panels/NodeDetailPanel';
 import CPUPowerDomain from '../panels/CPUPowerDomain';
@@ -21,7 +22,7 @@ import { useMonitorStore } from '../../stores/monitorStore';
 import type { TopologyNode } from '../../types/topology';
 import type { CPUData } from '../../types/power';
 
-const edgeTypes = { powerEdge: PowerEdge };
+const edgeTypes = { powerEdge: PowerEdge, controlEdge: ControlEdge };
 
 const TopologyCanvas: React.FC = () => {
   const {

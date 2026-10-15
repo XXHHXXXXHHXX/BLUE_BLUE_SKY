@@ -12,6 +12,7 @@ import '@xyflow/react/dist/style.css';
 
 import { staticNodeTypes } from './nodes';
 import PowerEdge from './edges/PowerEdge';
+import ControlEdge from './edges/ControlEdge';
 import CloneToolbar from './CloneToolbar';
 import CloneNodeDetailPanel from '../panels/CloneNodeDetailPanel';
 import CloneTopologyOverviewPanel from '../panels/CloneTopologyOverviewPanel';
@@ -21,7 +22,7 @@ import type { TopologyNode } from '../../types/topology';
 import type { CPUData } from '../../types/power';
 
 
-const edgeTypes = { powerEdge: PowerEdge };
+const edgeTypes = { powerEdge: PowerEdge, controlEdge: ControlEdge };
 
 interface CloneCanvasProps {
   // 可选的初始拓扑ID

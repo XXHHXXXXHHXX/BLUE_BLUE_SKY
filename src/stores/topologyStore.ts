@@ -83,6 +83,7 @@ interface TopologyState {
   updateNodeAlias: (nodeId: string, alias: string) => Promise<void>;
   updateNodeCustomIconUrl: (nodeId: string, url: string | undefined) => Promise<void>;
   updateNodeApiConfig: (nodeId: string, config: ApiConfig) => Promise<void>;
+  updateNodeControlConfig: (nodeId: string, config: import('../types/topology').ControlConfig) => Promise<void>;
 
   // 导入导出
   exportTopology: () => TopologyExportData;
@@ -231,16 +232,24 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
   },
 
   addEdge: async (connection) => {
-    const { edges } = get();
+    const { edges, nodes } = get();
     const id = `e-${connection.source}-${connection.target}-${Date.now()}`;
+    // 任一端为控制模块（control 类型）的边使用虚线控制边，表示控制关系
+    const sourceNode = nodes.find((n) => n.id === connection.source);
+    const targetNode = nodes.find((n) => n.id === connection.target);
+    const isControl =
+      sourceNode?.data?.nodeType === 'control' ||
+      targetNode?.data?.nodeType === 'control';
     const newEdge: TopologyEdge = {
       id,
       source: connection.source!,
       target: connection.target!,
       sourceHandle: connection.sourceHandle ?? undefined,
       targetHandle: connection.targetHandle ?? undefined,
-      type: 'powerEdge',
-      data: { loss: 0, lossPercent: 0, animated: true },
+      type: isControl ? 'controlEdge' : 'powerEdge',
+      data: isControl
+        ? { loss: 0, lossPercent: 0, animated: false, label: '控制', color: '#722ed1' }
+        : { loss: 0, lossPercent: 0, animated: true },
     };
     set({ edges: [...edges, newEdge] });
     await get().saveToBackend();
@@ -333,6 +342,18 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
       nodes: nodes.map(n =>
         n.id === nodeId
           ? { ...n, data: { ...n.data, apiConfig: config } }
+          : n
+      ),
+    });
+    await get().saveToBackend();
+  },
+
+  updateNodeControlConfig: async (nodeId, config) => {
+    const { nodes } = get();
+    set({
+      nodes: nodes.map(n =>
+        n.id === nodeId
+          ? { ...n, data: { ...n.data, controlConfig: config } }
           : n
       ),
     });

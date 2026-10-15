@@ -15,6 +15,7 @@ const categories: ModuleCategory[] = [
   { label: '负载类', types: ['cpu', 'memory', 'fan', 'disk', 'io', 'card'] },
   { label: '其他', types: ['sensor'] },
   { label: '自定义', types: ['custom'] },
+  { label: '控制', types: ['control'] },
 ];
 
 const ModulePalette: React.FC = () => {

@@ -10,7 +10,7 @@ export type HardwareNodeType =
   | 'ac' | 'psu' | 'vr' | 'psip' | 'busbar'
   | 'cpu' | 'memory' | 'fan' | 'disk'
   | 'io' | 'card' | 'sensor' | 'mgmtBoard' | 'chassis'
-  | 'thermometer' | 'custom';
+  | 'thermometer' | 'custom' | 'control';
 
 /** BMC 连接配置（通过 SSH） */
 export interface BMCConfig {
@@ -158,6 +158,7 @@ export const FIXED_FIELD_DEFS: Record<string, FixedFieldDef[]> = {
   ],
   chassis: [],
   custom: [],
+  control: [],
 };
 
 /** 默认字段阈值配置 */
@@ -275,6 +276,24 @@ export interface ApiConfig {
   customFieldDefs?: { fieldKey: string; label: string }[];
 }
 
+/** 控制范围方式：范围式（连续可调）或固定选项（离散数值） */
+export type ControlRangeMode = 'range' | 'options';
+
+/** 控制模块配置：控制命令（发往 BMC）+ 控制范围 */
+export interface ControlConfig {
+  /** 控制 Shell 命令，使用 {value} 占位符表示调节值，系统将通过 SSH 下发到 BMC 执行 */
+  controlShell: string;
+  /** 控制范围方式：range=范围式，options=固定选项 */
+  mode: ControlRangeMode;
+  /** 范围式：最小值 / 最大值 / 步进 / 单位 */
+  rangeMin?: number;
+  rangeMax?: number;
+  rangeStep?: number;
+  rangeUnit?: string;
+  /** 固定选项：离散数值列表 */
+  options?: number[];
+}
+
 /** 节点数据联合类型 */
 export type HardwareNodeData = {
   label: string;
@@ -302,6 +321,7 @@ export type HardwareNodeData = {
   | { nodeType: 'chassis'; }
   | { nodeType: 'thermometer'; thermometerData: import('./power').ThermometerData }
   | { nodeType: 'custom'; }
+  | { nodeType: 'control'; controlConfig?: ControlConfig }
 );
 
 /** React Flow节点类型 */

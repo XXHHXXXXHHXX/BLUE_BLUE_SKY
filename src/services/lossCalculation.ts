@@ -156,6 +156,10 @@ export function calculateEdgeLosses(nodes: TopologyNode[], edges: TopologyEdge[]
   });
 
   return edges.map(edge => {
+    // 控制关系边（controlEdge）不参与功率链路损耗计算
+    if (edge.type === 'controlEdge') {
+      return edge;
+    }
     // 检查是否反转
     const isReversed = (edge.data as { _reversed?: boolean } | undefined)?._reversed === true;
 

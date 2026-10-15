@@ -17,6 +17,7 @@ import '@xyflow/react/dist/style.css';
 
 import { nodeTypes } from '../topology/nodes';
 import PowerEdge from '../topology/edges/PowerEdge';
+import ControlEdge from '../topology/edges/ControlEdge';
 import DesignToolbar from './DesignToolbar';
 import ModulePalette from './ModulePalette';
 import IconPicker from './IconPicker';
@@ -25,7 +26,7 @@ import { useDesignTopologyStore } from '../../stores/designTopologyStore';
 import { calculateEdgeLosses } from '../../services/lossCalculation';
 import type { HardwareNodeType, TopologyNode } from '../../types/topology';
 
-const edgeTypes = { powerEdge: PowerEdge };
+const edgeTypes = { powerEdge: PowerEdge, controlEdge: ControlEdge };
 
 const DesignCanvasInner: React.FC = () => {
   const {

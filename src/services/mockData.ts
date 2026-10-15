@@ -195,6 +195,7 @@ export const nodeTypeLabels: Record<string, string> = {
   chassis: '机框',
   thermometer: '温度计',
   custom: '自定义模块',
+  control: '控制模块',
 };
 
 /** 各模块类型的默认字段映射配置（使用 fieldKey，显示名固定） */
@@ -307,6 +308,7 @@ export const defaultFieldMappings: Record<string, FieldMapping[]> = {
   custom: [
     { fieldKey: 'power', bmcField: '自定义模块功耗' },
   ],
+  control: [],
   thermometer: [
     { fieldKey: 'temperature', bmcField: 'Thermometer Temp' },
     { fieldKey: 'temperatureStatus', bmcField: 'Thermometer Status' },
@@ -376,6 +378,21 @@ export function createDefaultNodeData(type: string): HardwareNodeData {
           ],
         },
         displayMetrics: { power: fluctuate(50, 20) },
+      };
+    case 'control':
+      return {
+        label,
+        nodeType: 'control' as const,
+        category: 'other' as const,
+        controlConfig: {
+          controlShell: '',
+          mode: 'range',
+          rangeMin: 0,
+          rangeMax: 100,
+          rangeStep: 1,
+          rangeUnit: '%',
+          options: [],
+        },
       };
     default:
       return { label, nodeType: 'chassis' as const, category, apiConfig };
@@ -528,6 +545,10 @@ export function refreshNodeData(nodes: TopologyNode[]): TopologyNode[] {
 /** 刷新边数据（保留 label / customData 等用户字段） */
 export function refreshEdgeData(edges: TopologyEdge[]): TopologyEdge[] {
   return edges.map(edge => {
+    // 控制关系边不参与功率损耗波动刷新
+    if (edge.type === 'controlEdge') {
+      return edge;
+    }
     const prev = edge.data!;
     // 新建边 loss=0 时给一个随机小损耗，避免永远为0
     const baseLoss = prev.loss === 0 ? +(Math.random() * 2 + 0.5).toFixed(2) : prev.loss;

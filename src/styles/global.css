@@ -182,6 +182,18 @@ html, body, #root {
   color: #13c2c2;
 }
 
+/* 控制模块节点 */
+.hardware-node.control-node {
+  border-color: #b37feb;
+  background: linear-gradient(135deg, #f9f0ff 0%, #fff 100%);
+  min-width: 180px;
+}
+
+.hardware-node.control-node .node-icon-area {
+  background: rgba(114, 46, 209, 0.08);
+  color: #722ed1;
+}
+
 /* 温度计 - 低温蓝色闪烁 */
 @keyframes thermometer-cold-flash {
   0%, 100% {

@@ -12,12 +12,13 @@ import {
   ArrowUpOutlined,
   ArrowDownOutlined,
   ApartmentOutlined,
+  ControlOutlined,
 } from '@ant-design/icons';
 import { useDesignTopologyStore } from '../../stores/designTopologyStore';
 import { defaultFieldMappings, defaultPowerDomainFieldMappings } from '../../services/mockData';
 import { getNodeLossFieldAnnotation } from '../../services/lossCalculation';
 import { CPU_POWER_DOMAIN_FIELD_DEFS } from '../../types/power';
-import type { TopologyNode, HardwareNodeType, ApiConfig, FieldMapping, FieldThreshold } from '../../types/topology';
+import type { TopologyNode, HardwareNodeType, ApiConfig, FieldMapping, FieldThreshold, ControlConfig } from '../../types/topology';
 import { FIXED_FIELD_DEFS, DEFAULT_FIELD_THRESHOLDS } from '../../types/topology';
 
 const { Text, Title } = Typography;
@@ -27,7 +28,7 @@ const typeTagMap: Record<HardwareNodeType, string> = {
   ac: 'AC', psu: 'PSU', vr: 'VR', psip: 'PSIP', busbar: 'BUSBAR',
   cpu: 'CPU', memory: 'MEM', fan: 'FAN', disk: 'DISK',
   io: 'IO', card: 'CARD', sensor: 'SENSOR', mgmtBoard: 'MGMT', chassis: 'CHASSIS',
-  thermometer: 'THERM', custom: 'CUSTOM',
+  thermometer: 'THERM', custom: 'CUSTOM', control: 'CTRL',
 };
 
 interface NodeEditPanelProps {
@@ -37,9 +38,11 @@ interface NodeEditPanelProps {
 }
 
 const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) => {
-  const { updateNodeAlias, updateNodeCustomIconUrl, updateNodeApiConfig, updateNodeFieldMappings, updateNodePowerDomainFieldMappings } = useDesignTopologyStore();
+  const { updateNodeAlias, updateNodeCustomIconUrl, updateNodeApiConfig, updateNodeControlConfig, updateNodeFieldMappings, updateNodePowerDomainFieldMappings } = useDesignTopologyStore();
 
   const [alias, setAlias] = useState('');
+  const [controlConfig, setControlConfig] = useState<ControlConfig>({ controlShell: '', mode: 'range' });
+  const [controlOptionInput, setControlOptionInput] = useState('');
   const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([]);
   const [powerDomainFieldMappings, setPowerDomainFieldMappings] = useState<FieldMapping[]>([]);
   const [customFieldDefs, setCustomFieldDefs] = useState<{ fieldKey: string; label: string }[]>([]);
@@ -62,6 +65,9 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
       // 使用节点已有的阈值配置，或该类型的默认阈值
       const existingThresholds = node.data.apiConfig?.fieldThresholds;
       setFieldThresholds(existingThresholds || []);
+      // 使用节点已有的控制配置（控制模块专用）
+      const existingControl = (node.data as { controlConfig?: ControlConfig }).controlConfig;
+      setControlConfig(existingControl || { controlShell: '', mode: 'range' });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node?.id]);  // 只在节点 ID 变化时同步，避免 node 对象引用变化导致重置
@@ -129,6 +135,32 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     updateNodeApiConfig(node.id, config);
     message.success('字段映射配置已保存');
   }, [node, fieldMappings, powerDomainFieldMappings, customFieldDefs, fieldThresholds, updateNodeApiConfig]);
+
+  // 保存控制配置（控制模块专用）
+  const handleSaveControlConfig = useCallback(() => {
+    if (!node) return;
+    const config: ControlConfig = {
+      controlShell: (controlConfig.controlShell || '').trim(),
+      mode: controlConfig.mode,
+      rangeMin: controlConfig.rangeMin,
+      rangeMax: controlConfig.rangeMax,
+      rangeStep: controlConfig.rangeStep,
+      rangeUnit: controlConfig.rangeUnit,
+      options: controlConfig.options || [],
+    };
+    updateNodeControlConfig(node.id, config);
+    message.success('控制配置已保存');
+  }, [node, controlConfig, updateNodeControlConfig]);
+
+  // 解析固定选项输入（支持逗号/空格分隔）
+  const handleParseOptions = useCallback((raw: string): number[] => {
+    return raw
+      .split(/[,，\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => Number(s))
+      .filter((n) => !Number.isNaN(n));
+  }, []);
 
   // 添加字段映射（选择指定字段）
   const [fieldToAdd, setFieldToAdd] = useState<string | null>(null);
@@ -827,6 +859,172 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     );
   };
 
+  // 控制配置 Tab（控制模块专用）
+  const renderControlTab = () => {
+    if (!nodeType || nodeType !== 'control') return null;
+
+    const set = (patch: Partial<ControlConfig>) =>
+      setControlConfig((prev) => ({ ...prev, ...patch }));
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* 控制命令 */}
+        <div>
+          <Title level={5} style={{ margin: 0, marginBottom: 8 }}>
+            <ControlOutlined /> 控制命令
+          </Title>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+            配置发往 BMC 的控制 Shell 命令，使用 {'{value}'} 占位符表示调节值，系统将通过 SSH 下发到 BMC 执行。
+          </Text>
+          <Input.TextArea
+            rows={3}
+            placeholder="如：ipmitool -I lanplus -H {ip} -U {user} -P {pass} raw 0x30 0x45 0x01 {value}"
+            value={controlConfig.controlShell}
+            onChange={(e) => set({ controlShell: e.target.value })}
+          />
+        </div>
+
+        <Divider style={{ margin: '4px 0' }} />
+
+        {/* 控制范围方式 */}
+        <div>
+          <Title level={5} style={{ margin: 0, marginBottom: 8 }}>
+            <ControlOutlined /> 控制范围
+          </Title>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+            选择范围式（连续可调）或固定选项（离散数值），两种都可配置，之后监控界面据此生成调节控件。
+          </Text>
+
+          <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+            <Button
+              type={controlConfig.mode === 'range' ? 'primary' : 'default'}
+              onClick={() => set({ mode: 'range' })}
+            >
+              范围式
+            </Button>
+            <Button
+              type={controlConfig.mode === 'options' ? 'primary' : 'default'}
+              onClick={() => set({ mode: 'options' })}
+            >
+              固定选项
+            </Button>
+          </div>
+
+          {/* 范围式配置 */}
+          {controlConfig.mode === 'range' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <div style={{ flex: 1 }}>
+                  <Text style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>最小值</Text>
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    value={controlConfig.rangeMin ?? 0}
+                    onChange={(v) => set({ rangeMin: v ?? undefined })}
+                    placeholder="最小值"
+                  />
+                </div>
+                <span style={{ marginTop: 20 }}>~</span>
+                <div style={{ flex: 1 }}>
+                  <Text style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>最大值</Text>
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    value={controlConfig.rangeMax ?? 100}
+                    onChange={(v) => set({ rangeMax: v ?? undefined })}
+                    placeholder="最大值"
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <div style={{ flex: 1 }}>
+                  <Text style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>步进</Text>
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    value={controlConfig.rangeStep ?? 1}
+                    onChange={(v) => set({ rangeStep: v ?? undefined })}
+                    placeholder="步进"
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <Text style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>单位</Text>
+                  <Input
+                    style={{ width: '100%' }}
+                    value={controlConfig.rangeUnit || ''}
+                    onChange={(e) => set({ rangeUnit: e.target.value })}
+                    placeholder="如 % / V / RPM"
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* 固定选项配置 */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <Text style={{ display: 'block', fontSize: 12 }}>固定选项（用逗号或空格分隔数值）</Text>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                <Input
+                  style={{ flex: 1 }}
+                  value={controlOptionInput}
+                  onChange={(e) => setControlOptionInput(e.target.value)}
+                  placeholder="如：10, 20, 30, 40, 50"
+                  onPressEnter={() => {
+                    set({ options: handleParseOptions(controlOptionInput) });
+                    setControlOptionInput('');
+                  }}
+                />
+                <Button
+                  type="primary"
+                  onClick={() => {
+                    set({ options: handleParseOptions(controlOptionInput) });
+                    setControlOptionInput('');
+                  }}
+                >
+                  添加
+                </Button>
+              </div>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <div style={{ flex: '0 0 120px' }}>
+                  <Text style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>单位</Text>
+                  <Input
+                    style={{ width: '100%' }}
+                    value={controlConfig.rangeUnit || ''}
+                    onChange={(e) => set({ rangeUnit: e.target.value })}
+                    placeholder="如 % / V / RPM"
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <Text style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>当前选项</Text>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {(controlConfig.options || []).length === 0 ? (
+                      <Text type="secondary" style={{ fontSize: 12 }}>暂无固定选项</Text>
+                    ) : (
+                      (controlConfig.options || []).map((opt, idx) => (
+                        <Tag
+                          key={idx}
+                          closable
+                          onClose={() =>
+                            set({ options: (controlConfig.options || []).filter((_, i) => i !== idx) })
+                          }
+                          color="purple"
+                        >
+                          {opt}{controlConfig.rangeUnit || ''}
+                        </Tag>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <Divider style={{ margin: '4px 0' }} />
+
+        <Button type="primary" onClick={handleSaveControlConfig} block>
+          保存控制配置
+        </Button>
+      </div>
+    );
+  };
+
   return (
     <Drawer
       title={
@@ -856,6 +1054,13 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
               label: <span><ApiOutlined /> 字段映射</span>,
               children: renderApiTab(),
             },
+            ...(nodeType === 'control'
+              ? [{
+                  key: 'control',
+                  label: <span><ControlOutlined /> 控制配置</span>,
+                  children: renderControlTab(),
+                }]
+              : []),
           ]}
         />
       ) : (

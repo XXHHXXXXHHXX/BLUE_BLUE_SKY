@@ -103,7 +103,7 @@ const typeUpperMap: Record<string, string> = {
   ac: 'AC', psu: 'PSU', vr: 'VR', psip: 'PSIP', busbar: 'BUSBAR',
   cpu: 'CPU', memory: 'MEM', fan: 'FAN', disk: 'DISK',
   io: 'IO', card: 'CARD', sensor: 'SENSOR', mgmtBoard: 'MGMT', chassis: 'CHASSIS',
-  thermometer: 'THERM', custom: 'CUSTOM',
+  thermometer: 'THERM', custom: 'CUSTOM', control: 'CTRL',
 };
 
 /** 获取节点显示标签：有别名时显示 "别名 (类型)"，否则显示原 label */
