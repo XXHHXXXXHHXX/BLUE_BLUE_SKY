@@ -194,13 +194,18 @@ export function calculateEdgeLosses(nodes: TopologyNode[], edges: TopologyEdge[]
 
       const totalTargetPower = allTargetPowers.reduce((sum, p) => sum + p, 0);
 
-      if (totalTargetPower <= 0 || sourcePower <= totalTargetPower) {
-        // 测量误差或数据问题导致总目标功率不小于源功率，认为总损耗为0
-        loss = 0;
-      } else {
+      if (totalTargetPower <= 0) {
+        // 所有目标节点均无输入功率数据，无法分配，保持原值
+        return edge;
+      } else if (sourcePower > totalTargetPower) {
+        // 源输出大于下游输入之和（数据一致），按目标功率比例分配总损耗
         const totalLoss = sourcePower - totalTargetPower;
         // 按目标功率比例分配
         loss = totalLoss * (targetPower / totalTargetPower);
+      } else {
+        // 下游独立测量之和不小于源输出（常见于独立计量误差或多路供电），
+        // 不能整体置0，改为逐链路直接相减，保证每条链路仍参与损耗计算
+        loss = Math.max(0, sourcePower - targetPower);
       }
     }
 
