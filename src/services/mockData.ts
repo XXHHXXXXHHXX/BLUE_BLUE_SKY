@@ -545,8 +545,8 @@ export function refreshNodeData(nodes: TopologyNode[]): TopologyNode[] {
 /** 刷新边数据（保留 label / customData 等用户字段） */
 export function refreshEdgeData(edges: TopologyEdge[]): TopologyEdge[] {
   return edges.map(edge => {
-    // 控制关系边不参与功率损耗波动刷新
-    if (edge.type === 'controlEdge') {
+    // 控制关系边与传感器监测边不参与功率损耗波动刷新
+    if (edge.type === 'controlEdge' || edge.type === 'sensorEdge') {
       return edge;
     }
     const prev = edge.data!;

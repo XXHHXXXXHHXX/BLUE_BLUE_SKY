@@ -156,8 +156,8 @@ export function calculateEdgeLosses(nodes: TopologyNode[], edges: TopologyEdge[]
   });
 
   return edges.map(edge => {
-    // 控制关系边（controlEdge）不参与功率链路损耗计算
-    if (edge.type === 'controlEdge') {
+    // 控制关系边（controlEdge）与传感器监测边（sensorEdge）不参与功率链路损耗计算
+    if (edge.type === 'controlEdge' || edge.type === 'sensorEdge') {
       return edge;
     }
     // 检查是否反转

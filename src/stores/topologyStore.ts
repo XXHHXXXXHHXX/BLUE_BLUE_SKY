@@ -240,15 +240,21 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
     const isControl =
       sourceNode?.data?.nodeType === 'control' ||
       targetNode?.data?.nodeType === 'control';
+    const isSensor =
+      sourceNode?.data?.nodeType === 'sensor' ||
+      targetNode?.data?.nodeType === 'sensor';
+    const edgeType = isControl ? 'controlEdge' : isSensor ? 'sensorEdge' : 'powerEdge';
     const newEdge: TopologyEdge = {
       id,
       source: connection.source!,
       target: connection.target!,
       sourceHandle: connection.sourceHandle ?? undefined,
       targetHandle: connection.targetHandle ?? undefined,
-      type: isControl ? 'controlEdge' : 'powerEdge',
+      type: edgeType,
       data: isControl
         ? { loss: 0, lossPercent: 0, animated: false, label: '控制', color: '#722ed1' }
+        : isSensor
+        ? { loss: 0, lossPercent: 0, animated: false, label: '监测', color: '#52c41a' }
         : { loss: 0, lossPercent: 0, animated: true },
     };
     set({ edges: [...edges, newEdge] });
