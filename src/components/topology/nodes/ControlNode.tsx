@@ -41,6 +41,7 @@ const ControlNode: React.FC<NodeProps> = (props) => {
   const isDesignMode = (props.data as Record<string, unknown>)?._mode === 'design';
 
   const controlConfig = data.controlConfig || {
+    purpose: '',
     controlShell: '',
     mode: 'range' as const,
     rangeMin: 0,
@@ -104,9 +105,8 @@ const ControlNode: React.FC<NodeProps> = (props) => {
   const rangeStep = controlConfig.rangeStep && controlConfig.rangeStep > 0 ? controlConfig.rangeStep : 1;
   const options = controlConfig.options || [];
 
-  const rangeText = mode === 'range'
-    ? `${rangeMin} ~ ${rangeMax}${unit}`
-    : (options.length ? options.map((o) => formatOption(o)).join(' / ') : '未配置');
+  // 控制用途（自定义描述，监控页卡片显示；未配置则不显示）
+  const purpose = controlConfig.purpose?.trim();
 
   return (
     <div className="hardware-node control-node">
@@ -123,12 +123,11 @@ const ControlNode: React.FC<NodeProps> = (props) => {
             <span>{getNodeDisplayLabel(data)}</span>
           </div>
           <div className="node-body">
-            <div>
-              命令：{command ? command.length > 18 ? `${command.slice(0, 18)}…` : command : '未配置'}
-            </div>
-            <div>
-              范围：{rangeText}
-            </div>
+            {purpose && (
+              <div>
+                用途：{purpose}
+              </div>
+            )}
           </div>
         </div>
       </div>

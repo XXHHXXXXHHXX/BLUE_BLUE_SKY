@@ -281,6 +281,8 @@ export type ControlRangeMode = 'range' | 'options';
 
 /** 控制模块配置：控制命令（发往 BMC）+ 控制范围 */
 export interface ControlConfig {
+  /** 控制用途说明，用户在编辑时自定义，监控页卡片显示 */
+  purpose?: string;
   /** 控制 Shell 命令，使用 {value} 占位符表示调节值，系统将通过 SSH 下发到 BMC 执行 */
   controlShell: string;
   /** 控制范围方式：range=范围式，options=固定选项 */

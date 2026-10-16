@@ -140,6 +140,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
   const handleSaveControlConfig = useCallback(() => {
     if (!node) return;
     const config: ControlConfig = {
+      purpose: (controlConfig.purpose || '').trim(),
       controlShell: (controlConfig.controlShell || '').trim(),
       mode: controlConfig.mode,
       rangeMin: controlConfig.rangeMin,
@@ -870,6 +871,23 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* 控制用途 */}
+        <div>
+          <Title level={5} style={{ margin: 0, marginBottom: 8 }}>
+            <ControlOutlined /> 用途
+          </Title>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+            自定义这个控制的用途说明，将在拓扑监控页面的模块卡片上显示。
+          </Text>
+          <Input
+            placeholder="如：风扇转速调节 / CPU 功耗限制 / 电源模式切换"
+            value={controlConfig.purpose || ''}
+            onChange={(e) => set({ purpose: e.target.value })}
+          />
+        </div>
+
+        <Divider style={{ margin: '4px 0' }} />
+
         {/* 控制命令 */}
         <div>
           <Title level={5} style={{ margin: 0, marginBottom: 8 }}>
