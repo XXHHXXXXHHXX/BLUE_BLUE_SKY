@@ -54,12 +54,14 @@ export function getEfficiencyColor(eff: number): string {
   return '#ff4d4f';
 }
 
-/** 损耗颜色映射 */
+/** 损耗颜色映射 - 按严重程度 5 档：0/25/50/75/100% */
 export function getLossColor(lossPercent: number): string {
   if (Number.isNaN(lossPercent)) return '#999';
-  if (lossPercent < 1) return '#52c41a';
-  if (lossPercent < 3) return '#faad14';
-  return '#ff4d4f';
+  if (lossPercent < 25) return '#52c41a';   // 0-25% 正常 绿
+  if (lossPercent < 50) return '#a0d911';   // 25-50% 轻度 黄绿
+  if (lossPercent < 75) return '#faad14';   // 50-75% 中度 黄
+  if (lossPercent < 100) return '#ff7a45';  // 75-100% 重度 橙
+  return '#f5222d';                          // >=100% 严重 红
 }
 
 /** 判断温度是否异常 (>= 80°C 为异常/红色警告) */

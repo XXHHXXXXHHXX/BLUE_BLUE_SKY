@@ -4,6 +4,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { type EdgeProps, getSmoothStepPath, EdgeLabelRenderer, Position, useReactFlow } from '@xyflow/react';
 import { useTopologyStore } from '../../../stores/topologyStore';
 import { useDesignTopologyStore } from '../../../stores/designTopologyStore';
+import { getLossColor } from '../../../utils/formatters';
 import type { EdgeArrowType } from '../../../types/topology';
 
 /** 根据所在模式选择对应的 store action */
@@ -37,13 +38,6 @@ interface PowerEdgeDataLocal {
   _reversed?: boolean;
   bendOffset?: number;
   [key: string]: unknown;
-}
-
-function getEdgeColor(lossPercent: number): string {
-  if (Number.isNaN(lossPercent)) return '#999';
-  if (lossPercent < 1) return '#52c41a';
-  if (lossPercent <= 3) return '#faad14';
-  return '#f5222d';
 }
 
 /** 箭头类型对应的显示文字 */
@@ -207,7 +201,7 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
     8,
   );
 
-  const color = getEdgeColor(lossPercent);
+  const color = getLossColor(lossPercent);
 
   // 为每条边生成唯一的 marker ID
   const markerEndId = `arrow-end-${id}`;
