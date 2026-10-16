@@ -152,14 +152,16 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     message.success('控制配置已保存');
   }, [node, controlConfig, updateNodeControlConfig]);
 
-  // 解析固定选项输入（支持逗号/空格分隔）
-  const handleParseOptions = useCallback((raw: string): number[] => {
+  // 解析固定选项输入（支持逗号/空格分隔；保留字符串选项，数字选项保留为数字）
+  const handleParseOptions = useCallback((raw: string): (number | string)[] => {
     return raw
       .split(/[,，\s]+/)
       .map((s) => s.trim())
       .filter(Boolean)
-      .map((s) => Number(s))
-      .filter((n) => !Number.isNaN(n));
+      .map((s) => {
+        // 纯数字（含小数/负数）转成 number，其余保留字符串
+        return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : s;
+      });
   }, []);
 
   // 添加字段映射（选择指定字段）
@@ -958,7 +960,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
           ) : (
             /* 固定选项配置 */
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <Text style={{ display: 'block', fontSize: 12 }}>固定选项（用逗号或空格分隔数值）</Text>
+              <Text style={{ display: 'block', fontSize: 12 }}>固定选项（用逗号或空格分隔，支持数字或字符串，如 balance / performance）</Text>
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                 <Input
                   style={{ flex: 1 }}
@@ -1005,7 +1007,8 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                           }
                           color="purple"
                         >
-                          {opt}{controlConfig.rangeUnit || ''}
+                          {/* 数字选项带单位，字符串选项忽略单位 */}
+                          {typeof opt === 'number' ? `${opt}${controlConfig.rangeUnit || ''}` : opt}
                         </Tag>
                       ))
                     )}

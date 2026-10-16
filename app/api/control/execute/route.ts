@@ -6,12 +6,12 @@ interface ControlExecuteBody {
   config: BMCConfig;
   /** 控制 Shell 命令，包含 {value} 占位符（以及可选的 {ip}/{user}/{pass}） */
   shell: string;
-  /** 要下发的调节值（将替换 {value} 占位符） */
-  value: number;
+  /** 要下发的调节值（将替换 {value} 占位符），可为数字或字符串 */
+  value: number | string;
 }
 
 /** 替换占位符：{value}/{ip}/{user}/{pass} */
-function renderCommand(shell: string, config: BMCConfig, value: number): string {
+function renderCommand(shell: string, config: BMCConfig, value: number | string): string {
   return shell
     .replace(/\{value\}/g, String(value))
     .replace(/\{ip\}/g, config.ip)
@@ -43,14 +43,14 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (value === undefined || value === null || Number.isNaN(Number(value))) {
+    if (value === undefined || value === null || String(value).trim() === '') {
       return NextResponse.json(
         { success: false, message: '调节值无效' },
         { status: 400 }
       );
     }
 
-    const command = renderCommand(shell.trim(), config, Number(value));
+    const command = renderCommand(shell.trim(), config, typeof value === 'number' ? value : String(value));
     console.log(`[Control] Executing on ${config.ip}: ${command}`);
 
     const { NodeSSH } = await import('node-ssh');

@@ -161,11 +161,12 @@ export interface ControlExecuteResult {
   timestamp?: string;
 }
 
-/** 通过 SSH 将控制命令下发到 BMC（{value} 占位符已在后端替换） */
+/** 通过 SSH 将控制命令下发到 BMC（{value} 占位符已在后端替换）
+ * value 可为数字（如 50）或字符串（如 balance/performance） */
 export async function executeControlCommand(
   bmcConfig: BMCConfig,
   shell: string,
-  value: number
+  value: number | string
 ): Promise<ControlExecuteResult> {
   try {
     const response = await fetch(`${API_BASE_URL}/control/execute`, {

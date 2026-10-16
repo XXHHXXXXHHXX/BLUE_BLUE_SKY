@@ -64,11 +64,16 @@ const ControlNode: React.FC<NodeProps> = (props) => {
     return config;
   }, [sessions, connectedSessionId]);
   const [sending, setSending] = useState(false);
-  const [lastSent, setLastSent] = useState<{ value: number; time: string } | null>(null);
+  const [lastSent, setLastSent] = useState<{ value: number | string; time: string } | null>(null);
+
+  /** 选项展示：数字带单位，字符串忽略单位 */
+  const formatOption = useCallback((v: number | string) => {
+    return typeof v === 'number' ? `${v}${unit}` : v;
+  }, [unit]);
 
   /** 下发指定值到 BMC */
   const handleSend = useCallback(
-    async (value: number) => {
+    async (value: number | string) => {
       if (!command) {
         message.warning('控制命令未配置');
         return;
@@ -81,7 +86,7 @@ const ControlNode: React.FC<NodeProps> = (props) => {
       try {
         const result = await executeControlCommand(bmcConfig, command, value);
         if (result.success) {
-          message.success(`已下发 ${value}${unit}`);
+          message.success(`已下发 ${formatOption(value)}`);
           setLastSent({ value, time: new Date().toLocaleTimeString() });
         } else {
           message.error(result.message || '命令下发失败');
@@ -90,7 +95,7 @@ const ControlNode: React.FC<NodeProps> = (props) => {
         setSending(false);
       }
     },
-    [command, bmcConfig, unit],
+    [command, bmcConfig, formatOption],
   );
 
   // 范围式参数
@@ -101,7 +106,7 @@ const ControlNode: React.FC<NodeProps> = (props) => {
 
   const rangeText = mode === 'range'
     ? `${rangeMin} ~ ${rangeMax}${unit}`
-    : (options.length ? options.map((o) => `${o}${unit}`).join(' / ') : '未配置');
+    : (options.length ? options.map((o) => formatOption(o)).join(' / ') : '未配置');
 
   return (
     <div className="hardware-node control-node">
@@ -145,7 +150,7 @@ const ControlNode: React.FC<NodeProps> = (props) => {
               />
               {lastSent && (
                 <div style={{ fontSize: 11, color: '#8c8c8c', textAlign: 'center', marginTop: -6 }}>
-                  最近下发：{lastSent.value}{unit}（{lastSent.time}）
+                  最近下发：{formatOption(lastSent.value)}（{lastSent.time}）
                 </div>
               )}
             </div>
@@ -156,7 +161,7 @@ const ControlNode: React.FC<NodeProps> = (props) => {
               ) : (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {options.map((opt, idx) => (
-                    <Tooltip key={idx} title={`下发 ${opt}${unit}`}>
+                    <Tooltip key={idx} title={`下发 ${formatOption(opt)}`}>
                       <Button
                         size="small"
                         type={lastSent?.value === opt ? 'primary' : 'default'}
@@ -164,7 +169,7 @@ const ControlNode: React.FC<NodeProps> = (props) => {
                         onClick={() => handleSend(opt)}
                         style={{ borderColor: '#d3adf7' }}
                       >
-                        {opt}{unit}
+                        {formatOption(opt)}
                       </Button>
                     </Tooltip>
                   ))}

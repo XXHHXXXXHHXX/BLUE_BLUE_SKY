@@ -290,8 +290,8 @@ export interface ControlConfig {
   rangeMax?: number;
   rangeStep?: number;
   rangeUnit?: string;
-  /** 固定选项：离散数值列表 */
-  options?: number[];
+  /** 固定选项：离散数值或字符串（字符串直接替换 {value}，如 balance/performance） */
+  options?: (number | string)[];
 }
 
 /** 节点数据联合类型 */
