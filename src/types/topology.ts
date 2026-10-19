@@ -304,6 +304,7 @@ export type HardwareNodeData = {
   customIcon?: string;
   displayAlias?: string;      // 用户自定义显示别名
   customIconUrl?: string;     // 用户上传的自定义图标 (Data URL)
+  nodeColor?: string;         // 用户自定义渲染颜色（整个卡片 UI 主题色）
   apiConfig?: ApiConfig;      // API 接口配置
   displayMetrics?: Record<string, number | null>;  // 用户配置的显示指标（字段映射）
 } & (

@@ -27,6 +27,13 @@ const ScalableHandles: React.FC = () => (
   </>
 );
 
+/** 读取用户自定义渲染颜色（nodeColor），作为 CSS 变量注入卡片 */
+function getNodeColorVar(data: Record<string, unknown>): React.CSSProperties | undefined {
+  const color = data?.nodeColor as string | undefined;
+  if (!color || typeof color !== 'string' || !color.trim()) return undefined;
+  return { ['--node-color' as string]: color.trim() } as React.CSSProperties;
+}
+
 /** 链路损耗计算字段标注徽标（仅设计模式显示） */
 const LossFieldBadge: React.FC<{ data: Record<string, unknown> }> = ({ data }) => {
   if (data?._mode !== 'design') return null;
@@ -148,7 +155,10 @@ export function withScalable(Component: React.FC<NodeProps>): React.FC<NodeProps
     };
 
     return (
-      <div className={`scalable-node-wrapper${highlighted ? ' node-highlighted' : ''}`}>
+      <div
+        className={`scalable-node-wrapper${highlighted ? ' node-highlighted' : ''}`}
+        style={getNodeColorVar(data)}
+      >
         {/* Handle 放在缩放区域之外，保持固定位置 */}
         <ScalableHandles />
         
@@ -209,10 +219,14 @@ const StaticHandles: React.FC = () => (
  */
 export function withoutScalable(Component: React.FC<NodeProps>): React.FC<NodeProps> {
   const WrappedComponent: React.FC<NodeProps> = (props) => {
-    const highlighted = (props.data as Record<string, unknown>)?._highlighted === true;
+    const data = props.data as Record<string, unknown>;
+    const highlighted = data?._highlighted === true;
 
     return (
-      <div className={`scalable-node-wrapper${highlighted ? ' node-highlighted' : ''}`}>
+      <div
+        className={`scalable-node-wrapper${highlighted ? ' node-highlighted' : ''}`}
+        style={getNodeColorVar(data)}
+      >
         <StaticHandles />
         <Component {...props} />
       </div>

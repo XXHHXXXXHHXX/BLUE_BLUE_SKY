@@ -90,6 +90,7 @@ interface DesignTopologyState {
   // 别名 & 自定义图标 & API配置
   updateNodeAlias: (nodeId: string, alias: string) => void;
   updateNodeCustomIconUrl: (nodeId: string, url: string | undefined) => void;
+  updateNodeColor: (nodeId: string, color: string | undefined) => void;
   updateNodeApiConfig: (nodeId: string, config: ApiConfig) => void;
   updateNodeControlConfig: (nodeId: string, config: import('../types/topology').ControlConfig) => void;
   updateNodeFieldMappings: (nodeId: string, mappings: import('../types/topology').FieldMapping[]) => void;
@@ -382,6 +383,18 @@ export const useDesignTopologyStore = create<DesignTopologyState>((set, get) => 
       nodes: nodes.map(n =>
         n.id === nodeId
           ? { ...n, data: { ...n.data, customIconUrl: url } }
+          : n
+      ),
+      hasUnsavedChanges: true,
+    });
+  },
+
+  updateNodeColor: (nodeId, color) => {
+    const { nodes } = get();
+    set({
+      nodes: nodes.map(n =>
+        n.id === nodeId
+          ? { ...n, data: { ...n.data, nodeColor: color || undefined } }
           : n
       ),
       hasUnsavedChanges: true,

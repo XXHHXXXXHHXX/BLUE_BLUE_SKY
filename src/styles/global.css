@@ -194,6 +194,22 @@ html, body, #root {
   color: #722ed1;
 }
 
+/* 用户自定义渲染颜色（nodeColor）：整个卡片 UI 主题色 */
+/* 通过 ScalableNodeWrapper 注入 --node-color CSS 变量，仅对设置了颜色的卡片生效 */
+/* 优先级低于下方告警状态样式（告警使用 !important，异常闪烁仍优先显示） */
+.scalable-node-wrapper[style*="--node-color"] .hardware-node {
+  border-color: var(--node-color);
+}
+
+.scalable-node-wrapper[style*="--node-color"] .hardware-node .node-icon-area {
+  background: color-mix(in srgb, var(--node-color) 12%, white);
+  color: var(--node-color);
+}
+
+.scalable-node-wrapper[style*="--node-color"] .hardware-node .node-header {
+  color: var(--node-color);
+}
+
 /* 温度计 - 低温蓝色闪烁 */
 @keyframes thermometer-cold-flash {
   0%, 100% {

@@ -38,7 +38,7 @@ interface NodeEditPanelProps {
 }
 
 const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) => {
-  const { updateNodeAlias, updateNodeCustomIconUrl, updateNodeApiConfig, updateNodeControlConfig, updateNodeFieldMappings, updateNodePowerDomainFieldMappings } = useDesignTopologyStore();
+  const { updateNodeAlias, updateNodeCustomIconUrl, updateNodeColor, updateNodeApiConfig, updateNodeControlConfig, updateNodeFieldMappings, updateNodePowerDomainFieldMappings } = useDesignTopologyStore();
 
   const [alias, setAlias] = useState('');
   const [controlConfig, setControlConfig] = useState<ControlConfig>({ controlShell: '', mode: 'range' });
@@ -119,6 +119,31 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     updateNodeCustomIconUrl(node.id, undefined);
     message.success('已恢复默认图标');
   }, [node, updateNodeCustomIconUrl]);
+
+  // 预设渲染颜色
+  const PRESET_NODE_COLORS = [
+    '#1677ff', // 蓝
+    '#52c41a', // 绿
+    '#faad14', // 黄
+    '#ff7a45', // 橙
+    '#f5222d', // 红
+    '#722ed1', // 紫
+    '#13c2c2', // 青
+    '#eb2f96', // 粉
+    '#2f54eb', // 靛
+    '#8c8c8c', // 灰
+  ];
+
+  // 保存渲染颜色
+  const handleSaveColor = useCallback((color: string | undefined) => {
+    if (!node) return;
+    updateNodeColor(node.id, color);
+    if (color) {
+      message.success('渲染颜色已设置');
+    } else {
+      message.success('已恢复默认颜色');
+    }
+  }, [node, updateNodeColor]);
 
   // 保存 API 配置
   const handleSaveApiConfig = useCallback(() => {
@@ -453,6 +478,60 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
         <Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
           支持 PNG / SVG 格式，大小不超过 500KB
         </Text>
+      </div>
+
+      <Divider style={{ margin: '8px 0' }} />
+
+      {/* 渲染颜色 */}
+      <div>
+        <Text strong style={{ display: 'block', marginBottom: 8 }}>
+          <ApartmentOutlined /> 渲染颜色
+        </Text>
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+          选择后卡片整体（边框 / 图标区 / 标题）使用该主题色，监控页同样生效。
+        </Text>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {PRESET_NODE_COLORS.map((c) => {
+            const active = node?.data?.nodeColor === c;
+            return (
+              <div
+                key={c}
+                onClick={() => handleSaveColor(c)}
+                title={c}
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 6,
+                  background: c,
+                  cursor: 'pointer',
+                  border: active ? '2px solid #000' : '2px solid #fff',
+                  boxShadow: active ? '0 0 0 2px #1677ff' : '0 1px 3px rgba(0,0,0,0.2)',
+                }}
+              />
+            );
+          })}
+          {node?.data?.nodeColor && (
+            <div
+              onClick={() => handleSaveColor(undefined)}
+              title="恢复默认"
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 16,
+                cursor: 'pointer',
+                border: '1px dashed #d9d9d9',
+                color: '#8c8c8c',
+                background: '#fafafa',
+              }}
+            >
+              ✕
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
