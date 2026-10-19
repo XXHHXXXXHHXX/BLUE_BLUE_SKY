@@ -279,6 +279,20 @@ export interface ApiConfig {
 /** 控制范围方式：范围式（连续可调）或固定选项（离散数值） */
 export type ControlRangeMode = 'range' | 'options';
 
+/**
+ * 固定选项：
+ * - 简单形态：number | string，显示值与下发值相同（数字带单位显示，字符串原样）
+ * - 成对形态：{ label, value }，UI 显示 label（如中文），实际下发 value（如 mode=0）
+ */
+export interface ControlOption {
+  /** UI 显示标签（可为中文，如“自动”） */
+  label: string;
+  /** 实际下发值，替换 {value} 占位符（如 mode=0） */
+  value: number | string;
+}
+
+export type ControlOptionItem = number | string | ControlOption;
+
 /** 控制模块配置：控制命令（发往 BMC）+ 控制范围 */
 export interface ControlConfig {
   /** 控制用途说明，用户在编辑时自定义，监控页卡片显示 */
@@ -292,8 +306,8 @@ export interface ControlConfig {
   rangeMax?: number;
   rangeStep?: number;
   rangeUnit?: string;
-  /** 固定选项：离散数值或字符串（字符串直接替换 {value}，如 balance/performance） */
-  options?: (number | string)[];
+  /** 固定选项：简单形态（number|string）或成对形态（label+value，UI 显示中文、下发英文值） */
+  options?: ControlOptionItem[];
 }
 
 /** 节点数据联合类型 */

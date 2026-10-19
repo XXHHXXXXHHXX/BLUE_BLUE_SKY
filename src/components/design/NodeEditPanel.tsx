@@ -18,7 +18,7 @@ import { useDesignTopologyStore } from '../../stores/designTopologyStore';
 import { defaultFieldMappings, defaultPowerDomainFieldMappings } from '../../services/mockData';
 import { getNodeLossFieldAnnotation } from '../../services/lossCalculation';
 import { CPU_POWER_DOMAIN_FIELD_DEFS } from '../../types/power';
-import type { TopologyNode, HardwareNodeType, ApiConfig, FieldMapping, FieldThreshold, ControlConfig } from '../../types/topology';
+import type { TopologyNode, HardwareNodeType, ApiConfig, FieldMapping, FieldThreshold, ControlConfig, ControlOptionItem } from '../../types/topology';
 import { FIXED_FIELD_DEFS, DEFAULT_FIELD_THRESHOLDS } from '../../types/topology';
 
 const { Text, Title } = Typography;
@@ -178,14 +178,26 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     message.success('控制配置已保存');
   }, [node, controlConfig, updateNodeControlConfig]);
 
-  // 解析固定选项输入（支持逗号/空格分隔；保留字符串选项，数字选项保留为数字）
-  const handleParseOptions = useCallback((raw: string): (number | string)[] => {
+  // 解析固定选项输入（支持逗号/空格分隔）
+  // 支持两种形态：
+  //   1. 简单：`10` / `balance` → 显示值与下发值相同
+  //   2. 成对：`自动:mode=0` / `手动:mode=1` → UI 显示中文，下发英文值
+  // 成对格式用最后一个冒号分隔（value 本身可能含冒号，如 http://）
+  const handleParseOptions = useCallback((raw: string): ControlOptionItem[] => {
     return raw
       .split(/[,，\s]+/)
       .map((s) => s.trim())
       .filter(Boolean)
       .map((s) => {
-        // 纯数字（含小数/负数）转成 number，其余保留字符串
+        const sepIdx = s.lastIndexOf(':');
+        if (sepIdx > 0) {
+          const label = s.slice(0, sepIdx).trim();
+          const value = s.slice(sepIdx + 1).trim();
+          if (label && value) {
+            return { label, value: /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : value };
+          }
+        }
+        // 简单形态：纯数字（含小数/负数）转成 number，其余保留字符串
         return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : s;
       });
   }, []);
@@ -1057,13 +1069,13 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
           ) : (
             /* 固定选项配置 */
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <Text style={{ display: 'block', fontSize: 12 }}>固定选项（用逗号或空格分隔，支持数字或字符串，如 balance / performance）</Text>
+              <Text style={{ display: 'block', fontSize: 12 }}>固定选项（逗号或空格分隔）。简单值如 10 / balance；如需 UI 显示中文、下发英文值，用冒号成对：自动:mode=0</Text>
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                 <Input
                   style={{ flex: 1 }}
                   value={controlOptionInput}
                   onChange={(e) => setControlOptionInput(e.target.value)}
-                  placeholder="如：10, 20, 30, 40, 50"
+                  placeholder="如：10, 20, 30, 40, 50 或 自动:mode=0, 手动:mode=1"
                   onPressEnter={() => {
                     set({ options: handleParseOptions(controlOptionInput) });
                     setControlOptionInput('');
@@ -1095,19 +1107,27 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                     {(controlConfig.options || []).length === 0 ? (
                       <Text type="secondary" style={{ fontSize: 12 }}>暂无固定选项</Text>
                     ) : (
-                      (controlConfig.options || []).map((opt, idx) => (
-                        <Tag
-                          key={idx}
-                          closable
-                          onClose={() =>
-                            set({ options: (controlConfig.options || []).filter((_, i) => i !== idx) })
-                          }
-                          color="purple"
-                        >
-                          {/* 数字选项带单位，字符串选项忽略单位 */}
-                          {typeof opt === 'number' ? `${opt}${controlConfig.rangeUnit || ''}` : opt}
-                        </Tag>
-                      ))
+                      (controlConfig.options || []).map((opt, idx) => {
+                        // 成对选项显示“中文标签 (下发值)”，简单形态保持原样
+                        const isPair = typeof opt === 'object' && opt !== null && 'label' in opt && 'value' in opt;
+                        const display = isPair
+                          ? `${(opt as { label: string }).label} (${(opt as { value: number | string }).value})`
+                          : typeof opt === 'number'
+                            ? `${opt}${controlConfig.rangeUnit || ''}`
+                            : String(opt);
+                        return (
+                          <Tag
+                            key={idx}
+                            closable
+                            onClose={() =>
+                              set({ options: (controlConfig.options || []).filter((_, i) => i !== idx) })
+                            }
+                            color="purple"
+                          >
+                            {display}
+                          </Tag>
+                        );
+                      })
                     )}
                   </div>
                 </div>

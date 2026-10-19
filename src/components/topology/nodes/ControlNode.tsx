@@ -5,7 +5,7 @@ import { type NodeProps } from '@xyflow/react';
 import { Slider, Button, message, Tooltip } from 'antd';
 import NodeIcon from './NodeIcon';
 import { getNodeDisplayLabel } from '../../../utils/formatters';
-import type { ControlConfig } from '../../../types/topology';
+import type { ControlConfig, ControlOptionItem } from '../../../types/topology';
 import { useBMCSessionStore } from '../../../stores/bmcSessionStore';
 import { executeControlCommand } from '../../../services/backendApi';
 
@@ -25,6 +25,22 @@ function buildSliderMarks(min: number, max: number, step: number, unit: string):
     }
   }
   return marks;
+}
+
+/** 判断选项是否为成对形态（label + value） */
+function isPairOption(opt: ControlOptionItem): opt is { label: string; value: number | string } {
+  return typeof opt === 'object' && opt !== null && 'label' in opt && 'value' in opt;
+}
+
+/** 获取选项的 UI 显示文本：成对显示 label，数字带单位，字符串原样 */
+function getOptionLabel(opt: ControlOptionItem, unit: string): string {
+  if (isPairOption(opt)) return opt.label;
+  return typeof opt === 'number' ? `${opt}${unit}` : String(opt);
+}
+
+/** 获取选项的实际下发值：成对取 value，简单形态取自身 */
+function getOptionValue(opt: ControlOptionItem): number | string {
+  return isPairOption(opt) ? opt.value : opt;
 }
 
 const ControlNode: React.FC<NodeProps> = (props) => {
@@ -159,19 +175,23 @@ const ControlNode: React.FC<NodeProps> = (props) => {
                 <div style={{ fontSize: 12, color: '#8c8c8c' }}>未配置固定选项</div>
               ) : (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {options.map((opt, idx) => (
-                    <Tooltip key={idx} title={`下发 ${formatOption(opt)}`}>
-                      <Button
-                        size="small"
-                        type={lastSent?.value === opt ? 'primary' : 'default'}
-                        loading={sending}
-                        onClick={() => handleSend(opt)}
-                        style={{ borderColor: '#d3adf7' }}
-                      >
-                        {formatOption(opt)}
-                      </Button>
-                    </Tooltip>
-                  ))}
+                  {options.map((opt, idx) => {
+                    const label = getOptionLabel(opt, unit);
+                    const value = getOptionValue(opt);
+                    return (
+                      <Tooltip key={idx} title={`下发 ${formatOption(value)}`}>
+                        <Button
+                          size="small"
+                          type={lastSent?.value === value ? 'primary' : 'default'}
+                          loading={sending}
+                          onClick={() => handleSend(value)}
+                          style={{ borderColor: '#d3adf7' }}
+                        >
+                          {label}
+                        </Button>
+                      </Tooltip>
+                    );
+                  })}
                 </div>
               )}
             </div>
