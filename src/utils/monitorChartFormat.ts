@@ -7,7 +7,7 @@ interface TooltipContext {
 
 /** ECharts tooltip formatter 回调参数的最小结构（仅使用到的字段） */
 interface TooltipCallbackParam {
-  dataIndex?: number;
+  dataIndex: number;
   value?: unknown;
   marker?: string;
   seriesName?: string;
