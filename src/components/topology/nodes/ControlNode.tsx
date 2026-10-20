@@ -2,7 +2,7 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { type NodeProps } from '@xyflow/react';
-import { Slider, Button, message, Tooltip } from 'antd';
+import { Slider, Button, message, Tooltip, Modal } from 'antd';
 import NodeIcon from './NodeIcon';
 import { getNodeDisplayLabel } from '../../../utils/formatters';
 import type { ControlConfig, ControlOptionItem } from '../../../types/topology';
@@ -88,8 +88,8 @@ const ControlNode: React.FC<NodeProps> = (props) => {
     return typeof v === 'number' ? `${v}${unit}` : v;
   }, [unit]);
 
-  /** 下发指定值到 BMC */
-  const handleSend = useCallback(
+  /** 真正下发指定值到 BMC（确认通过后调用） */
+  const doSend = useCallback(
     async (value: number | string) => {
       if (!command) {
         message.warning('控制命令未配置');
@@ -113,6 +113,32 @@ const ControlNode: React.FC<NodeProps> = (props) => {
       }
     },
     [command, bmcConfig, formatOption],
+  );
+
+  /** 点击控制时先弹确认框，确认后才下发，避免误操作 */
+  const handleSend = useCallback(
+    (value: number | string) => {
+      if (!command) {
+        message.warning('控制命令未配置');
+        return;
+      }
+      if (!bmcConfig) {
+        message.warning('未连接 BMC，请先在监控配置中连接 BMC');
+        return;
+      }
+      Modal.confirm({
+        title: '确认下发控制命令',
+        content: (
+          <div>
+            确定要下发 <b>{formatOption(value)}</b> 到当前 BMC 吗？
+          </div>
+        ),
+        okText: '确认下发',
+        cancelText: '取消',
+        onOk: () => doSend(value),
+      });
+    },
+    [command, bmcConfig, formatOption, doSend],
   );
 
   // 范围式参数
