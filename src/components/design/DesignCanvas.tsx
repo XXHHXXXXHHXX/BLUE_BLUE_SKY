@@ -25,6 +25,7 @@ import IconPicker from './IconPicker';
 import NodeEditPanel from './NodeEditPanel';
 import { useDesignTopologyStore } from '../../stores/designTopologyStore';
 import { calculateEdgeLosses } from '../../services/lossCalculation';
+import { useAlignmentGuides } from './useAlignmentGuides';
 import type { HardwareNodeType, TopologyNode } from '../../types/topology';
 
 const edgeTypes = { powerEdge: PowerEdge, controlEdge: ControlEdge, sensorEdge: SensorEdge };
@@ -55,7 +56,10 @@ const DesignCanvasInner: React.FC = () => {
   } = useDesignTopologyStore();
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, flowToScreenPosition } = useReactFlow();
+
+  // 拖拽对齐参考线
+  const { guides: alignmentGuides, onNodeDragStart: handleAlignDragStart, onNodeDrag: handleAlignDrag, onNodeDragStop: handleAlignDragStop } = useAlignmentGuides();
 
   // === 连线高亮 ===
   const highlightedEdgeIds = useMemo(() => {
@@ -315,6 +319,9 @@ const DesignCanvasInner: React.FC = () => {
           onDrop={handleDrop}
           onPaneClick={handlePaneClick}
           onNodeDoubleClick={handleNodeDoubleClick}
+          onNodeDragStart={handleAlignDragStart}
+          onNodeDrag={handleAlignDrag}
+          onNodeDragStop={handleAlignDragStop}
           onNodeContextMenu={handleNodeContextMenu}
           onEdgeContextMenu={handleEdgeContextMenu}
           fitView
@@ -340,6 +347,44 @@ const DesignCanvasInner: React.FC = () => {
             hasUnsavedChanges={hasUnsavedChanges}
           />
         </ReactFlow>
+
+        {/* 拖拽对齐参考线：贯穿画布的辅助线 */}
+        {alignmentGuides.map((g, idx) => {
+          const screenPos = g.orientation === 'vertical'
+            ? flowToScreenPosition({ x: g.position, y: 0 })
+            : flowToScreenPosition({ x: 0, y: g.position });
+          return g.orientation === 'vertical' ? (
+            <div
+              key={idx}
+              style={{
+                position: 'absolute',
+                left: screenPos.x,
+                top: 0,
+                width: 1,
+                height: '100%',
+                background: '#ff4d4f',
+                pointerEvents: 'none',
+                zIndex: 1000,
+                boxShadow: '0 0 3px rgba(255,77,79,0.6)',
+              }}
+            />
+          ) : (
+            <div
+              key={idx}
+              style={{
+                position: 'absolute',
+                top: screenPos.y,
+                left: 0,
+                height: 1,
+                width: '100%',
+                background: '#ff4d4f',
+                pointerEvents: 'none',
+                zIndex: 1000,
+                boxShadow: '0 0 3px rgba(255,77,79,0.6)',
+              }}
+            />
+          );
+        })}
 
         {/* 节点编辑面板 */}
         <NodeEditPanel
