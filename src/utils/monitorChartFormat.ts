@@ -5,6 +5,14 @@ interface TooltipContext {
   score?: number;
 }
 
+/** ECharts tooltip formatter 回调参数的最小结构（仅使用到的字段） */
+interface TooltipCallbackParam {
+  dataIndex?: number;
+  value?: unknown;
+  marker?: string;
+  seriesName?: string;
+}
+
 export function getScrollLegend(data: string[]) {
   return {
     data,
@@ -21,7 +29,7 @@ export const tooltipBase = {
 } as const;
 
 export function formatAxisTooltip(
-  params: any[],
+  params: TooltipCallbackParam[],
   getContext: (dataIndex: number) => TooltipContext | undefined,
   headerExtra?: (ctx: TooltipContext | undefined) => string
 ) {
