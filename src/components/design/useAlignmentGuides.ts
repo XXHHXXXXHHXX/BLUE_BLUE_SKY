@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { useReactFlow, type OnNodeDrag, type OnNodeDragStart, type OnNodeDragStop } from '@xyflow/react';
+import { useReactFlow, type OnNodeDrag } from '@xyflow/react';
 import { useDesignTopologyStore } from '../../stores/designTopologyStore';
 import type { TopologyNode } from '../../types/topology';
 
@@ -122,7 +122,7 @@ export function useAlignmentGuides() {
   const { getNodes, setNodes } = useReactFlow();
 
   /** 拖拽开始时重置参考线状态 */
-  const handleNodeDragStart: OnNodeDragStart<TopologyNode> = useCallback(() => {
+  const handleNodeDragStart: OnNodeDrag<TopologyNode> = useCallback(() => {
     draggingRef.current = true;
     setGuides([]);
   }, []);
@@ -168,7 +168,7 @@ export function useAlignmentGuides() {
   );
 
   /** 拖拽结束时清空参考线 */
-  const handleNodeDragStop: OnNodeDragStop<TopologyNode> = useCallback(() => {
+  const handleNodeDragStop: OnNodeDrag<TopologyNode> = useCallback(() => {
     draggingRef.current = false;
     setGuides([]);
   }, []);
