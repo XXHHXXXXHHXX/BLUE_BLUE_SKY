@@ -5,7 +5,7 @@ import { type NodeProps } from '@xyflow/react';
 import { Slider, Button, message, Tooltip, Modal } from 'antd';
 import NodeIcon from './NodeIcon';
 import { getNodeDisplayLabel } from '../../../utils/formatters';
-import type { ControlConfig, ControlOptionItem } from '../../../types/topology';
+import type { ControlConfig, ControlOption, ControlOptionItem } from '../../../types/topology';
 import { useBMCSessionStore } from '../../../stores/bmcSessionStore';
 import { executeControlCommand } from '../../../services/backendApi';
 
@@ -28,7 +28,7 @@ function buildSliderMarks(min: number, max: number, step: number, unit: string):
 }
 
 /** 判断选项是否为成对形态（label + value） */
-function isPairOption(opt: ControlOptionItem): opt is { label: string; value: number | string } {
+function isPairOption(opt: ControlOptionItem): opt is ControlOption {
   return typeof opt === 'object' && opt !== null && 'label' in opt && 'value' in opt;
 }
 
@@ -41,6 +41,14 @@ function getOptionLabel(opt: ControlOptionItem, unit: string): string {
 /** 获取选项的实际下发值：成对取 value，简单形态取自身 */
 function getOptionValue(opt: ControlOptionItem): number | string {
   return isPairOption(opt) ? opt.value : opt;
+}
+
+/** 获取选项专属命令模板：成对形态且配置了 shell 时返回，否则返回 undefined（回退全局命令） */
+function getOptionShell(opt: ControlOptionItem): string | undefined {
+  if (isPairOption(opt) && typeof opt.shell === 'string' && opt.shell.trim()) {
+    return opt.shell.trim();
+  }
+  return undefined;
 }
 
 const ControlNode: React.FC<NodeProps> = (props) => {
@@ -88,10 +96,11 @@ const ControlNode: React.FC<NodeProps> = (props) => {
     return typeof v === 'number' ? `${v}${unit}` : v;
   }, [unit]);
 
-  /** 真正下发指定值到 BMC（确认通过后调用） */
+  /** 真正下发指定值到 BMC（确认通过后调用）。shell 传入时用选项专属命令，否则用全局命令 */
   const doSend = useCallback(
-    async (value: number | string) => {
-      if (!command) {
+    async (value: number | string, shell?: string) => {
+      const finalShell = shell || command;
+      if (!finalShell) {
         message.warning('控制命令未配置');
         return;
       }
@@ -101,7 +110,7 @@ const ControlNode: React.FC<NodeProps> = (props) => {
       }
       setSending(true);
       try {
-        const result = await executeControlCommand(bmcConfig, command, value);
+        const result = await executeControlCommand(bmcConfig, finalShell, value);
         if (result.success) {
           message.success(`已下发 ${formatOption(value)}`);
           setLastSent({ value, time: new Date().toLocaleTimeString() });
@@ -117,8 +126,9 @@ const ControlNode: React.FC<NodeProps> = (props) => {
 
   /** 点击控制时先弹确认框，确认后才下发，避免误操作 */
   const handleSend = useCallback(
-    (value: number | string) => {
-      if (!command) {
+    (value: number | string, shell?: string) => {
+      const finalShell = shell || command;
+      if (!finalShell) {
         message.warning('控制命令未配置');
         return;
       }
@@ -131,11 +141,16 @@ const ControlNode: React.FC<NodeProps> = (props) => {
         content: (
           <div>
             确定要下发 <b>{formatOption(value)}</b> 到当前 BMC 吗？
+            {finalShell !== command && (
+              <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 4 }}>
+                使用选项专属命令：{finalShell}
+              </div>
+            )}
           </div>
         ),
         okText: '确认下发',
         cancelText: '取消',
-        onOk: () => doSend(value),
+        onOk: () => doSend(value, shell),
       });
     },
     [command, bmcConfig, formatOption, doSend],
@@ -204,13 +219,14 @@ const ControlNode: React.FC<NodeProps> = (props) => {
                   {options.map((opt, idx) => {
                     const label = getOptionLabel(opt, unit);
                     const value = getOptionValue(opt);
+                    const optShell = getOptionShell(opt);
                     return (
-                      <Tooltip key={idx} title={`下发 ${formatOption(value)}`}>
+                      <Tooltip key={idx} title={optShell ? `下发 ${formatOption(value)}（专属命令）` : `下发 ${formatOption(value)}`}>
                         <Button
                           size="small"
                           type={lastSent?.value === value ? 'primary' : 'default'}
                           loading={sending}
-                          onClick={() => handleSend(value)}
+                          onClick={() => handleSend(value, optShell)}
                           style={{ borderColor: '#d3adf7' }}
                         >
                           {label}

@@ -289,6 +289,8 @@ export interface ControlOption {
   label: string;
   /** 实际下发值，替换 {value} 占位符（如 mode=0） */
   value: number | string;
+  /** 该选项专属的控制命令模板（使用 {value} 占位符）；未配置时回退到 ControlConfig.controlShell */
+  shell?: string;
 }
 
 export type ControlOptionItem = number | string | ControlOption;

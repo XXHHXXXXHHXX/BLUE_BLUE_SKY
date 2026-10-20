@@ -202,6 +202,26 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
       });
   }, []);
 
+  // 更新某个固定选项的专属命令模板；简单形态（number/string）填了命令后升级为成对形态
+  const handleOptionShellChange = useCallback((idx: number, shell: string) => {
+    setControlConfig((prev) => {
+      const options = prev.options || [];
+      const next = options.map((opt, i) => {
+        if (i !== idx) return opt;
+        const trimmed = shell.trim();
+        if (typeof opt === 'object' && opt !== null && 'label' in opt && 'value' in opt) {
+          return { ...opt, shell: trimmed || undefined };
+        }
+        // 简单形态：若有专属命令则升级为成对形态，label/value 用自身
+        if (trimmed) {
+          return { label: String(opt), value: opt, shell: trimmed };
+        }
+        return opt;
+      });
+      return { ...prev, options: next };
+    });
+  }, []);
+
   // 添加字段映射（选择指定字段）
   const [fieldToAdd, setFieldToAdd] = useState<string | null>(null);
 
@@ -1069,7 +1089,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
           ) : (
             /* 固定选项配置 */
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <Text style={{ display: 'block', fontSize: 12 }}>固定选项（逗号或空格分隔）。简单值如 10 / balance；如需 UI 显示中文、下发英文值，用冒号成对：自动:mode=0</Text>
+              <Text style={{ display: 'block', fontSize: 12 }}>固定选项（逗号或空格分隔）。简单值如 10 / balance；如需 UI 显示中文、下发英文值，用冒号成对：自动:mode=0。每个选项还可单独配置专属命令（留空则用上方全局命令）。</Text>
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                 <Input
                   style={{ flex: 1 }}
@@ -1103,11 +1123,11 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                 </div>
                 <div style={{ flex: 1 }}>
                   <Text style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>当前选项</Text>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {(controlConfig.options || []).length === 0 ? (
-                      <Text type="secondary" style={{ fontSize: 12 }}>暂无固定选项</Text>
-                    ) : (
-                      (controlConfig.options || []).map((opt, idx) => {
+                  {(controlConfig.options || []).length === 0 ? (
+                    <Text type="secondary" style={{ fontSize: 12 }}>暂无固定选项</Text>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {(controlConfig.options || []).map((opt, idx) => {
                         // 成对选项显示“中文标签 (下发值)”，简单形态保持原样
                         const isPair = typeof opt === 'object' && opt !== null && 'label' in opt && 'value' in opt;
                         const display = isPair
@@ -1115,21 +1135,37 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                           : typeof opt === 'number'
                             ? `${opt}${controlConfig.rangeUnit || ''}`
                             : String(opt);
+                        const optShell = isPair
+                          ? ((opt as { shell?: string }).shell ?? '')
+                          : '';
                         return (
-                          <Tag
+                          <div
                             key={idx}
-                            closable
-                            onClose={() =>
-                              set({ options: (controlConfig.options || []).filter((_, i) => i !== idx) })
-                            }
-                            color="purple"
+                            style={{
+                              display: 'flex',
+                              gap: 6,
+                              alignItems: 'center',
+                              padding: 6,
+                              background: '#fafafa',
+                              borderRadius: 4,
+                              border: '1px solid #f0f0f0',
+                            }}
                           >
-                            {display}
-                          </Tag>
+                            <Tag closable color="purple" onClose={() => set({ options: (controlConfig.options || []).filter((_, i) => i !== idx) })}>
+                              {display}
+                            </Tag>
+                            <Input
+                              size="small"
+                              style={{ flex: 1, minWidth: 0 }}
+                              placeholder="专属命令（留空则用上方全局命令）"
+                              value={optShell}
+                              onChange={(e) => handleOptionShellChange(idx, e.target.value)}
+                            />
+                          </div>
                         );
-                      })
-                    )}
-                  </div>
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
