@@ -119,7 +119,7 @@ function computeSnap(dragNodes: TopologyNode[], others: TopologyNode[]): SnapRes
 export function useAlignmentGuides() {
   const [guides, setGuides] = useState<AlignmentGuide[]>([]);
   const draggingRef = useRef(false);
-  const { getNodes, setNodes } = useReactFlow();
+  const { getNodes, setNodes } = useReactFlow<TopologyNode>();
 
   /** 拖拽开始时重置参考线状态 */
   const handleNodeDragStart: OnNodeDrag<TopologyNode> = useCallback(() => {
