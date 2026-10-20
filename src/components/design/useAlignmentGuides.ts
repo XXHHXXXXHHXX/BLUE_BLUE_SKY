@@ -55,17 +55,20 @@ function getNodeBox(node: TopologyNode): NodeBox {
  * 计算拖拽节点相对其它节点的对齐吸附量与参考线
  * - 垂直参考线：左边缘 / 中心 / 右边缘 对齐
  * - 水平参考线：上边缘 / 中心 / 下边缘 对齐
+ *
+ * 每个锚点（左/中/右、上/中/下）各自保留最近的一条参考线，
+ * 避免中心对齐被边缘对齐“抢占”导致无法居中；吸附取所有候选中绝对差值最小的偏移。
  */
 function computeSnap(dragNodes: TopologyNode[], others: TopologyNode[]): SnapResult {
   const main = dragNodes[0];
   if (!main) return { dx: 0, dy: 0, guides: [] };
   const mainBox = getNodeBox(main);
 
-  let bestDx: number | null = null;
-  let bestGuideX: number | null = null;
-
-  let bestDy: number | null = null;
-  let bestGuideY: number | null = null;
+  // 每个锚点最近的参考线 { delta, guidePosition }
+  const bestByAnchorX: (number | null)[] = [null, null, null]; // left / centerX / right
+  const bestByAnchorY: (number | null)[] = [null, null, null]; // top / centerY / bottom
+  const guideByAnchorX: (number | null)[] = [null, null, null];
+  const guideByAnchorY: (number | null)[] = [null, null, null];
 
   const mainXs = [mainBox.left, mainBox.centerX, mainBox.right];
   const mainYs = [mainBox.top, mainBox.centerY, mainBox.bottom];
@@ -76,36 +79,67 @@ function computeSnap(dragNodes: TopologyNode[], others: TopologyNode[]): SnapRes
     const refYs = [b.top, b.centerY, b.bottom];
 
     // X 方向对齐（垂直参考线）
-    for (const myX of mainXs) {
+    for (let i = 0; i < 3; i++) {
       for (const refX of refXs) {
-        const delta = refX - myX;
-        if (Math.abs(delta) < SNAP_THRESHOLD && (bestDx === null || Math.abs(delta) < Math.abs(bestDx))) {
-          bestDx = delta;
-          bestGuideX = refX;
+        const delta = refX - mainXs[i];
+        if (Math.abs(delta) < SNAP_THRESHOLD && (bestByAnchorX[i] === null || Math.abs(delta) < Math.abs(bestByAnchorX[i]!))) {
+          bestByAnchorX[i] = delta;
+          guideByAnchorX[i] = refX;
         }
       }
     }
 
     // Y 方向对齐（水平参考线）
-    for (const myY of mainYs) {
+    for (let i = 0; i < 3; i++) {
       for (const refY of refYs) {
-        const delta = refY - myY;
-        if (Math.abs(delta) < SNAP_THRESHOLD && (bestDy === null || Math.abs(delta) < Math.abs(bestDy))) {
-          bestDy = delta;
-          bestGuideY = refY;
+        const delta = refY - mainYs[i];
+        if (Math.abs(delta) < SNAP_THRESHOLD && (bestByAnchorY[i] === null || Math.abs(delta) < Math.abs(bestByAnchorY[i]!))) {
+          bestByAnchorY[i] = delta;
+          guideByAnchorY[i] = refY;
         }
       }
     }
   }
 
+  // 吸附偏移：取所有候选中绝对差值最小的
+  let bestDx: number | null = null;
+  let bestGuideX: number | null = null;
+  let bestDy: number | null = null;
+  let bestGuideY: number | null = null;
+
+  for (let i = 0; i < 3; i++) {
+    const d = bestByAnchorX[i];
+    if (d !== null && (bestDx === null || Math.abs(d) < Math.abs(bestDx))) {
+      bestDx = d;
+      bestGuideX = guideByAnchorX[i];
+    }
+  }
+  for (let i = 0; i < 3; i++) {
+    const d = bestByAnchorY[i];
+    if (d !== null && (bestDy === null || Math.abs(d) < Math.abs(bestDy))) {
+      bestDy = d;
+      bestGuideY = guideByAnchorY[i];
+    }
+  }
+
   const dx = bestDx ?? 0;
   const dy = bestDy ?? 0;
+
+  // 参考线：每个锚点各自保留（去重）
   const guides: AlignmentGuide[] = [];
-  if (bestGuideX !== null) {
-    guides.push({ orientation: 'vertical', position: bestGuideX });
+  const seenX = new Set<number>();
+  const seenY = new Set<number>();
+  for (let i = 0; i < 3; i++) {
+    if (guideByAnchorX[i] !== null && !seenX.has(guideByAnchorX[i]!)) {
+      seenX.add(guideByAnchorX[i]!);
+      guides.push({ orientation: 'vertical', position: guideByAnchorX[i]! });
+    }
   }
-  if (bestGuideY !== null) {
-    guides.push({ orientation: 'horizontal', position: bestGuideY });
+  for (let i = 0; i < 3; i++) {
+    if (guideByAnchorY[i] !== null && !seenY.has(guideByAnchorY[i]!)) {
+      seenY.add(guideByAnchorY[i]!);
+      guides.push({ orientation: 'horizontal', position: guideByAnchorY[i]! });
+    }
   }
   return { dx, dy, guides };
 }
@@ -113,13 +147,42 @@ function computeSnap(dragNodes: TopologyNode[], others: TopologyNode[]): SnapRes
 /**
  * 拖拽对齐参考线 Hook：拖拽节点时检测与其它模块的边缘/中心对齐并吸附
  *
- * 使用 useReactFlow 的 getNodes/setNodes 与 React Flow 内部拖拽状态同步，
- * 避免手动更新 store 导致与 React Flow 拖拽位置竞争产生抖动。
+ * 实现要点：
+ * - 拖拽过程中不调用 setNodes/更新 store，避免与 React Flow 内部拖拽状态竞争导致卡住；
+ *   仅用 onNodeDrag 传入的实时节点快照计算对齐并显示参考线。
+ * - 松手（onNodeDragStop）时基于最终位置做一次吸附修正，一次性 setNodes + 更新 store。
  */
 export function useAlignmentGuides() {
   const [guides, setGuides] = useState<AlignmentGuide[]>([]);
   const draggingRef = useRef(false);
   const { getNodes, setNodes } = useReactFlow<TopologyNode>();
+
+  /** 提交吸附修正：把拖拽节点的位置加上 dx/dy，并同步 React Flow 内部状态与 store */
+  const applySnap = useCallback(
+    (dragIds: Set<string>, dx: number, dy: number) => {
+      if ((dx === 0 && dy === 0) || dragIds.size === 0) return;
+
+      const allNodes = getNodes();
+      const updated = allNodes.map((n) => {
+        if (dragIds.has(n.id)) {
+          return { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } };
+        }
+        return n;
+      });
+      setNodes(updated);
+
+      // 同步到 store：只更新 position，保留 store 节点的原有字段
+      const storeNodes = useDesignTopologyStore.getState().nodes;
+      useDesignTopologyStore.getState().updateNodes(
+        storeNodes.map((n) =>
+          dragIds.has(n.id)
+            ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } }
+            : n,
+        ),
+      );
+    },
+    [getNodes, setNodes],
+  );
 
   /** 拖拽开始时重置参考线状态 */
   const handleNodeDragStart: OnNodeDrag<TopologyNode> = useCallback(() => {
@@ -127,51 +190,48 @@ export function useAlignmentGuides() {
     setGuides([]);
   }, []);
 
-  /** 拖拽过程中检测对齐并吸附 */
+  /** 拖拽过程中：仅计算对齐参考线并显示，不修改节点位置（避免与拖拽状态竞争） */
   const handleNodeDrag: OnNodeDrag<TopologyNode> = useCallback(
     (_event, _node, nodes) => {
       if (!draggingRef.current || !nodes || nodes.length === 0) return;
 
-      // 使用 React Flow 内部节点（含拖拽中的最新位置）
-      const allNodes = getNodes();
+      // nodes 是拖拽中的实时节点快照（React Flow 内部状态），无需 getNodes()
       const dragIds = new Set(nodes.map((n) => n.id));
+      const allNodes = getNodes();
       const others = allNodes.filter((n) => !dragIds.has(n.id));
-      const dragNodes = allNodes.filter((n) => dragIds.has(n.id));
+      const dragNodes = nodes as TopologyNode[];
       if (dragNodes.length === 0) return;
 
-      const { dx, dy, guides: nextGuides } = computeSnap(dragNodes, others);
-
-      if (dx !== 0 || dy !== 0) {
-        // 更新 React Flow 内部节点（含拖拽最新位置 + 吸附修正）
-        const updated = allNodes.map((n) => {
-          if (dragIds.has(n.id)) {
-            return { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } };
-          }
-          return n;
-        });
-        // 同步 React Flow 内部状态，避免下一帧拖拽基准被未吸附位置覆盖
-        setNodes(updated);
-        // 同步到 store：只更新 position，保留 store 节点的原有字段
-        const storeNodes = useDesignTopologyStore.getState().nodes;
-        useDesignTopologyStore.getState().updateNodes(
-          storeNodes.map((n) =>
-            dragIds.has(n.id)
-              ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } }
-              : n,
-          ),
-        );
-      }
-
+      // 仅计算参考线，不吸附移动位置
+      const { guides: nextGuides } = computeSnap(dragNodes, others);
       setGuides(nextGuides);
     },
-    [getNodes, setNodes],
+    [getNodes],
   );
 
-  /** 拖拽结束时清空参考线 */
-  const handleNodeDragStop: OnNodeDrag<TopologyNode> = useCallback(() => {
-    draggingRef.current = false;
-    setGuides([]);
-  }, []);
+  /** 拖拽结束时：基于最终位置做一次吸附修正，然后清空参考线 */
+  const handleNodeDragStop: OnNodeDrag<TopologyNode> = useCallback(
+    (_event, _node, nodes) => {
+      draggingRef.current = false;
+      if (!nodes || nodes.length === 0) {
+        setGuides([]);
+        return;
+      }
+
+      const dragIds = new Set(nodes.map((n) => n.id));
+      const allNodes = getNodes();
+      const others = allNodes.filter((n) => !dragIds.has(n.id));
+      const dragNodes = nodes as TopologyNode[];
+
+      if (dragNodes.length > 0) {
+        const { dx, dy } = computeSnap(dragNodes, others);
+        applySnap(dragIds, dx, dy);
+      }
+
+      setGuides([]);
+    },
+    [getNodes, applySnap],
+  );
 
   return {
     guides,
