@@ -248,7 +248,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
     logMonitorStartPid = null;
   };
 
-  /** 终止持续模式远程后台进程（优先 SIGTERM 优雅终止让 perf record 正常落盘，超时再兜底 SIGKILL） */
+  /** 终止持续模式远程后台进程（优先 SIGINT 优雅终止让 perf record 正常落盘，超时再兜底 SIGKILL） */
   const stopContinuousRemote = async (logConfig: NonNullable<PipelineStage['logMonitorConfig']>) => {
     if (!logMonitorSsh) return;
     const buildPidTarget = () => {
@@ -259,8 +259,8 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
     const pidTarget = buildPidTarget();
     if (!pidTarget) return;
     try {
-      // 先发 SIGTERM 让 perf record 等进程正常收尾落盘
-      const termCmd = `kill ${pidTarget} 2>/dev/null; pkill -P ${pidTarget} 2>/dev/null; echo done`;
+      // 先发 SIGINT 让 perf record 等进程正常收尾落盘（perf record 对 SIGINT 响应更友好）
+      const termCmd = `kill -INT ${pidTarget} 2>/dev/null; pkill -INT -P ${pidTarget} 2>/dev/null; echo done`;
       await withTimeout(logMonitorSsh.execCommand(termCmd), 20000, '日志监控终止进程');
       // 等待进程退出并落盘，最多 5 秒；仍未退出则强杀兜底
       for (let i = 0; i < 5; i++) {
