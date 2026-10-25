@@ -98,6 +98,12 @@ export interface LogMonitorConfig {
   interval: number;
   target: 'host' | 'bmc';
   sessionId: string | null;
+  /** 日志监控模式：interval=按间隔轮询（默认），continuous=持续模式（迭代开始前启动、结束后获取） */
+  mode?: 'interval' | 'continuous';
+  /** 持续模式：迭代开始前执行的启动命令（可长时间运行，如 perf record） */
+  startCommand?: string;
+  /** 持续模式：迭代结束后执行的获取命令（如 cat 结果文件） */
+  fetchCommand?: string;
 }
 
 /** 流水线阶段 */
@@ -260,6 +266,9 @@ const createNewTab = (id: string, name: string): TestTab => ({
       interval: 10,
       target: 'host',
       sessionId: null,
+      mode: 'interval',
+      startCommand: '',
+      fetchCommand: '',
     },
     globalBmcSessionId: null,
   },

@@ -674,13 +674,24 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     // 验证日志监控配置
     const logMonitor = tab.powerTestConfig.logMonitorConfig;
     if (logMonitor.enabled) {
-      if (!logMonitor.command.trim()) {
-        message.error('日志监控已启用，请填写日志获取命令');
-        return;
-      }
-      if (logMonitor.interval < 0.1) {
-        message.error('日志监控间隔必须大于等于0.1秒');
-        return;
+      if ((logMonitor.mode || 'interval') === 'continuous') {
+        if (!logMonitor.startCommand?.trim()) {
+          message.error('日志监控持续模式已启用，请填写启动命令');
+          return;
+        }
+        if (!logMonitor.fetchCommand?.trim()) {
+          message.error('日志监控持续模式已启用，请填写获取命令');
+          return;
+        }
+      } else {
+        if (!logMonitor.command.trim()) {
+          message.error('日志监控已启用，请填写日志获取命令');
+          return;
+        }
+        if (logMonitor.interval < 0.1) {
+          message.error('日志监控间隔必须大于等于0.1秒');
+          return;
+        }
       }
     }
 
@@ -2266,33 +2277,22 @@ echo "{\"score\": \${SCORE}}"`}
                 />
               </div>
               <div style={{ color: '#666', fontSize: 12, marginBottom: 8 }}>
-                在每次迭代期间按设定间隔执行命令获取日志，本轮迭代结束后自动打包成压缩包供下载
+                间隔模式：每次迭代期间按设定间隔执行命令获取日志；持续模式：迭代开始前执行启动命令持续运行，迭代结束后执行获取命令取回结果。本轮迭代结束后自动打包成压缩包供下载
               </div>
               {tab.powerTestConfig.logMonitorConfig.enabled && (
                 <Space direction="vertical" style={{ width: '100%' }} size="small">
-                  <Input.TextArea
-                    size="small"
-                    rows={2}
-                    placeholder="日志获取命令，例如：tail -n 100 /var/log/messages"
-                    value={tab.powerTestConfig.logMonitorConfig.command}
-                    onChange={(e) => setLogMonitorConfig(tab.id, { command: e.target.value })}
-                    disabled={tab.isRunningTest}
-                  />
                   <Row gutter={8}>
                     <Col span={12}>
-                      <Space>
-                        <span style={{ color: '#666', fontSize: 12 }}>间隔</span>
-                        <InputNumber
-                          size="small"
-                          min={0.1}
-                          max={300}
-                          value={tab.powerTestConfig.logMonitorConfig.interval}
-                          onChange={(val) => setLogMonitorConfig(tab.id, { interval: val || 0.1 })}
-                          disabled={tab.isRunningTest}
-                          style={{ width: 70 }}
-                        />
-                        <span style={{ color: '#666', fontSize: 12 }}>秒</span>
-                      </Space>
+                      <Select
+                        size="small"
+                        style={{ width: '100%' }}
+                        value={tab.powerTestConfig.logMonitorConfig.mode || 'interval'}
+                        onChange={(value) => setLogMonitorConfig(tab.id, { mode: value })}
+                        disabled={tab.isRunningTest}
+                      >
+                        <Option value="interval">间隔轮询</Option>
+                        <Option value="continuous">持续模式</Option>
+                      </Select>
                     </Col>
                     <Col span={12}>
                       <Select
@@ -2322,6 +2322,54 @@ echo "{\"score\": \${SCORE}}"`}
                       </Select>
                     </Col>
                   </Row>
+                  {(tab.powerTestConfig.logMonitorConfig.mode || 'interval') === 'interval' ? (
+                    <>
+                      <Input.TextArea
+                        size="small"
+                        rows={2}
+                        placeholder="日志获取命令，例如：tail -n 100 /var/log/messages"
+                        value={tab.powerTestConfig.logMonitorConfig.command}
+                        onChange={(e) => setLogMonitorConfig(tab.id, { command: e.target.value })}
+                        disabled={tab.isRunningTest}
+                      />
+                      <Row gutter={8}>
+                        <Col span={12}>
+                          <Space>
+                            <span style={{ color: '#666', fontSize: 12 }}>间隔</span>
+                            <InputNumber
+                              size="small"
+                              min={0.1}
+                              max={300}
+                              value={tab.powerTestConfig.logMonitorConfig.interval}
+                              onChange={(val) => setLogMonitorConfig(tab.id, { interval: val || 0.1 })}
+                              disabled={tab.isRunningTest}
+                              style={{ width: 70 }}
+                            />
+                            <span style={{ color: '#666', fontSize: 12 }}>秒</span>
+                          </Space>
+                        </Col>
+                      </Row>
+                    </>
+                  ) : (
+                    <>
+                      <Input.TextArea
+                        size="small"
+                        rows={2}
+                        placeholder="启动命令（迭代开始前执行，可持续运行），例如：perf record -C 250 -o cpu250.data"
+                        value={tab.powerTestConfig.logMonitorConfig.startCommand || ''}
+                        onChange={(e) => setLogMonitorConfig(tab.id, { startCommand: e.target.value })}
+                        disabled={tab.isRunningTest}
+                      />
+                      <Input.TextArea
+                        size="small"
+                        rows={2}
+                        placeholder="获取命令（迭代结束后执行取回结果），例如：cat cpu250.data"
+                        value={tab.powerTestConfig.logMonitorConfig.fetchCommand || ''}
+                        onChange={(e) => setLogMonitorConfig(tab.id, { fetchCommand: e.target.value })}
+                        disabled={tab.isRunningTest}
+                      />
+                    </>
+                  )}
                   {tab.powerTestConfig.logMonitorConfig.target === 'bmc' && (
                     <div style={{ fontSize: 12, color: '#666' }}>
                       {tab.powerTestConfig.globalBmcSessionId ? (

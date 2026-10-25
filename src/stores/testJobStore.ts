@@ -101,6 +101,12 @@ export interface JobConfig {
       username: string;
       password: string;
     };
+    /** 日志监控模式：interval=按间隔轮询（默认），continuous=持续模式 */
+    mode?: 'interval' | 'continuous';
+    /** 持续模式：迭代开始前执行的启动命令（可长时间运行） */
+    startCommand?: string;
+    /** 持续模式：迭代结束后执行的获取命令 */
+    fetchCommand?: string;
   };
   // 统一 BMC 会话选择
   globalBmcSessionId?: string | null;

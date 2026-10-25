@@ -232,6 +232,8 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
   let logMonitorSsh: NodeSSH | null = null;
   let logMonitorIntervalId: ReturnType<typeof setInterval> | null = null;
   let logMonitorLocalDir = '';
+  // 持续模式：后台启动命令的远程 PID（用于迭代结束后终止）
+  let logMonitorStartPid: string | null = null;
 
   const cleanupLogMonitor = () => {
     if (logMonitorIntervalId) {
@@ -242,6 +244,26 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       try { logMonitorSsh.dispose(); } catch { /* ignore */ }
       logMonitorSsh = null;
     }
+    logMonitorStartPid = null;
+  };
+
+  /** 终止持续模式远程后台进程（按记录的 PID kill，失败则按启动命令特征 pkill） */
+  const stopContinuousRemote = async (logConfig: NonNullable<PipelineStage['logMonitorConfig']>) => {
+    if (!logMonitorSsh) return;
+    try {
+      if (logMonitorStartPid) {
+        const killCmd = `kill -9 ${logMonitorStartPid} 2>/dev/null; pkill -9 -P ${logMonitorStartPid} 2>/dev/null; echo done`;
+        await withTimeout(logMonitorSsh.execCommand(killCmd), 20000, '日志监控终止进程');
+      } else if (logConfig.startCommand) {
+        const pattern = logConfig.startCommand.split(/\s+/)[0];
+        if (pattern) {
+          await withTimeout(logMonitorSsh.execCommand(`pkill -9 -f "${pattern}" 2>/dev/null; echo done`), 20000, '日志监控终止进程');
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addJobLog(jobId, 'warning', `日志监控（持续模式）终止进程失败: ${msg}`);
+    }
   };
 
   const getLogBaseDir = (stage: PipelineStage) =>
@@ -251,10 +273,15 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
 
   const startLogMonitor = async (iteration: number, stage: PipelineStage) => {
     const logConfig = stage.logMonitorConfig;
-    if (!logConfig || !logConfig.enabled || !logConfig.command.trim()) return;
+    const isContinuous = (logConfig?.mode || 'interval') === 'continuous';
+    if (!logConfig || !logConfig.enabled) return;
+    // 间隔模式需要采样命令，持续模式需要启动命令
+    const requiredCmd = isContinuous ? logConfig.startCommand : logConfig.command;
+    if (!requiredCmd || !requiredCmd.trim()) return;
 
     // 重置状态
     logMonitorLocalDir = '';
+    logMonitorStartPid = null;
     logMonitorSsh = new NodeSSH();
     try {
       if (logConfig.target === 'host') {
@@ -297,6 +324,30 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       return;
     }
 
+    if (isContinuous) {
+      // ===== 持续模式：后台启动开始命令（nohup 使其脱离会话持续运行） =====
+      try {
+        // PID 文件写到远程固定位置（/tmp），因为 logMonitorLocalDir 是服务器本地路径
+        const remotePidFile = `/tmp/blue_sky_logmon_${jobId}_${iteration}.pid`;
+        // 远程记录 PID，便于迭代结束后终止进程。用 exec 让启动命令进程替换 bash，使 $$ 即目标进程 PID
+        const startCmd = `nohup bash -c 'echo $$ > ${remotePidFile}; exec ${logConfig.startCommand}' > /dev/null 2>&1 &`;
+        const startResult = await withTimeout(logMonitorSsh!.execCommand(startCmd), 30000, '日志监控启动命令');
+        if (startResult.stderr && startResult.code !== 0) {
+          throw new Error(startResult.stderr);
+        }
+        // 读取远程记录的 PID（稍等片刻让 bash 写入）
+        const pidRead = await withTimeout(logMonitorSsh!.execCommand(`cat ${remotePidFile} 2>/dev/null`), 15000, '日志监控 PID 读取');
+        logMonitorStartPid = pidRead.stdout.trim() || null;
+        addJobLog(jobId, 'info', `日志监控（持续模式）启动命令已后台运行${logMonitorStartPid ? `（PID ${logMonitorStartPid}）` : ''}，本地目录: ${logMonitorLocalDir}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        addJobLog(jobId, 'warning', `日志监控（持续模式）启动命令执行失败: ${msg}`);
+        cleanupLogMonitor();
+      }
+      return;
+    }
+
+    // ===== 间隔模式：按设定间隔执行采样命令 =====
     const runLogCommand = async () => {
       try {
         const result = await withTimeout(logMonitorSsh!.execCommand(logConfig.command), 30000, '日志监控采样');
@@ -324,12 +375,33 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
     }
 
     const logConfig = stage.logMonitorConfig;
+    const isContinuous = (logConfig?.mode || 'interval') === 'continuous';
     if (!logConfig || !logConfig.enabled || !logMonitorLocalDir) {
       cleanupLogMonitor();
       return undefined;
     }
 
     try {
+      if (isContinuous && logMonitorSsh) {
+        // ===== 持续模式：先终止后台启动的进程（确保 perf 等落盘），再执行获取命令 =====
+        await stopContinuousRemote(logConfig);
+        // 稍等片刻让 perf record 等完成落盘
+        await new Promise((r) => setTimeout(r, 1000));
+
+        // 执行获取命令，把结果保存到迭代目录
+        if (logConfig.fetchCommand?.trim()) {
+          try {
+            const fetchResult = await withTimeout(logMonitorSsh.execCommand(logConfig.fetchCommand), 60000, '日志监控获取命令');
+            const content = (fetchResult.stdout || '') + (fetchResult.stderr ? `\n[stderr]\n${fetchResult.stderr}` : '');
+            fs.writeFileSync(path.join(logMonitorLocalDir, 'continuous-result.log'), content, 'utf-8');
+            addJobLog(jobId, 'info', `日志监控（持续模式）获取结果已保存（${content.length} 字节）`);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            addJobLog(jobId, 'warning', `日志监控（持续模式）获取命令失败: ${msg}`);
+          }
+        }
+      }
+
       // 释放 SSH 连接（不再需要）
       if (logMonitorSsh) {
         try { logMonitorSsh.dispose(); } catch { /* ignore */ }
@@ -462,8 +534,16 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
   const abortHandler = () => {
     addJobLog(jobId, 'info', '正在执行立即中止...');
     cleanupMonitors();
-    cleanupLogMonitor();
     cleanupHeartbeat();
+    // 终止持续模式远程后台进程（先于 cleanupLogMonitor 释放 SSH）
+    const currentStage = getJob(jobId)?.config;
+    const currentLogConfig = currentStage?.logMonitorConfig
+      ?? (currentStage?.stages?.find((st) => st.logMonitorConfig?.enabled)?.logMonitorConfig)
+      ?? null;
+    if (currentLogConfig && (currentLogConfig.mode || 'interval') === 'continuous') {
+      stopContinuousRemote(currentLogConfig as NonNullable<PipelineStage['logMonitorConfig']>).catch(() => {});
+    }
+    cleanupLogMonitor();
     try { ssh.dispose(); } catch { /* ignore */ }
 
     // 触发 abortPromise，让正在执行的 ssh.exec / ssh.execCommand 立即退出
