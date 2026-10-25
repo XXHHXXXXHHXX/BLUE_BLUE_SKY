@@ -2,6 +2,7 @@
 import { NodeSSH } from 'node-ssh';
 import fs from 'fs';
 import path from 'path';
+import JSZip from 'jszip';
 import {
   getJob,
   updateJob,
@@ -434,7 +435,6 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       fs.mkdirSync(localDir, { recursive: true });
       const localPath = path.join(localDir, `iteration-${iteration}.zip`);
 
-      const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
       for (const file of files) {
         const filePath = path.join(logMonitorLocalDir, file);
