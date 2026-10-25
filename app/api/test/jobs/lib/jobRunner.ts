@@ -247,19 +247,28 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
     logMonitorStartPid = null;
   };
 
-  /** 终止持续模式远程后台进程（按记录的 PID kill，失败则按启动命令特征 pkill） */
+  /** 终止持续模式远程后台进程（优先 SIGTERM 优雅终止让 perf record 正常落盘，超时再兜底 SIGKILL） */
   const stopContinuousRemote = async (logConfig: NonNullable<PipelineStage['logMonitorConfig']>) => {
     if (!logMonitorSsh) return;
+    const buildPidTarget = () => {
+      if (logMonitorStartPid) return logMonitorStartPid;
+      const pattern = (logConfig.startCommand || '').split(/\s+/)[0];
+      return pattern ? `$(pgrep -f "${pattern}" | head -1)` : '';
+    };
+    const pidTarget = buildPidTarget();
+    if (!pidTarget) return;
     try {
-      if (logMonitorStartPid) {
-        const killCmd = `kill -9 ${logMonitorStartPid} 2>/dev/null; pkill -9 -P ${logMonitorStartPid} 2>/dev/null; echo done`;
-        await withTimeout(logMonitorSsh.execCommand(killCmd), 20000, '日志监控终止进程');
-      } else if (logConfig.startCommand) {
-        const pattern = logConfig.startCommand.split(/\s+/)[0];
-        if (pattern) {
-          await withTimeout(logMonitorSsh.execCommand(`pkill -9 -f "${pattern}" 2>/dev/null; echo done`), 20000, '日志监控终止进程');
-        }
+      // 先发 SIGTERM 让 perf record 等进程正常收尾落盘
+      const termCmd = `kill ${pidTarget} 2>/dev/null; pkill -P ${pidTarget} 2>/dev/null; echo done`;
+      await withTimeout(logMonitorSsh.execCommand(termCmd), 20000, '日志监控终止进程');
+      // 等待进程退出并落盘，最多 5 秒；仍未退出则强杀兜底
+      for (let i = 0; i < 5; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const alive = await withTimeout(logMonitorSsh.execCommand(`kill -0 ${pidTarget} 2>/dev/null && echo alive || echo dead`), 15000, '日志监控进程存活检查');
+        if (alive.stdout.trim() !== 'alive') return;
       }
+      await withTimeout(logMonitorSsh.execCommand(`kill -9 ${pidTarget} 2>/dev/null; pkill -9 -P ${pidTarget} 2>/dev/null; echo done`), 20000, '日志监控终止进程');
+      addJobLog(jobId, 'warning', '日志监控（持续模式）进程未在超时内退出，已强制终止');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       addJobLog(jobId, 'warning', `日志监控（持续模式）终止进程失败: ${msg}`);
@@ -420,25 +429,21 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
         return undefined;
       }
 
-      // 在服务器本地打包（使用 archiver，不依赖远程系统命令）
+      // 在服务器本地打包（使用 JSZip，纯 JS 实现，规避 archiver 在 Node 24 下的兼容问题）
       const localDir = getLogBaseDir(stage);
       fs.mkdirSync(localDir, { recursive: true });
       const localPath = path.join(localDir, `iteration-${iteration}.zip`);
 
-      const archiver = (await import('archiver')).default;
-      const output = fs.createWriteStream(localPath);
-      const archive = archiver('zip', { zlib: { level: 9 } });
-
-      await new Promise<void>((resolve, reject) => {
-        output.on('close', () => resolve());
-        archive.on('error', (err: Error) => reject(err));
-        archive.on('warning', (err: Error) => {
-          if (err.message) addJobLog(jobId, 'warning', `打包警告: ${err.message}`);
-        });
-        archive.pipe(output);
-        archive.directory(logMonitorLocalDir, false);
-        archive.finalize();
-      });
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+      for (const file of files) {
+        const filePath = path.join(logMonitorLocalDir, file);
+        if (fs.statSync(filePath).isFile()) {
+          zip.file(file, fs.readFileSync(filePath));
+        }
+      }
+      const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+      fs.writeFileSync(localPath, zipBuffer);
 
       // 打包完成后清理本地临时目录
       fs.rmSync(logMonitorLocalDir, { recursive: true, force: true });
