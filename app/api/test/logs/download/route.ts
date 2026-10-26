@@ -34,22 +34,42 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const logsDir = stageId
-      ? path.join(process.cwd(), '.data', 'logs', jobId, stageId)
-      : path.join(process.cwd(), '.data', 'logs', jobId);
+    // 校验 stageId 只允许字母、数字、连字符和下划线，防止目录遍历
+    if (stageId && !/^[-_a-zA-Z0-9]+$/.test(stageId)) {
+      return NextResponse.json(
+        { success: false, message: '非法的阶段ID' },
+        { status: 400 }
+      );
+    }
+
+    // 优先按 stageId 路径查找（流水线模式日志在 {jobId}/{stageId} 下）
+    // 找不到时回退到 {jobId} 根目录（非流水线模式日志直接在根目录，stageId 可能是默认值）
+    const logsDirs = stageId
+      ? [
+          path.join(process.cwd(), '.data', 'logs', jobId, stageId),
+          path.join(process.cwd(), '.data', 'logs', jobId),
+        ]
+      : [path.join(process.cwd(), '.data', 'logs', jobId)];
 
     // 支持 .tar.gz（新）和 .zip（旧）两种格式
-    const candidates = [
-      path.join(logsDir, `iteration-${iteration}.tar.gz`),
-      path.join(logsDir, `iteration-${iteration}.zip`),
-    ];
+    const candidates: string[] = [];
+    for (const logsDir of logsDirs) {
+      candidates.push(
+        path.join(logsDir, `iteration-${iteration}.tar.gz`),
+        path.join(logsDir, `iteration-${iteration}.zip`)
+      );
+    }
 
     let resolvedPath: string | undefined;
     let ext = '.tar.gz';
     for (const candidate of candidates) {
       const rp = path.resolve(candidate);
-      const resolvedLogsDir = path.resolve(logsDir);
-      if (!rp.startsWith(resolvedLogsDir + path.sep) && rp !== resolvedLogsDir) {
+      // 校验解析后的路径仍在允许的日志目录内，防止目录遍历
+      const inAllowed = logsDirs.some((logsDir) => {
+        const resolvedLogsDir = path.resolve(logsDir);
+        return rp.startsWith(resolvedLogsDir + path.sep) || rp === resolvedLogsDir;
+      });
+      if (!inAllowed) {
         continue;
       }
       if (fs.existsSync(rp) && fs.statSync(rp).isFile()) {

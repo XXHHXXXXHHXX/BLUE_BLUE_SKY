@@ -1276,6 +1276,19 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
                     <FileTextOutlined style={{ marginRight: 6 }} />
                     迭代日志:
                   </span>
+                  <Button
+                    type="primary"
+                    ghost
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    onClick={() => {
+                      window.open(
+                        `/api/test/reports/logs/download-all?reportId=${viewingReport.id}`
+                      );
+                    }}
+                  >
+                    一键下载全部
+                  </Button>
                   {viewingReport.results
                     .filter((r) => r.logArchivePath)
                     .map((r, idx) => (
