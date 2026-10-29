@@ -38,6 +38,22 @@ def _safe_float(v):
         return 0.0
 
 
+def _is_numeric(v):
+    """判断值是否为纯数值（可安全转为 float）"""
+    if v is None:
+        return False
+    if isinstance(v, (int, float)):
+        return True
+    s = str(v).strip()
+    if s == '':
+        return False
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+
 def analyze(data: dict) -> dict:
     report = data.get('report', {})
     target = data.get('target', 'score')
@@ -74,6 +90,59 @@ def analyze(data: dict) -> dict:
     if not param_names:
         return {"error": "未检测到迭代参数，无法分析"}
 
+    # ===== 识别类别型（字符串枚举）参数并构建编码映射 =====
+    # 数值型参数直接用原值；存在非纯数字取值的参数做 label-encoding
+    # 参与建模，输出时再还原为原始字符串，避免全部显示为 0。
+    # （custom 模式若全部是纯数字仍按数值处理，与原行为一致）
+    param_values = {p: set() for p in param_names}
+    for r in results:
+        iv = r.get('iterationValues') or {}
+        for p in param_names:
+            if p in iv:
+                param_values[p].add(str(iv[p]))
+
+    is_categorical = {}
+    cat_maps = {}      # pname -> {value: code}
+    cat_maps_rev = {}  # pname -> {code: value}
+    for p in param_names:
+        vals = param_values[p]
+        pdef = next((x for x in iteration_params if x.get('name') == p), None)
+        mode = pdef.get('mode', 'range') if pdef else 'range'
+        # 仅当存在非纯数字取值时才判为类别型；custom 模式若全部是纯数字
+        # 仍按数值处理（与原行为一致），避免改变数值参数的建模语义。
+        has_non_numeric = any(not _is_numeric(v) for v in vals)
+        if has_non_numeric:
+            all_vals = []
+            if pdef:
+                for v in pdef.get('values', []):
+                    v = str(v).strip()
+                    if v and v not in all_vals:
+                        all_vals.append(v)
+            for v in sorted(vals):
+                if v not in all_vals:
+                    all_vals.append(v)
+            is_categorical[p] = True
+            cat_maps[p] = {v: i for i, v in enumerate(all_vals)}
+            cat_maps_rev[p] = {i: v for v, i in cat_maps[p].items()}
+        else:
+            is_categorical[p] = False
+
+    def encode_value(pname, raw):
+        """将参数原始值编码为数值（类别型返回 code，数值型返回 float）"""
+        if is_categorical[pname]:
+            return float(cat_maps[pname].get(str(raw), 0))
+        return _safe_float(raw)
+
+    def decode_values(row):
+        """将模型特征行还原为参数展示值（类别型还原原始字符串）"""
+        out = {}
+        for j, p in enumerate(param_names):
+            if is_categorical[p]:
+                out[p] = cat_maps_rev[p].get(int(round(row[j])), str(row[j]))
+            else:
+                out[p] = round(float(row[j]), 4)
+        return out
+
     # 构建特征矩阵与目标向量
     X_list = []
     y_list = []
@@ -90,7 +159,7 @@ def analyze(data: dict) -> dict:
         values = r.get('iterationValues', {})
         row = []
         for pname in param_names:
-            row.append(_safe_float(values.get(pname, 0)))
+            row.append(encode_value(pname, values.get(pname, 0)))
         X_list.append(row)
 
     X = np.array(X_list, dtype=float)
@@ -192,6 +261,10 @@ def analyze(data: dict) -> dict:
     search_grids = []
     for pname in param_names:
         pdef = param_defs.get(pname, {})
+        if is_categorical[pname]:
+            # 类别型参数只在其合法枚举编码值中搜索
+            search_grids.append([float(c) for c in cat_maps_rev[pname].keys()])
+            continue
         mode = pdef.get('mode', 'range')
         if mode == 'custom':
             vals = sorted(set(_safe_float(v) for v in pdef.get('values', [])))
@@ -239,7 +312,7 @@ def analyze(data: dict) -> dict:
             idx = sorted_indices[i]
             top3_inferred.append({
                 "rank": i,
-                "values": {pname: round(float(X_search[idx, j]), 4) for j, pname in enumerate(param_names)},
+                "values": decode_values(X_search[idx]),
                 "predicted_score": round(float(y_search[idx]), 4)
             })
     else:
@@ -251,7 +324,7 @@ def analyze(data: dict) -> dict:
             idx = sorted_indices[i]
             top3_inferred.append({
                 "rank": i,
-                "values": {pname: round(float(X[idx, j]), 4) for j, pname in enumerate(param_names)},
+                "values": decode_values(X[idx]),
                 "predicted_score": round(float(y[idx]), 4)
             })
 
@@ -269,7 +342,7 @@ def analyze(data: dict) -> dict:
         idx = actual_sorted_indices[i]
         top3_actual.append({
             "rank": i,
-            "values": {pname: round(float(X[idx, j]), 4) for j, pname in enumerate(param_names)},
+            "values": decode_values(X[idx]),
             "actual_score": round(float(y[idx]), 4)
         })
 
@@ -285,10 +358,15 @@ def analyze(data: dict) -> dict:
 
         for val in unique_vals:
             val_f = float(val)
+            # 类别型参数用原始字符串作为 x 轴标签
+            if is_categorical[pname]:
+                x_label = cat_maps_rev[pname].get(int(round(val_f)), str(val_f))
+            else:
+                x_label = round(val_f, 4)
             if use_xgb and use_shap:
                 idx = int(np.argmin(np.abs(X[:, i] - val_f)))
                 effect_data.append({
-                    "x": round(val_f, 4),
+                    "x": x_label,
                     "shap": round(float(shap_values[idx, i]), 4),
                     "actual_y": round(float(y[idx]), 4)
                 })
@@ -299,7 +377,7 @@ def analyze(data: dict) -> dict:
                 mask = np.abs(X[:, i] - val_f) <= tol
                 avg_y = float(y[mask].mean()) if np.any(mask) else float(y.mean())
                 effect_data.append({
-                    "x": round(val_f, 4),
+                    "x": x_label,
                     "shap": 0.0,
                     "actual_y": round(avg_y, 4)
                 })
@@ -312,7 +390,8 @@ def analyze(data: dict) -> dict:
     waterfall_data = None
     if use_shap and search_points:
         selected_values = optimal_point["values"]
-        opt_row = np.array([selected_values[p] for p in param_names], dtype=float).reshape(1, -1)
+        # 类别型参数已是原始字符串，需先编码回数值再送入模型
+        opt_row = np.array([encode_value(p, selected_values.get(p, 0)) for p in param_names], dtype=float).reshape(1, -1)
         try:
             sv = explainer.shap_values(opt_row)
             if isinstance(sv, list):
@@ -326,7 +405,7 @@ def analyze(data: dict) -> dict:
                 "features": [
                     {
                         "feature": pname,
-                        "value": round(float(opt_row[0, i]), 4),
+                        "value": decode_values(opt_row[0])[pname],
                         "shap": round(float(sv[i]), 4)
                     }
                     for i, pname in enumerate(param_names)

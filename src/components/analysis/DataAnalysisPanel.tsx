@@ -40,7 +40,8 @@ const { Option } = Select;
 
 interface RankPoint {
   rank: number;
-  values: Record<string, number>;
+  /** 参数取值：数值参数为 number，字符串枚举参数为原始字符串 */
+  values: Record<string, number | string>;
   predicted_score?: number;
   actual_score?: number;
 }
@@ -67,11 +68,11 @@ interface AnalysisResult {
   }>;
   parameter_effects: Array<{
     feature: string;
-    data: Array<{ x: number; shap: number; actual_y: number }>;
+    data: Array<{ x: number | string; shap: number; actual_y: number }>;
   }>;
   waterfall_data: {
     base_value: number;
-    features: Array<{ feature: string; value: number; shap: number }>;
+    features: Array<{ feature: string; value: number | string; shap: number }>;
     final_prediction: number;
   } | null;
   algorithm_note: string;
@@ -191,7 +192,7 @@ const DataAnalysisPanel: React.FC = () => {
     };
   }, [result]);
 
-  const effectLineOption = (feature: string, data: Array<{ x: number; shap: number; actual_y: number }>) => {
+  const effectLineOption = (feature: string, data: Array<{ x: number | string; shap: number; actual_y: number }>) => {
     return {
       tooltip: { trigger: 'axis' },
       grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
