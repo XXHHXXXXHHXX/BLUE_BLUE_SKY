@@ -270,9 +270,12 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, message: '默认目录不可删除' }, { status: 400 });
     }
 
-    // 收集所有需要删除的目录（自身及子目录）
+    // 收集所有需要删除的目录（自身及子目录），visited 防循环引用
     const idsToDelete = new Set<string>();
+    const visited = new Set<string>();
     const collect = (folderId: string) => {
+      if (visited.has(folderId)) return;
+      visited.add(folderId);
       idsToDelete.add(folderId);
       for (const f of folders) {
         if (f.parentId === folderId) {

@@ -178,26 +178,32 @@ export const exportReportToJSON = (report: TestReport): string => {
   );
 };
 
-// 构建 Antd Tree 需要的目录树结构
-function buildTree(folders: ReportFolder[], parentId: string | null = null): FolderTreeNode[] {
+// 构建 Antd Tree 需要的目录树结构（visited 防循环引用导致无限递归栈溢出）
+function buildTree(folders: ReportFolder[], parentId: string | null = null, visited = new Set<string>()): FolderTreeNode[] {
   return folders
-    .filter((f) => f.parentId === parentId)
+    .filter((f) => f.parentId === parentId && !visited.has(f.id))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
-    .map((f) => ({
-      key: f.id,
-      title: f.name,
-      data: f,
-      children: buildTree(folders, f.id),
-    }))
+    .map((f) => {
+      const nextVisited = new Set(visited);
+      nextVisited.add(f.id);
+      return {
+        key: f.id,
+        title: f.name,
+        data: f,
+        children: buildTree(folders, f.id, nextVisited),
+      };
+    })
     .map((node) => (node.children && node.children.length ? node : { ...node, isLeaf: true }));
 }
 
-function buildTreeOptions(folders: ReportFolder[], parentId: string | null = null): { value: string; title: string; children?: any[] }[] {
+function buildTreeOptions(folders: ReportFolder[], parentId: string | null = null, visited = new Set<string>()): { value: string; title: string; children?: any[] }[] {
   return folders
-    .filter((f) => f.parentId === parentId)
+    .filter((f) => f.parentId === parentId && !visited.has(f.id))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
     .map((f) => {
-      const children = buildTreeOptions(folders, f.id);
+      const nextVisited = new Set(visited);
+      nextVisited.add(f.id);
+      const children = buildTreeOptions(folders, f.id, nextVisited);
       const option: { value: string; title: string; children?: any[] } = { value: f.id, title: f.name };
       if (children.length) option.children = children;
       return option;
@@ -362,7 +368,10 @@ export const useTestReportStore = create<TestReportState>()(
       if (!folderId) return reports;
       const folders = get().folders;
       const descendantIds = new Set([folderId]);
+      const visited = new Set<string>();
       const collect = (parentId: string) => {
+        if (visited.has(parentId)) return;
+        visited.add(parentId);
         for (const f of folders) {
           if (f.parentId === parentId) {
             descendantIds.add(f.id);

@@ -45,7 +45,10 @@ function countReportsByFolder(
   folderId: string
 ): number {
   const descendantIds = new Set([folderId]);
+  const visited = new Set<string>();
   const collect = (parentId: string) => {
+    if (visited.has(parentId)) return;
+    visited.add(parentId);
     for (const f of folders) {
       if (f.parentId === parentId) {
         descendantIds.add(f.id);
@@ -96,7 +99,10 @@ const ReportPicker: React.FC<ReportPickerProps> = ({
   const currentReports = useMemo(() => {
     if (!selectedFolderId) return reports;
     const descendantIds = new Set([selectedFolderId]);
+    const visited = new Set<string>();
     const collect = (parentId: string) => {
+      if (visited.has(parentId)) return;
+      visited.add(parentId);
       for (const f of folders) {
         if (f.parentId === parentId) {
           descendantIds.add(f.id);
