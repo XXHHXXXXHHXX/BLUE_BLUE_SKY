@@ -48,6 +48,9 @@ interface MonitorCommandConfig {
   skipFirst?: number;
   takeLast?: number;
   skipLast?: number;
+  continuous?: boolean;
+  startCommand?: string;
+  fetchCommand?: string;
 }
 
 interface StreamConfig {

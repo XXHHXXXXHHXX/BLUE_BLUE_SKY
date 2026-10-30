@@ -103,6 +103,49 @@ const parseListOutput = (stdout: string): { values: number[]; raw: string } => {
   return { values, raw };
 };
 
+/** 解析持续模式结束命令的多行输出为采样点。
+ * 每行视为一次采样：单值模式每行一个数字；多值模式每行逗号分隔多列。
+ * 返回 { points, columnPoints, skippedLines }，columnPoints 仅在多值模式下有值 */
+const parseContinuousOutput = (
+  stdout: string,
+  mode: 'single' | 'list'
+): {
+  points: Array<{ timestamp: string; value: number; raw: string }>;
+  columnPoints: Array<Array<{ timestamp: string; value: number; raw: string }>>;
+  skippedLines: number;
+} => {
+  const points: Array<{ timestamp: string; value: number; raw: string }> = [];
+  const columnPoints: Array<Array<{ timestamp: string; value: number; raw: string }>> = [];
+  let skippedLines = 0;
+
+  const lines = stdout.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const timestamp = new Date().toISOString();
+    if (mode === 'list') {
+      // 多值模式：每行逗号分隔多列
+      const cells = trimmed.split(',').map((s) => s.trim());
+      if (cells.length === 0) { skippedLines++; continue; }
+      while (columnPoints.length < cells.length) columnPoints.push([]);
+      cells.forEach((cell, ci) => {
+        const numMatch = cell.match(/-?\d+(?:\.\d+)?/);
+        columnPoints[ci].push({
+          timestamp,
+          value: numMatch ? parseFloat(numMatch[0]) : NaN,
+          raw: trimmed,
+        });
+      });
+    } else {
+      // 单值模式：每行一个数字
+      const { value, raw } = parseNumericOutput(trimmed);
+      points.push({ timestamp, value, raw });
+    }
+  }
+
+  return { points, columnPoints, skippedLines };
+};
+
 /** 固定数量过滤：跳过前 N 个，只保留最后 M 个，再屏蔽最后 K 个 */
 const filterByPosition = (
   points: Array<{ timestamp: string; value: number; raw: string }>,
@@ -218,6 +261,8 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       columnDataPoints?: Array<Array<{ timestamp: string; value: number; raw: string }>>;
       intervalId: ReturnType<typeof setInterval>;
       ssh: NodeSSH;
+      /** 持续模式：后台启动命令的远程 PID（迭代结束后用于终止） */
+      remotePid?: string | null;
     }
   >();
 
@@ -227,6 +272,37 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       try { state.ssh.dispose(); } catch { /* ignore */ }
     }
     monitorStates.clear();
+  };
+
+  /** 终止持续模式监控的远程后台进程（优先 SIGINT 优雅终止，超时再兜底 SIGKILL） */
+  const stopContinuousMonitorRemote = async (
+    ssh: NodeSSH,
+    remotePid: string | null | undefined,
+    startCommand: string
+  ) => {
+    const buildPidTarget = () => {
+      if (remotePid) return remotePid;
+      const pattern = (startCommand || '').split(/\s+/)[0];
+      return pattern ? `$(pgrep -f "${pattern}" | head -1)` : '';
+    };
+    const pidTarget = buildPidTarget();
+    if (!pidTarget) return;
+    try {
+      // 先发 SIGINT 让 perf record 等进程正常收尾落盘
+      const termCmd = `kill -INT ${pidTarget} 2>/dev/null; pkill -INT -P ${pidTarget} 2>/dev/null; echo done`;
+      await withTimeout(ssh.execCommand(termCmd), 20000, '监控终止进程');
+      // 等待进程退出，最多 5 秒；仍未退出则强杀兜底
+      for (let i = 0; i < 5; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const alive = await withTimeout(ssh.execCommand(`kill -0 ${pidTarget} 2>/dev/null && echo alive || echo dead`), 15000, '监控进程存活检查');
+        if (alive.stdout.trim() !== 'alive') return;
+      }
+      await withTimeout(ssh.execCommand(`kill -9 ${pidTarget} 2>/dev/null; pkill -9 -P ${pidTarget} 2>/dev/null; echo done`), 20000, '监控终止进程');
+      addJobLog(jobId, 'warning', '监控（持续模式）进程未在超时内退出，已强制终止');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addJobLog(jobId, 'warning', `监控（持续模式）终止进程失败: ${msg}`);
+    }
   };
 
   // ========== 日志监控（数据全部存在服务器本地） ==========
@@ -538,6 +614,18 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
   // 注册立即中止处理器
   const abortHandler = () => {
     addJobLog(jobId, 'info', '正在执行立即中止...');
+    // 先终止持续模式监控的远程后台进程（再释放 SSH 连接），避免残留 perf 等进程
+    const curStage = getJob(jobId)?.config;
+    const allMonitorCmds = [
+      ...(curStage?.monitorCommands ?? []),
+      ...(curStage?.stages ?? []).flatMap((st) => st.monitorCommands ?? []),
+    ];
+    for (const [cmdId, state] of monitorStates) {
+      const cmd = allMonitorCmds.find((c) => c.id === cmdId);
+      if (cmd?.continuous && cmd.startCommand?.trim()) {
+        stopContinuousMonitorRemote(state.ssh, state.remotePid, cmd.startCommand).catch(() => {});
+      }
+    }
     cleanupMonitors();
     cleanupHeartbeat();
     // 终止持续模式远程后台进程（先于 cleanupLogMonitor 释放 SSH）
@@ -818,20 +906,45 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
           }
 
           const isListMode = cmd.mode === 'list' && cmd.columns && cmd.columns.length > 0;
+          const isContinuous = !!(cmd.continuous && cmd.startCommand && cmd.startCommand.trim());
 
           const state: {
             dataPoints: Array<{ timestamp: string; value: number; raw: string }>;
             columnDataPoints?: Array<Array<{ timestamp: string; value: number; raw: string }>>;
             intervalId: ReturnType<typeof setInterval>;
             ssh: NodeSSH;
+            remotePid?: string | null;
           } = {
             dataPoints: [],
             intervalId: null as unknown as ReturnType<typeof setInterval>,
             ssh: monitorSsh!,
+            remotePid: null,
           };
 
           if (isListMode) {
             state.columnDataPoints = cmd.columns!.map(() => []);
+          }
+
+          if (isContinuous) {
+            // ===== 持续模式：后台启动开始命令（nohup 使其脱离会话持续运行） =====
+            try {
+              const remotePidFile = `/tmp/blue_sky_monitor_${jobId}_${cmd.id}.pid`;
+              // 用 exec 让启动命令进程替换 bash，使 $$ 即目标进程 PID
+              const startCmd = `nohup bash -c 'echo $$ > ${remotePidFile}; exec ${cmd.startCommand}' > /dev/null 2>&1 &`;
+              const startResult = await withTimeout(monitorSsh!.execCommand(startCmd), 30000, `监控 [${cmd.name}] 启动命令`);
+              if (startResult.stderr && startResult.code !== 0) {
+                throw new Error(startResult.stderr);
+              }
+              const pidRead = await withTimeout(monitorSsh!.execCommand(`cat ${remotePidFile} 2>/dev/null`), 15000, `监控 [${cmd.name}] PID 读取`);
+              state.remotePid = pidRead.stdout.trim() || null;
+              addJobLog(jobId, 'info', `监控 [${cmd.name}]（持续模式）启动命令已后台运行${state.remotePid ? `（PID ${state.remotePid}）` : ''}`);
+              monitorStates.set(cmd.id, state);
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              addJobLog(jobId, 'warning', `监控 [${cmd.name}]（持续模式）启动命令失败: ${errMsg}`);
+              try { monitorSsh!.dispose(); } catch { /* ignore */ }
+            }
+            continue;
           }
 
           const runMonitor = async () => {
@@ -963,11 +1076,38 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
 
       for (const [cmdId, state] of monitorStates) {
         try { clearInterval(state.intervalId); } catch { /* ignore */ }
-        try { state.ssh.dispose(); } catch { /* ignore */ }
         const cmd = activeMonitors.find((c) => c.id === cmdId);
         if (!cmd) continue;
 
+        const isContinuous = !!(cmd.continuous && cmd.startCommand && cmd.startCommand.trim());
         const isListMode = cmd.mode === 'list' && cmd.columns && cmd.columns.length > 0;
+
+        if (isContinuous) {
+          // ===== 持续模式：先终止后台进程（确保 perf 等落盘），再执行结束命令解析采样点 =====
+          await stopContinuousMonitorRemote(state.ssh, state.remotePid, cmd.startCommand || '');
+          // 稍等片刻让 perf record 等完成落盘
+          await new Promise((r) => setTimeout(r, 1000));
+          if (cmd.fetchCommand?.trim()) {
+            try {
+              const fetchResult = await withTimeout(state.ssh.execCommand(cmd.fetchCommand), 60000, `监控 [${cmd.name}] 结束命令`);
+              const { points, columnPoints, skippedLines } = parseContinuousOutput(fetchResult.stdout || '', isListMode ? 'list' : 'single');
+              if (isListMode && state.columnDataPoints) {
+                // 多值模式：把解析出的列数据填入 columnDataPoints
+                for (let ci = 0; ci < state.columnDataPoints.length; ci++) {
+                  state.columnDataPoints[ci] = columnPoints[ci] || [];
+                }
+              } else {
+                state.dataPoints = points;
+              }
+              addJobLog(jobId, 'info', `监控 [${cmd.name}]（持续模式）结束命令解析 ${isListMode ? (columnPoints[0]?.length || 0) : points.length} 个采样点${skippedLines ? `（跳过 ${skippedLines} 行空行）` : ''}`);
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : String(err);
+              addJobLog(jobId, 'warning', `监控 [${cmd.name}]（持续模式）结束命令失败: ${errMsg}`);
+            }
+          }
+        }
+
+        try { state.ssh.dispose(); } catch { /* ignore */ }
 
         if (isListMode && state.columnDataPoints) {
           // list 模式：为每个列生成独立的 monitorResult

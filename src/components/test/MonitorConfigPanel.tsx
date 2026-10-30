@@ -98,6 +98,9 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
       takeLast: 0,
       skipLast: 0,
       excludeZero: false,
+      continuous: false,
+      startCommand: '',
+      fetchCommand: '',
     };
     updateCommands([...commands, newCommand]);
   };
@@ -292,6 +295,22 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                     disabled={disabled}
                   />
                 </Col>
+                <Col flex="none">
+                  <Tooltip title="持续模式：迭代开始前执行启动命令全程运行，迭代结束后杀掉进程并执行结束命令解析数据；无需设置间隔">
+                    <Checkbox
+                      checked={!!cmd.continuous}
+                      onChange={(e) =>
+                        updateCommand(index, {
+                          continuous: e.target.checked,
+                          command: e.target.checked ? '' : cmd.command,
+                        })
+                      }
+                      disabled={disabled}
+                    >
+                      <span style={{ color: '#666', fontSize: 12 }}>持续模式</span>
+                    </Checkbox>
+                  </Tooltip>
+                </Col>
                 <Col flex="auto">
                   <Row gutter={[8, 8]}>
                     <Col span={8}>
@@ -304,16 +323,18 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                         prefix={<span style={{ color: '#999', fontSize: 12 }}>名称</span>}
                       />
                     </Col>
-                    <Col span={16}>
-                      <Input
-                        size="small"
-                        placeholder="监控命令，例如：cat /proc/loadavg | awk '{print $1}'"
-                        value={cmd.command}
-                        onChange={(e) => updateCommand(index, { command: e.target.value })}
-                        disabled={disabled}
-                        prefix={<span style={{ color: '#999', fontSize: 12 }}>命令</span>}
-                      />
-                    </Col>
+                    {!cmd.continuous && (
+                      <Col span={16}>
+                        <Input
+                          size="small"
+                          placeholder="监控命令，例如：cat /proc/loadavg | awk '{print $1}'"
+                          value={cmd.command}
+                          onChange={(e) => updateCommand(index, { command: e.target.value })}
+                          disabled={disabled}
+                          prefix={<span style={{ color: '#999', fontSize: 12 }}>命令</span>}
+                        />
+                      </Col>
+                    )}
                     <Col span={8}>
                       <Select
                         size="small"
@@ -348,6 +369,30 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                           prefix={<span style={{ color: '#999', fontSize: 12 }}>列名</span>}
                         />
                       </Col>
+                    )}
+                    {cmd.continuous && (
+                      <>
+                        <Col span={24}>
+                          <Input.TextArea
+                            size="small"
+                            rows={2}
+                            placeholder="启动命令（迭代开始前执行，全程持续运行），例如：while true; do cat /proc/loadavg | awk '{print $1}'; sleep 1; done > /tmp/mon.log"
+                            value={cmd.startCommand || ''}
+                            onChange={(e) => updateCommand(index, { startCommand: e.target.value })}
+                            disabled={disabled}
+                          />
+                        </Col>
+                        <Col span={24}>
+                          <Input.TextArea
+                            size="small"
+                            rows={2}
+                            placeholder="结束命令（迭代结束后执行并解析数据）：单值模式每行一个数值，多值模式每行逗号分隔多列。例如：cat /tmp/mon.log"
+                            value={cmd.fetchCommand || ''}
+                            onChange={(e) => updateCommand(index, { fetchCommand: e.target.value })}
+                            disabled={disabled}
+                          />
+                        </Col>
+                      </>
                     )}
                     <Col span={8}>
                       <Select
@@ -392,21 +437,23 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                         </div>
                       </Col>
                     )}
-                    <Col span={cmd.target === 'bmc' ? 6 : 16}>
-                      <Space>
-                        <span style={{ color: '#666', fontSize: 12 }}>间隔</span>
-                        <InputNumber
-                          size="small"
-                          min={0.1}
-                          max={60}
-                          value={cmd.interval}
-                          onChange={(val) => updateCommand(index, { interval: val || 0.1 })}
-                          disabled={disabled}
-                          style={{ width: 60 }}
-                        />
-                        <span style={{ color: '#666', fontSize: 12 }}>秒</span>
-                      </Space>
-                    </Col>
+                    {!cmd.continuous && (
+                      <Col span={cmd.target === 'bmc' ? 6 : 16}>
+                        <Space>
+                          <span style={{ color: '#666', fontSize: 12 }}>间隔</span>
+                          <InputNumber
+                            size="small"
+                            min={0.1}
+                            max={60}
+                            value={cmd.interval}
+                            onChange={(val) => updateCommand(index, { interval: val || 0.1 })}
+                            disabled={disabled}
+                            style={{ width: 60 }}
+                          />
+                          <span style={{ color: '#666', fontSize: 12 }}>秒</span>
+                        </Space>
+                      </Col>
+                    )}
                     <Col span={cmd.target === 'bmc' ? 14 : 16}>
                       <Space>
                         <Tooltip title="相邻采样点变化超过此值时记为一次跳变，用于自动识别校准/预热阶段。0 表示不启用跳变检测">

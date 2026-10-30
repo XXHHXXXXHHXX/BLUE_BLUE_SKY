@@ -43,6 +43,9 @@ export interface MonitorCommandData {
   skipFirst?: number;
   takeLast?: number;
   skipLast?: number;
+  continuous?: boolean;
+  startCommand?: string;
+  fetchCommand?: string;
 }
 
 export interface SavedTestConfigData {

@@ -665,7 +665,16 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         message.error('请填写所有启用的监控命令名称');
         return;
       }
-      if (!monitor.command.trim()) {
+      if (monitor.continuous) {
+        if (!monitor.startCommand?.trim()) {
+          message.error(`监控命令 [${monitor.name}] 持续模式已启用，请填写启动命令`);
+          return;
+        }
+        if (!monitor.fetchCommand?.trim()) {
+          message.error(`监控命令 [${monitor.name}] 持续模式已启用，请填写结束命令`);
+          return;
+        }
+      } else if (!monitor.command.trim()) {
         message.error(`监控命令 [${monitor.name}] 未填写命令内容`);
         return;
       }

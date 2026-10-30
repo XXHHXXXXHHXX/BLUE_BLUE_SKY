@@ -35,6 +35,9 @@ export interface PipelineStageTemplate {
     takeLast?: number;
     skipLast?: number;
     excludeZero?: boolean;
+    continuous?: boolean;
+    startCommand?: string;
+    fetchCommand?: string;
   }>;
   /** 阶段独立环境变量 */
   envVars?: Array<{ key: string; value: string }>;

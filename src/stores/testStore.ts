@@ -89,6 +89,12 @@ export interface MonitorCommand {
   skipLast?: number;
   /** 排除数值为 0 的采样点，不纳入平均值计算 */
   excludeZero?: boolean;
+  /** 持续模式：迭代开始前执行启动命令持续运行，迭代结束后终止并执行结束命令解析数据。true 时无需间隔 */
+  continuous?: boolean;
+  /** 持续模式：迭代开始前执行的启动命令（可长时间运行，如 perf record / 采样写入临时文件） */
+  startCommand?: string;
+  /** 持续模式：迭代结束后执行的结束命令，输出解析为采样点（每行一次采样；单值每行一个数，多值每行逗号分隔多列） */
+  fetchCommand?: string;
 }
 
 /** 日志监控配置 */

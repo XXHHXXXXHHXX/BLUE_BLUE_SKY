@@ -82,6 +82,9 @@ export interface JobConfig {
     takeLast?: number;
     skipLast?: number;
     excludeZero?: boolean;
+    continuous?: boolean;
+    startCommand?: string;
+    fetchCommand?: string;
   }>;
   // 心跳检测配置
   heartbeatEnabled?: boolean;

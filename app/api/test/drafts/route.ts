@@ -48,6 +48,9 @@ interface TestDraftData {
       skipFirst?: number;
       takeLast?: number;
       skipLast?: number;
+      continuous?: boolean;
+      startCommand?: string;
+      fetchCommand?: string;
     }>;
     envVars: Array<{ key: string; value: string }>;
   };
