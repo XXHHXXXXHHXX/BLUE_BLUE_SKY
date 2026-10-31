@@ -196,6 +196,7 @@ export const nodeTypeLabels: Record<string, string> = {
   thermometer: '温度计',
   custom: '自定义模块',
   control: '控制模块',
+  view: '查看组件',
 };
 
 /** 各模块类型的默认字段映射配置（使用 fieldKey，显示名固定） */
@@ -309,6 +310,7 @@ export const defaultFieldMappings: Record<string, FieldMapping[]> = {
     { fieldKey: 'power', bmcField: '自定义模块功耗' },
   ],
   control: [],
+  view: [],
   thermometer: [
     { fieldKey: 'temperature', bmcField: 'Thermometer Temp' },
     { fieldKey: 'temperatureStatus', bmcField: 'Thermometer Status' },
@@ -392,6 +394,17 @@ export function createDefaultNodeData(type: string): HardwareNodeData {
           rangeStep: 1,
           rangeUnit: '%',
           options: [],
+        },
+      };
+    case 'view':
+      return {
+        label,
+        nodeType: 'view' as const,
+        category: 'other' as const,
+        viewConfig: {
+          purpose: '',
+          command: '',
+          params: [],
         },
       };
     default:

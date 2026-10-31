@@ -13,13 +13,16 @@ import {
   ArrowDownOutlined,
   ApartmentOutlined,
   ControlOutlined,
+  EyeOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import { useDesignTopologyStore } from '../../stores/designTopologyStore';
 import { defaultFieldMappings, defaultPowerDomainFieldMappings } from '../../services/mockData';
 import { getNodeLossFieldAnnotation } from '../../services/lossCalculation';
 import { CPU_POWER_DOMAIN_FIELD_DEFS } from '../../types/power';
-import type { TopologyNode, HardwareNodeType, ApiConfig, FieldMapping, FieldThreshold, ControlConfig, ControlOptionItem } from '../../types/topology';
+import type { TopologyNode, HardwareNodeType, ApiConfig, FieldMapping, FieldThreshold, ControlConfig, ControlOptionItem, ViewConfig, ViewParamDef } from '../../types/topology';
 import { FIXED_FIELD_DEFS, DEFAULT_FIELD_THRESHOLDS } from '../../types/topology';
+import { extractCommandParams } from '../../utils/commandParams';
 
 const { Text, Title } = Typography;
 
@@ -28,7 +31,7 @@ const typeTagMap: Record<HardwareNodeType, string> = {
   ac: 'AC', psu: 'PSU', vr: 'VR', psip: 'PSIP', busbar: 'BUSBAR',
   cpu: 'CPU', memory: 'MEM', fan: 'FAN', disk: 'DISK',
   io: 'IO', card: 'CARD', sensor: 'SENSOR', mgmtBoard: 'MGMT', chassis: 'CHASSIS',
-  thermometer: 'THERM', custom: 'CUSTOM', control: 'CTRL',
+  thermometer: 'THERM', custom: 'CUSTOM', control: 'CTRL', view: 'VIEW',
 };
 
 interface NodeEditPanelProps {
@@ -38,10 +41,11 @@ interface NodeEditPanelProps {
 }
 
 const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) => {
-  const { updateNodeAlias, updateNodeCustomIconUrl, updateNodeColor, updateNodeApiConfig, updateNodeControlConfig, updateNodeFieldMappings, updateNodePowerDomainFieldMappings } = useDesignTopologyStore();
+  const { updateNodeAlias, updateNodeCustomIconUrl, updateNodeColor, updateNodeApiConfig, updateNodeControlConfig, updateNodeViewConfig, updateNodeFieldMappings, updateNodePowerDomainFieldMappings } = useDesignTopologyStore();
 
   const [alias, setAlias] = useState('');
   const [controlConfig, setControlConfig] = useState<ControlConfig>({ controlShell: '', mode: 'range' });
+  const [viewConfig, setViewConfig] = useState<ViewConfig>({ purpose: '', command: '', params: [] });
   const [controlOptionInput, setControlOptionInput] = useState('');
   const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([]);
   const [powerDomainFieldMappings, setPowerDomainFieldMappings] = useState<FieldMapping[]>([]);
@@ -68,6 +72,9 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
       // 使用节点已有的控制配置（控制模块专用）
       const existingControl = (node.data as { controlConfig?: ControlConfig }).controlConfig;
       setControlConfig(existingControl || { controlShell: '', mode: 'range' });
+      // 使用节点已有的查看配置（查看组件专用）
+      const existingView = (node.data as { viewConfig?: ViewConfig }).viewConfig;
+      setViewConfig(existingView || { purpose: '', command: '', params: [] });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node?.id]);  // 只在节点 ID 变化时同步，避免 node 对象引用变化导致重置
@@ -177,6 +184,58 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     updateNodeControlConfig(node.id, config);
     message.success('控制配置已保存');
   }, [node, controlConfig, updateNodeControlConfig]);
+
+  // 解析命令中的参数占位符，同步到参数列表
+  const handleViewParseParams = useCallback(() => {
+    const names = extractCommandParams(viewConfig.command || '');
+    if (names.length === 0) {
+      message.info('命令中未找到 {参数} 占位符');
+      return;
+    }
+    setViewConfig((prev) => {
+      const existing = new Map((prev.params || []).map((p) => [p.name, p]));
+      const merged: ViewParamDef[] = names.map((name) => {
+        const old = existing.get(name);
+        return old
+          ? { ...old }
+          : { name, label: name, encrypted: false };
+      });
+      return { ...prev, params: merged };
+    });
+    message.success(`已解析 ${names.length} 个参数`);
+  }, [viewConfig.command]);
+
+  // 更新某个参数定义（显示名 / 是否加密）
+  const handleViewParamChange = useCallback((idx: number, updates: Partial<ViewParamDef>) => {
+    setViewConfig((prev) => {
+      const params = (prev.params || []).map((p, i) => (i === idx ? { ...p, ...updates } : p));
+      return { ...prev, params };
+    });
+  }, []);
+
+  // 删除某个参数定义
+  const handleViewParamRemove = useCallback((idx: number) => {
+    setViewConfig((prev) => {
+      const params = (prev.params || []).filter((_, i) => i !== idx);
+      return { ...prev, params };
+    });
+  }, []);
+
+  // 保存查看配置（查看组件专用）
+  const handleSaveViewConfig = useCallback(() => {
+    if (!node) return;
+    const config: ViewConfig = {
+      purpose: (viewConfig.purpose || '').trim(),
+      command: (viewConfig.command || '').trim(),
+      params: (viewConfig.params || []).map((p) => ({
+        name: p.name,
+        label: p.label || p.name,
+        encrypted: !!p.encrypted,
+      })),
+    };
+    updateNodeViewConfig(node.id, config);
+    message.success('查看配置已保存');
+  }, [node, viewConfig, updateNodeViewConfig]);
 
   // 解析固定选项输入（支持逗号/空格分隔）
   // 支持两种形态：
@@ -1181,6 +1240,130 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     );
   };
 
+  // 查看配置 Tab（查看组件专用）
+  const renderViewTab = () => {
+    if (!nodeType || nodeType !== 'view') return null;
+
+    const set = (patch: Partial<ViewConfig>) =>
+      setViewConfig((prev) => ({ ...prev, ...patch }));
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* 查看用途 */}
+        <div>
+          <Title level={5} style={{ margin: 0, marginBottom: 8 }}>
+            <EyeOutlined /> 用途
+          </Title>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+            自定义这个查看的用途说明，将在拓扑监控页面的模块卡片上显示。
+          </Text>
+          <Input
+            placeholder="如：查询服务器健康状态 / 读取整机功耗"
+            value={viewConfig.purpose || ''}
+            onChange={(e) => set({ purpose: e.target.value })}
+          />
+        </div>
+
+        <Divider style={{ margin: '4px 0' }} />
+
+        {/* 查看命令 */}
+        <div>
+          <Title level={5} style={{ margin: 0, marginBottom: 8 }}>
+            <EyeOutlined /> 查看命令
+          </Title>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+            配置通过 SSH 在已连接 BMC 上执行的查询命令，使用 {'{参数名}'} 占位符。保存前点击“解析参数”可自动从命令中提取参数。
+          </Text>
+          <Input.TextArea
+            rows={3}
+            placeholder="如：ssh {user}@{ip}:{password} hello"
+            value={viewConfig.command || ''}
+            onChange={(e) => set({ command: e.target.value })}
+          />
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            onClick={handleViewParseParams}
+            style={{ marginTop: 8 }}
+          >
+            解析参数
+          </Button>
+        </div>
+
+        <Divider style={{ margin: '4px 0' }} />
+
+        {/* 参数定义列表 */}
+        <div>
+          <Title level={5} style={{ margin: 0, marginBottom: 8 }}>
+            <EyeOutlined /> 参数定义
+          </Title>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+            在监控页面查看时，会要求填写这些参数。可设置“加密”，加密参数用密码框输入且不回显。
+          </Text>
+          {(viewConfig.params || []).length === 0 ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              暂无参数，请先在上方填写命令并点击“解析参数”。
+            </Text>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {(viewConfig.params || []).map((p, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    display: 'flex',
+                    gap: 8,
+                    alignItems: 'center',
+                    padding: 8,
+                    background: '#fafafa',
+                    borderRadius: 4,
+                    border: '1px solid #f0f0f0',
+                  }}
+                >
+                  <Input
+                    size="small"
+                    style={{ flex: '0 0 110px' }}
+                    value={p.name}
+                    disabled
+                    title="参数名（来自命令占位符，不可修改）"
+                  />
+                  <Input
+                    size="small"
+                    style={{ flex: 1, minWidth: 0 }}
+                    placeholder="显示名（可选）"
+                    value={p.label || p.name}
+                    onChange={(e) => handleViewParamChange(idx, { label: e.target.value })}
+                  />
+                  <Select
+                    size="small"
+                    style={{ flex: '0 0 84px' }}
+                    value={p.encrypted ? 'encrypted' : 'plain'}
+                    onChange={(v) => handleViewParamChange(idx, { encrypted: v === 'encrypted' })}
+                    options={[
+                      { value: 'plain', label: '普通' },
+                      { value: 'encrypted', label: '加密' },
+                    ]}
+                  />
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<DeleteOutlined />}
+                    onClick={() => handleViewParamRemove(idx)}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <Divider style={{ margin: '4px 0' }} />
+
+        <Button type="primary" onClick={handleSaveViewConfig} block>
+          保存查看配置
+        </Button>
+      </div>
+    );
+  };
+
   return (
     <Drawer
       title={
@@ -1215,6 +1398,13 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                   key: 'control',
                   label: <span><ControlOutlined /> 控制配置</span>,
                   children: renderControlTab(),
+                }]
+              : []),
+            ...(nodeType === 'view'
+              ? [{
+                  key: 'view',
+                  label: <span><EyeOutlined /> 查看配置</span>,
+                  children: renderViewTab(),
                 }]
               : []),
           ]}

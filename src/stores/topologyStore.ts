@@ -84,6 +84,7 @@ interface TopologyState {
   updateNodeCustomIconUrl: (nodeId: string, url: string | undefined) => Promise<void>;
   updateNodeApiConfig: (nodeId: string, config: ApiConfig) => Promise<void>;
   updateNodeControlConfig: (nodeId: string, config: import('../types/topology').ControlConfig) => Promise<void>;
+  updateNodeViewConfig: (nodeId: string, config: import('../types/topology').ViewConfig) => Promise<void>;
 
   // 导入导出
   exportTopology: () => TopologyExportData;
@@ -360,6 +361,18 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
       nodes: nodes.map(n =>
         n.id === nodeId
           ? { ...n, data: { ...n.data, controlConfig: config } }
+          : n
+      ),
+    });
+    await get().saveToBackend();
+  },
+
+  updateNodeViewConfig: async (nodeId, config) => {
+    const { nodes } = get();
+    set({
+      nodes: nodes.map(n =>
+        n.id === nodeId
+          ? { ...n, data: { ...n.data, viewConfig: config } }
           : n
       ),
     });

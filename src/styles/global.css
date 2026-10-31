@@ -194,6 +194,18 @@ html, body, #root {
   color: #722ed1;
 }
 
+/* 查看组件节点 */
+.hardware-node.view-node {
+  border-color: #13c2c2;
+  background: linear-gradient(135deg, #e6fffb 0%, #fff 100%);
+  min-width: 200px;
+}
+
+.hardware-node.view-node .node-icon-area {
+  background: rgba(19, 194, 194, 0.08);
+  color: #13c2c2;
+}
+
 /* 用户自定义渲染颜色（nodeColor）：整个卡片 UI 主题色 */
 /* 通过 ScalableNodeWrapper 注入 --node-color CSS 变量，仅对设置了颜色的卡片生效 */
 /* 优先级低于下方告警状态样式（告警使用 !important，异常闪烁仍优先显示） */

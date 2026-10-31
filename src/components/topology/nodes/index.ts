@@ -17,6 +17,7 @@ import ChassisNode from './ChassisNode';
 import ThermometerNode from './ThermometerNode';
 import CustomNode from './CustomNode';
 import ControlNode from './ControlNode';
+import ViewNode from './ViewNode';
 
 /**
  * 带缩放功能的节点类型 - 用于设计页面
@@ -39,6 +40,7 @@ export const nodeTypes: NodeTypes = {
   thermometer: withScalable(ThermometerNode),
   custom: withScalable(CustomNode),
   control: withScalable(ControlNode),
+  view: withScalable(ViewNode),
 };
 
 /**
@@ -62,4 +64,5 @@ export const staticNodeTypes: NodeTypes = {
   thermometer: withoutScalable(ThermometerNode),
   custom: withoutScalable(CustomNode),
   control: withoutScalable(ControlNode),
+  view: withoutScalable(ViewNode),
 };

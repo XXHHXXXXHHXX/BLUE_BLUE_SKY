@@ -186,6 +186,43 @@ export async function executeControlCommand(
   }
 }
 
+// ==================== 查看命令执行 API ====================
+
+/** 查看命令执行结果 */
+export interface ViewExecuteResult {
+  success: boolean;
+  message: string;
+  command?: string;
+  stdout?: string;
+  stderr?: string;
+  timestamp?: string;
+}
+
+/** 通过 SSH 到已连接 BMC 执行查看命令（{param} 占位符已在后端替换）
+ * paramValues 为前端填写的参数值，key 为参数名 */
+export async function executeViewCommand(
+  bmcConfig: BMCConfig,
+  command: string,
+  paramValues: Record<string, string>
+): Promise<ViewExecuteResult> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/view/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: bmcConfig, command, paramValues }),
+    });
+
+    const result: ViewExecuteResult = await response.json();
+    return result;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      message: `命令执行失败: ${errMsg}`,
+    };
+  }
+}
+
 // ==================== 拓扑结构 API ====================
 
 /** 获取指定拓扑结构 */

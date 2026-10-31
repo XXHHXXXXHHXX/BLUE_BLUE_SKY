@@ -16,6 +16,7 @@ const categories: ModuleCategory[] = [
   { label: '其他', types: ['sensor'] },
   { label: '自定义', types: ['custom'] },
   { label: '控制', types: ['control'] },
+  { label: '查看', types: ['view'] },
 ];
 
 const ModulePalette: React.FC = () => {

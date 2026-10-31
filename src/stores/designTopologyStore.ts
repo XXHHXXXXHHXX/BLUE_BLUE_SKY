@@ -93,6 +93,7 @@ interface DesignTopologyState {
   updateNodeColor: (nodeId: string, color: string | undefined) => void;
   updateNodeApiConfig: (nodeId: string, config: ApiConfig) => void;
   updateNodeControlConfig: (nodeId: string, config: import('../types/topology').ControlConfig) => void;
+  updateNodeViewConfig: (nodeId: string, config: import('../types/topology').ViewConfig) => void;
   updateNodeFieldMappings: (nodeId: string, mappings: import('../types/topology').FieldMapping[]) => void;
   updateNodePowerDomainFieldMappings: (nodeId: string, mappings: import('../types/topology').FieldMapping[]) => void;
 
@@ -419,6 +420,18 @@ export const useDesignTopologyStore = create<DesignTopologyState>((set, get) => 
       nodes: nodes.map(n =>
         n.id === nodeId
           ? { ...n, data: { ...n.data, controlConfig: config } }
+          : n
+      ),
+      hasUnsavedChanges: true,
+    });
+  },
+
+  updateNodeViewConfig: (nodeId, config) => {
+    const { nodes } = get();
+    set({
+      nodes: nodes.map(n =>
+        n.id === nodeId
+          ? { ...n, data: { ...n.data, viewConfig: config } }
           : n
       ),
       hasUnsavedChanges: true,

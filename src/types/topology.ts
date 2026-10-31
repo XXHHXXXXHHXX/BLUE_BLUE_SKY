@@ -10,7 +10,7 @@ export type HardwareNodeType =
   | 'ac' | 'psu' | 'vr' | 'psip' | 'busbar'
   | 'cpu' | 'memory' | 'fan' | 'disk'
   | 'io' | 'card' | 'sensor' | 'mgmtBoard' | 'chassis'
-  | 'thermometer' | 'custom' | 'control';
+  | 'thermometer' | 'custom' | 'control' | 'view';
 
 /** BMC 连接配置（通过 SSH） */
 export interface BMCConfig {
@@ -159,6 +159,7 @@ export const FIXED_FIELD_DEFS: Record<string, FixedFieldDef[]> = {
   chassis: [],
   custom: [],
   control: [],
+  view: [],
 };
 
 /** 默认字段阈值配置 */
@@ -312,6 +313,26 @@ export interface ControlConfig {
   options?: ControlOptionItem[];
 }
 
+/** 查看组件参数定义：从命令模板中的 {name} 占位符动态解析生成 */
+export interface ViewParamDef {
+  /** 参数名（占位符名，如 {user} → 'user'） */
+  name: string;
+  /** 前端展示用标签（用户可自定义，默认等于参数名） */
+  label: string;
+  /** 是否加密输入（如密码），开启后前端用密码框输入且不回显 */
+  encrypted: boolean;
+}
+
+/** 查看组件配置：通过 SSH 到已连接 BMC 执行查询命令并展示结果 */
+export interface ViewConfig {
+  /** 查看用途说明，用户在编辑时自定义，监控页卡片显示 */
+  purpose?: string;
+  /** 查询命令模板，使用 {paramName} 占位符，如 ssh {user}@{ip}:{password} hello */
+  command: string;
+  /** 由命令模板中的 {name} 占位符动态解析出的参数定义列表 */
+  params?: ViewParamDef[];
+}
+
 /** 节点数据联合类型 */
 export type HardwareNodeData = {
   label: string;
@@ -341,6 +362,7 @@ export type HardwareNodeData = {
   | { nodeType: 'thermometer'; thermometerData: import('./power').ThermometerData }
   | { nodeType: 'custom'; }
   | { nodeType: 'control'; controlConfig?: ControlConfig }
+  | { nodeType: 'view'; viewConfig?: ViewConfig }
 );
 
 /** React Flow节点类型 */

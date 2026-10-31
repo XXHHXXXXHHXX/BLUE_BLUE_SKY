@@ -22,6 +22,7 @@ const defaultIconMap: Record<HardwareNodeType, string> = {
   thermometer: 'DashboardOutlined',
   custom: 'BuildOutlined',
   control: 'ControlOutlined',
+  view: 'EyeOutlined',
 };
 
 /** Fan SVG icon (custom, since Ant Design doesn't have a fan icon) */
