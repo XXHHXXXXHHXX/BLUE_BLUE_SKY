@@ -2,12 +2,12 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { type NodeProps } from '@xyflow/react';
-import { Slider, Button, message, Tooltip, Modal } from 'antd';
+import { Slider, Button, message, Tooltip, Modal, Input } from 'antd';
 import NodeIcon from './NodeIcon';
 import { getNodeDisplayLabel } from '../../../utils/formatters';
-import type { ControlConfig, ControlOption, ControlOptionItem } from '../../../types/topology';
+import type { ControlConfig, ControlOption, ControlOptionItem, ViewParamDef } from '../../../types/topology';
 import { useBMCSessionStore } from '../../../stores/bmcSessionStore';
-import { executeControlCommand } from '../../../services/backendApi';
+import { executeControlCommand, executeCustomControlCommand } from '../../../services/backendApi';
 
 /** 生成步进点标记：0~100 步进 25 → {0,25,50,75,100} */
 function buildSliderMarks(min: number, max: number, step: number, unit: string): Record<number, React.ReactNode> {
@@ -73,6 +73,8 @@ const ControlNode: React.FC<NodeProps> = (props) => {
     rangeStep: 1,
     rangeUnit: '%',
     options: [],
+    params: [],
+    buttons: [],
   };
 
   const command = controlConfig.controlShell?.trim();
@@ -90,6 +92,20 @@ const ControlNode: React.FC<NodeProps> = (props) => {
   }, [sessions, connectedSessionId]);
   const [sending, setSending] = useState(false);
   const [lastSent, setLastSent] = useState<{ value: number | string; time: string } | null>(null);
+
+  // 自定义参数模式：用户填写的参数值（key 为参数名）
+  const [paramValues, setParamValues] = useState<Record<string, string>>({});
+  const params = controlConfig.params || [];
+  const buttons = controlConfig.buttons || [];
+
+  /** 校验自定义参数是否已填齐 */
+  const validateParams = useCallback(
+    (list: ViewParamDef[]): string | null => {
+      const missing = list.filter((p) => !paramValues[p.name] || !paramValues[p.name].trim());
+      return missing.length > 0 ? missing.map((p) => p.label || p.name).join('、') : null;
+    },
+    [paramValues],
+  );
 
   /** 选项展示：数字带单位，字符串忽略单位 */
   const formatOption = useCallback((v: number | string) => {
@@ -122,6 +138,72 @@ const ControlNode: React.FC<NodeProps> = (props) => {
       }
     },
     [command, bmcConfig, formatOption],
+  );
+
+  /** 下发自定义参数命令到 BMC（确认通过后调用）。
+   * shell 传入时用专属按钮命令，否则用全局控制命令 */
+  const doSendCustom = useCallback(
+    async (shell: string) => {
+      const finalShell = shell || command;
+      if (!finalShell) {
+        message.warning('控制命令未配置');
+        return;
+      }
+      if (!bmcConfig) {
+        message.warning('未连接 BMC，请先在监控配置中连接 BMC');
+        return;
+      }
+      setSending(true);
+      try {
+        const result = await executeCustomControlCommand(bmcConfig, finalShell, paramValues);
+        if (result.success) {
+          message.success('命令已下发');
+          setLastSent({ value: '自定义参数', time: new Date().toLocaleTimeString() });
+        } else {
+          message.error(result.message || '命令下发失败');
+        }
+      } finally {
+        setSending(false);
+      }
+    },
+    [command, bmcConfig, paramValues],
+  );
+
+  /** 自定义参数模式：点击时先弹确认框，确认后才下发 */
+  const handleSendCustom = useCallback(
+    (shell: string) => {
+      const finalShell = shell || command;
+      if (!finalShell) {
+        message.warning('控制命令未配置');
+        return;
+      }
+      if (!bmcConfig) {
+        message.warning('未连接 BMC，请先在监控配置中连接 BMC');
+        return;
+      }
+      const missing = validateParams(params);
+      if (missing) {
+        message.warning(`请填写参数：${missing}`);
+        return;
+      }
+      Modal.confirm({
+        title: '确认下发控制命令',
+        content: (
+          <div>
+            确定要下发<b>自定义参数</b>控制命令到当前 BMC 吗？
+            {finalShell !== command && (
+              <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 4 }}>
+                使用专属命令：{finalShell}
+              </div>
+            )}
+          </div>
+        ),
+        okText: '确认下发',
+        cancelText: '取消',
+        onOk: () => doSendCustom(shell),
+      });
+    },
+    [command, bmcConfig, validateParams, params, doSendCustom],
   );
 
   /** 点击控制时先弹确认框，确认后才下发，避免误操作 */
@@ -191,7 +273,80 @@ const ControlNode: React.FC<NodeProps> = (props) => {
 
       {!isDesignMode && (
         <div className="control-node-interactive nodrag nopan" style={{ marginTop: 8, borderTop: '1px dashed #d3adf7', paddingTop: 8 }}>
-          {mode === 'range' ? (
+          {mode === 'custom' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '0 8px' }}>
+              {params.length === 0 ? (
+                <div style={{ fontSize: 12, color: '#8c8c8c' }}>未配置控制参数</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {params.map((p) => (
+                    <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span
+                        style={{
+                          flex: '0 0 64px',
+                          fontSize: 12,
+                          color: '#595959',
+                          textAlign: 'right',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {p.label || p.name}
+                      </span>
+                      <Input
+                        size="small"
+                        style={{ flex: 1, minWidth: 0 }}
+                        type={p.encrypted ? 'password' : 'text'}
+                        placeholder={p.encrypted ? '••••••' : `请输入${p.label || p.name}`}
+                        value={paramValues[p.name] || ''}
+                        onChange={(e) =>
+                          setParamValues((prev) => ({ ...prev, [p.name]: e.target.value }))
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {command && (
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={sending}
+                  disabled={params.length > 0 && validateParams(params) !== null}
+                  onClick={() => handleSendCustom(command)}
+                  style={{ borderColor: '#d3adf7' }}
+                >
+                  下发
+                </Button>
+              )}
+
+              {buttons.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {buttons.map((btn, idx) => (
+                    <Button
+                      key={idx}
+                      size="small"
+                      type="default"
+                      loading={sending}
+                      disabled={params.length > 0 && validateParams(params) !== null}
+                      onClick={() => handleSendCustom(btn.shell)}
+                      style={{ borderColor: '#d3adf7' }}
+                    >
+                      {btn.label}
+                    </Button>
+                  ))}
+                </div>
+              )}
+
+              {lastSent && (
+                <div style={{ fontSize: 11, color: '#8c8c8c', textAlign: 'center' }}>
+                  最近下发：{formatOption(lastSent.value)}（{lastSent.time}）
+                </div>
+              )}
+            </div>
+          ) : mode === 'range' ? (
             <div style={{ padding: '0 8px' }}>
               <Slider
                 min={rangeMin}

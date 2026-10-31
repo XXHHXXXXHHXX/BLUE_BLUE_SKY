@@ -277,8 +277,8 @@ export interface ApiConfig {
   customFieldDefs?: { fieldKey: string; label: string }[];
 }
 
-/** 控制范围方式：范围式（连续可调）或固定选项（离散数值） */
-export type ControlRangeMode = 'range' | 'options';
+/** 控制范围方式：范围式（连续可调）/ 固定选项（离散数值）/ 自定义参数（用户填写参数后下发） */
+export type ControlRangeMode = 'range' | 'options' | 'custom';
 
 /**
  * 固定选项：
@@ -296,13 +296,21 @@ export interface ControlOption {
 
 export type ControlOptionItem = number | string | ControlOption;
 
+/** 专属命令按钮：UI 显示一个按钮，点击后下发专属控制命令（可用 {value}/{ip}/{user}/{pass} 及自定义参数占位符） */
+export interface ControlCommandButton {
+  /** 按钮显示文本 */
+  label: string;
+  /** 该按钮专属的控制命令模板；未配置时回退到 ControlConfig.controlShell */
+  shell: string;
+}
+
 /** 控制模块配置：控制命令（发往 BMC）+ 控制范围 */
 export interface ControlConfig {
   /** 控制用途说明，用户在编辑时自定义，监控页卡片显示 */
   purpose?: string;
   /** 控制 Shell 命令，使用 {value} 占位符表示调节值，系统将通过 SSH 下发到 BMC 执行 */
   controlShell: string;
-  /** 控制范围方式：range=范围式，options=固定选项 */
+  /** 控制范围方式：range=范围式，options=固定选项，custom=自定义参数 */
   mode: ControlRangeMode;
   /** 范围式：最小值 / 最大值 / 步进 / 单位 */
   rangeMin?: number;
@@ -311,6 +319,10 @@ export interface ControlConfig {
   rangeUnit?: string;
   /** 固定选项：简单形态（number|string）或成对形态（label+value，UI 显示中文、下发英文值） */
   options?: ControlOptionItem[];
+  /** 自定义参数模式：由控制命令模板中的 {name} 占位符动态解析生成的参数定义列表 */
+  params?: ViewParamDef[];
+  /** 专属命令按钮：UI 直接显示按钮，点击后下发对应专属命令（custom 模式专用） */
+  buttons?: ControlCommandButton[];
 }
 
 /** 查看组件参数定义：从命令模板中的 {name} 占位符动态解析生成 */

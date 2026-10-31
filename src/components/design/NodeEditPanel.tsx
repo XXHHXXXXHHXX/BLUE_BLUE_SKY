@@ -180,6 +180,14 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
       rangeStep: controlConfig.rangeStep,
       rangeUnit: controlConfig.rangeUnit,
       options: controlConfig.options || [],
+      params: (controlConfig.params || []).map((p) => ({
+        name: p.name,
+        label: p.label || p.name,
+        encrypted: !!p.encrypted,
+      })),
+      buttons: (controlConfig.buttons || [])
+        .map((b) => ({ label: (b.label || '').trim(), shell: (b.shell || '').trim() }))
+        .filter((b) => b.label || b.shell),
     };
     updateNodeControlConfig(node.id, config);
     message.success('控制配置已保存');
@@ -278,6 +286,66 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
         return opt;
       });
       return { ...prev, options: next };
+    });
+  }, []);
+
+  // ==================== 自定义参数模式（控制模块） ====================
+
+  // 解析控制命令中的参数占位符，同步到参数列表
+  const handleControlParseParams = useCallback(() => {
+    const names = extractCommandParams(controlConfig.controlShell || '');
+    if (names.length === 0) {
+      message.info('命令中未找到 {参数} 占位符');
+      return;
+    }
+    setControlConfig((prev) => {
+      const existing = new Map((prev.params || []).map((p) => [p.name, p]));
+      const merged = names.map((name) => {
+        const old = existing.get(name);
+        return old ? { ...old } : { name, label: name, encrypted: false };
+      });
+      return { ...prev, params: merged };
+    });
+    message.success(`已解析 ${names.length} 个参数`);
+  }, [controlConfig.controlShell]);
+
+  // 更新某个控制参数定义（显示名 / 是否加密）
+  const handleControlParamChange = useCallback((idx: number, updates: Partial<ViewParamDef>) => {
+    setControlConfig((prev) => {
+      const params = (prev.params || []).map((p, i) => (i === idx ? { ...p, ...updates } : p));
+      return { ...prev, params };
+    });
+  }, []);
+
+  // 删除某个控制参数定义
+  const handleControlParamRemove = useCallback((idx: number) => {
+    setControlConfig((prev) => {
+      const params = (prev.params || []).filter((_, i) => i !== idx);
+      return { ...prev, params };
+    });
+  }, []);
+
+  // 更新某个专属命令按钮（标签 / 命令）
+  const handleControlButtonChange = useCallback((idx: number, patch: { label?: string; shell?: string }) => {
+    setControlConfig((prev) => {
+      const buttons = (prev.buttons || []).map((b, i) => (i === idx ? { ...b, ...patch } : b));
+      return { ...prev, buttons };
+    });
+  }, []);
+
+  // 新增一个专属命令按钮
+  const handleControlButtonAdd = useCallback(() => {
+    setControlConfig((prev) => ({
+      ...prev,
+      buttons: [...(prev.buttons || []), { label: '', shell: '' }],
+    }));
+  }, []);
+
+  // 删除某个专属命令按钮
+  const handleControlButtonRemove = useCallback((idx: number) => {
+    setControlConfig((prev) => {
+      const buttons = (prev.buttons || []).filter((_, i) => i !== idx);
+      return { ...prev, buttons };
     });
   }, []);
 
@@ -1098,6 +1166,12 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
             >
               固定选项
             </Button>
+            <Button
+              type={controlConfig.mode === 'custom' ? 'primary' : 'default'}
+              onClick={() => set({ mode: 'custom' })}
+            >
+              自定义参数
+            </Button>
           </div>
 
           {/* 范围式配置 */}
@@ -1144,6 +1218,101 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                   />
                 </div>
               </div>
+            </div>
+          ) : controlConfig.mode === 'custom' ? (
+            /* 自定义参数配置 */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <Text style={{ display: 'block', fontSize: 12 }}>
+                自定义参数模式：在监控页面会要求填写这些参数，然后点击下发执行命令。命令使用 {'{参数名}'} 占位符；点击“解析参数”可自动从命令中提取参数。还可添加“专属命令按钮”，每个按钮有独立命令（同样支持占位符），点击后直接下发。
+              </Text>
+              <Button size="small" icon={<ReloadOutlined />} onClick={handleControlParseParams}>
+                解析参数
+              </Button>
+              {/* 参数定义列表 */}
+              <Text style={{ display: 'block', fontSize: 12 }}>参数定义（可改显示名、设置加密）</Text>
+              {(controlConfig.params || []).length === 0 ? (
+                <Text type="secondary" style={{ fontSize: 12 }}>暂无参数，请先在命令中输入 {'{参数名}'} 并点击“解析参数”。</Text>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {(controlConfig.params || []).map((p, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'flex',
+                        gap: 6,
+                        alignItems: 'center',
+                        padding: 6,
+                        background: '#fafafa',
+                        borderRadius: 4,
+                        border: '1px solid #f0f0f0',
+                      }}
+                    >
+                      <Input size="small" style={{ flex: '0 0 110px' }} value={p.name} disabled title="参数名（来自命令占位符，不可修改）" />
+                      <Input
+                        size="small"
+                        style={{ flex: 1, minWidth: 0 }}
+                        placeholder="显示名（可选）"
+                        value={p.label || p.name}
+                        onChange={(e) => handleControlParamChange(idx, { label: e.target.value })}
+                      />
+                      <Select
+                        size="small"
+                        style={{ flex: '0 0 84px' }}
+                        value={p.encrypted ? 'encrypted' : 'plain'}
+                        onChange={(v) => handleControlParamChange(idx, { encrypted: v === 'encrypted' })}
+                        options={[
+                          { value: 'plain', label: '普通' },
+                          { value: 'encrypted', label: '加密' },
+                        ]}
+                      />
+                      <Button size="small" type="text" icon={<DeleteOutlined />} onClick={() => handleControlParamRemove(idx)} />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* 专属命令按钮列表 */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+                <Text style={{ display: 'block', fontSize: 12 }}>专属命令按钮（点击后直接下发专属命令）</Text>
+                <Button size="small" icon={<PlusOutlined />} onClick={handleControlButtonAdd}>
+                  添加按钮
+                </Button>
+              </div>
+              {(controlConfig.buttons || []).length === 0 ? (
+                <Text type="secondary" style={{ fontSize: 12 }}>暂无专属命令按钮。</Text>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {(controlConfig.buttons || []).map((btn, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'flex',
+                        gap: 6,
+                        alignItems: 'center',
+                        padding: 6,
+                        background: '#fafafa',
+                        borderRadius: 4,
+                        border: '1px solid #f0f0f0',
+                      }}
+                    >
+                      <Input
+                        size="small"
+                        style={{ flex: '0 0 120px' }}
+                        placeholder="按钮名称"
+                        value={btn.label || ''}
+                        onChange={(e) => handleControlButtonChange(idx, { label: e.target.value })}
+                      />
+                      <Input
+                        size="small"
+                        style={{ flex: 1, minWidth: 0 }}
+                        placeholder="专属命令（支持 {参数名} 占位符）"
+                        value={btn.shell || ''}
+                        onChange={(e) => handleControlButtonChange(idx, { shell: e.target.value })}
+                      />
+                      <Button size="small" type="text" icon={<DeleteOutlined />} onClick={() => handleControlButtonRemove(idx)} />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             /* 固定选项配置 */

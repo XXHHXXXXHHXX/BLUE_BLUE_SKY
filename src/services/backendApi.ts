@@ -186,6 +186,31 @@ export async function executeControlCommand(
   }
 }
 
+/** 通过 SSH 下发自定义参数控制命令（{value}/{ip}/{user}/{pass}/{自定义参数名} 占位符均在后端替换）
+ * paramValues 为前端填写的自定义参数值，key 为参数名 */
+export async function executeCustomControlCommand(
+  bmcConfig: BMCConfig,
+  shell: string,
+  paramValues: Record<string, string>
+): Promise<ControlExecuteResult> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/control/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: bmcConfig, shell, paramValues }),
+    });
+
+    const result: ControlExecuteResult = await response.json();
+    return result;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      message: `命令下发失败: ${errMsg}`,
+    };
+  }
+}
+
 // ==================== 查看命令执行 API ====================
 
 /** 查看命令执行结果 */

@@ -394,6 +394,8 @@ export function createDefaultNodeData(type: string): HardwareNodeData {
           rangeStep: 1,
           rangeUnit: '%',
           options: [],
+          params: [],
+          buttons: [],
         },
       };
     case 'view':
