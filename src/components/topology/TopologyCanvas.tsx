@@ -42,6 +42,10 @@ const TopologyCanvas: React.FC = () => {
   const [cpuModalOpen, setCpuModalOpen] = useState(false);
   const [cpuModalNodeId, setCpuModalNodeId] = useState<string | null>(null);
   const [cpuModalData, setCpuModalData] = useState<CPUData | null>(null);
+  const [cpuModalCommandMode, setCpuModalCommandMode] = useState(false);
+  const [cpuModalCommandDomains, setCpuModalCommandDomains] = useState<{ name: string; value: number | null }[]>([]);
+  const [cpuModalCommandTime, setCpuModalCommandTime] = useState<string>();
+  const [cpuModalCommandError, setCpuModalCommandError] = useState<string>();
   const [overviewOpen, setOverviewOpen] = useState(false);
 
   // 从 store 实时获取选中的节点数据
@@ -145,9 +149,13 @@ const TopologyCanvas: React.FC = () => {
   // Listen for CPU detail custom event
   useEffect(() => {
     const handler = (e: Event) => {
-      const { nodeId, data } = (e as CustomEvent).detail;
+      const { nodeId, data, commandMode, powerDomains, commandTime, commandError } = (e as CustomEvent).detail;
       setCpuModalNodeId(nodeId);
       setCpuModalData(data);
+      setCpuModalCommandMode(!!commandMode);
+      setCpuModalCommandDomains(commandMode ? powerDomains || [] : []);
+      setCpuModalCommandTime(commandMode ? commandTime : undefined);
+      setCpuModalCommandError(commandMode ? commandError : undefined);
       setCpuModalOpen(true);
     };
     window.addEventListener('open-cpu-detail', handler);
@@ -189,6 +197,10 @@ const TopologyCanvas: React.FC = () => {
         onClose={() => setCpuModalOpen(false)}
         nodeId={cpuModalNodeId}
         cpuData={cpuModalData}
+        commandMode={cpuModalCommandMode}
+        commandPowerDomains={cpuModalCommandDomains}
+        commandTime={cpuModalCommandTime}
+        commandError={cpuModalCommandError}
       />
 
       <TopologyOverviewPanel

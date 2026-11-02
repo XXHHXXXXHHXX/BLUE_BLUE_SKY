@@ -271,6 +271,10 @@ export interface ApiConfig {
   fieldMappings?: FieldMapping[];
   /** CPU电源域字段映射配置（用于"电源域详情"弹窗内的固定字段） */
   powerDomainFieldMappings?: FieldMapping[];
+  /** 电源域命令获取配置：点击"电源域详情"时执行该命令，返回逗号分隔值序列按字段顺序映射 */
+  powerDomainCommand?: string;
+  /** 电源域命令字段列表：顺序对应命令输出的值（如 TA_CORE_DVFS → 第一个值） */
+  powerDomainCommandFields?: { name: string; label: string }[];
   /** 字段阈值配置（用于监控界面颜色显示） */
   fieldThresholds?: FieldThreshold[];
   /** 用户自定义字段定义（fieldKey + 显示名） */

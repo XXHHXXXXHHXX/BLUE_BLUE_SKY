@@ -19,7 +19,7 @@ import {
 import { useDesignTopologyStore } from '../../stores/designTopologyStore';
 import { defaultFieldMappings, defaultPowerDomainFieldMappings } from '../../services/mockData';
 import { getNodeLossFieldAnnotation } from '../../services/lossCalculation';
-import { CPU_POWER_DOMAIN_FIELD_DEFS } from '../../types/power';
+import { CPU_POWER_DOMAIN_FIELD_DEFS, CPU_POWER_DOMAINS } from '../../types/power';
 import type { TopologyNode, HardwareNodeType, ApiConfig, FieldMapping, FieldThreshold, ControlConfig, ControlOptionItem, ViewConfig, ViewParamDef } from '../../types/topology';
 import { FIXED_FIELD_DEFS, DEFAULT_FIELD_THRESHOLDS } from '../../types/topology';
 import { extractCommandParams } from '../../utils/commandParams';
@@ -49,6 +49,10 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
   const [controlOptionInput, setControlOptionInput] = useState('');
   const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([]);
   const [powerDomainFieldMappings, setPowerDomainFieldMappings] = useState<FieldMapping[]>([]);
+  const [powerDomainCommand, setPowerDomainCommand] = useState('');
+  const [powerDomainCommandFields, setPowerDomainCommandFields] = useState<{ name: string; label: string }[]>([]);
+  const [powerDomainFieldToAddCmd, setPowerDomainFieldToAddCmd] = useState<string>('');
+  const [powerDomainFieldAddCustom, setPowerDomainFieldAddCustom] = useState(false);
   const [customFieldDefs, setCustomFieldDefs] = useState<{ fieldKey: string; label: string }[]>([]);
   const [fieldThresholds, setFieldThresholds] = useState<FieldThreshold[]>([]);
   const [activeThresholdField, setActiveThresholdField] = useState<string | null>(null);
@@ -64,6 +68,9 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
       // 使用节点已有的电源域字段映射
       const existingDomainMappings = node.data.apiConfig?.powerDomainFieldMappings;
       setPowerDomainFieldMappings(existingDomainMappings || []);
+      // 使用节点已有的电源域命令获取配置
+      setPowerDomainCommand(node.data.apiConfig?.powerDomainCommand || '');
+      setPowerDomainCommandFields(node.data.apiConfig?.powerDomainCommandFields || []);
       // 使用节点已有的自定义字段定义
       setCustomFieldDefs(node.data.apiConfig?.customFieldDefs || []);
       // 使用节点已有的阈值配置，或该类型的默认阈值
@@ -160,6 +167,11 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     config.fieldMappings = fieldMappings.filter(m => m.fieldKey);
     // 保存电源域字段映射（用于"电源域详情"弹窗）
     config.powerDomainFieldMappings = powerDomainFieldMappings.filter(m => m.fieldKey);
+    // 保存电源域命令获取配置（点击"电源域详情"时执行命令获取值）
+    config.powerDomainCommand = (powerDomainCommand || '').trim();
+    config.powerDomainCommandFields = (powerDomainCommandFields || [])
+      .map(f => ({ name: (f.name || '').trim(), label: (f.label || '').trim() || (f.name || '').trim() }))
+      .filter(f => f.name);
     // 保存自定义字段定义
     config.customFieldDefs = customFieldDefs.filter(d => d.fieldKey && d.label);
     // 保存阈值配置（过滤掉空范围）
@@ -168,7 +180,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     // 立即落盘并同步到主 store，保证监控页可见
     await saveToBackend();
     message.success('字段映射配置已保存');
-  }, [node, fieldMappings, powerDomainFieldMappings, customFieldDefs, fieldThresholds, updateNodeApiConfig, saveToBackend]);
+  }, [node, fieldMappings, powerDomainFieldMappings, powerDomainCommand, powerDomainCommandFields, customFieldDefs, fieldThresholds, updateNodeApiConfig, saveToBackend]);
 
   // 保存控制配置（控制模块专用）
   const handleSaveControlConfig = useCallback(async () => {
@@ -556,6 +568,54 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     }
     message.success('已清空电源域字段');
   }, [node, updateNodePowerDomainFieldMappings]);
+
+  // ==================== 电源域命令获取（CPU 专用） ====================
+  // 点击"电源域详情"时执行命令，返回逗号分隔值序列按字段顺序映射
+
+  const handleAddPowerDomainCommandField = useCallback(() => {
+    const raw = (powerDomainFieldToAddCmd || '').trim();
+    if (!raw) return;
+    const name = raw.split('|')[0].trim();
+    const label = raw.split('|')[1]?.trim() || name;
+    const exists = (powerDomainCommandFields || []).some(f => f.name === name);
+    if (exists) {
+      message.info('该电源域字段已存在');
+      return;
+    }
+    const next = [...(powerDomainCommandFields || []), { name, label }];
+    setPowerDomainCommandFields(next);
+    setPowerDomainFieldToAddCmd('');
+    setPowerDomainFieldAddCustom(false);
+  }, [powerDomainFieldToAddCmd, powerDomainCommandFields]);
+
+  const handleRemovePowerDomainCommandField = useCallback((index: number) => {
+    setPowerDomainCommandFields(prev => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleMovePowerDomainCommandField = useCallback((index: number, direction: -1 | 1) => {
+    setPowerDomainCommandFields(prev => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  }, []);
+
+  const handleUpdatePowerDomainCommandField = useCallback((index: number, updates: Partial<{ name: string; label: string }>) => {
+    setPowerDomainCommandFields(prev =>
+      prev.map((f, i) => (i === index ? { ...f, ...updates } : f))
+    );
+  }, []);
+
+  const handleParsePowerDomainCommand = useCallback(() => {
+    const names = extractCommandParams(powerDomainCommand || '');
+    if (names.length === 0) {
+      message.info('命令中未找到 {参数} 占位符');
+      return;
+    }
+    message.info(`命令包含参数占位符：${names.join('、')}（监控页执行时需先连接 BMC）`);
+  }, [powerDomainCommand]);
 
   const renderBasicTab = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1039,6 +1099,130 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                 </div>
                 <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleAddPowerDomainFieldMapping} disabled={!powerDomainFieldToAdd}>
                   添加
+                </Button>
+              </div>
+            </div>
+
+            <Divider style={{ margin: '12px 0' }} />
+
+            {/* 命令获取电源域数据（点击"电源域详情"时执行命令获取值） */}
+            <div style={{ background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: 6, padding: 12 }}>
+              <Title level={5} style={{ margin: 0, marginBottom: 8 }}>
+                <ApartmentOutlined /> 命令获取电源域数据
+              </Title>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+                配置一条命令，监控页点击"电源域详情"时执行，命令返回逗号分隔的值序列（如 100,200），按下方字段顺序一一映射到电源域
+              </Text>
+
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#595959' }}>获取命令</Text>
+                  <Input
+                    placeholder="如：sshpass -p '{password}' ssh {user}@{ip} 'cat /sys/power_domain_value'"
+                    value={powerDomainCommand}
+                    onChange={(e) => setPowerDomainCommand(e.target.value)}
+                    size="small"
+                  />
+                </div>
+                <Button size="small" onClick={handleParsePowerDomainCommand} icon={<InfoCircleOutlined />}>
+                  解析参数
+                </Button>
+              </div>
+              {extractCommandParams(powerDomainCommand || '').length > 0 && (
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+                  命令包含参数：{extractCommandParams(powerDomainCommand || '').join('、')}（监控页执行时自动填入 BMC 连接信息）
+                </Text>
+              )}
+
+              <Text style={{ fontSize: 12, display: 'block', marginBottom: 8, color: '#595959' }}>电源域字段（顺序对应命令输出值）</Text>
+              {powerDomainCommandFields.length === 0 && (
+                <div style={{ padding: 12, textAlign: 'center', background: '#f5f5f5', borderRadius: 6, color: '#8c8c8c', marginBottom: 8 }}>
+                  暂无电源域字段，请从下方添加
+                </div>
+              )}
+              {powerDomainCommandFields.map((field, index) => (
+                <div key={index} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <Input
+                      size="small"
+                      placeholder="电源域名（如 TA_CORE_DVFS）"
+                      value={field.name}
+                      onChange={(e) => handleUpdatePowerDomainCommandField(index, { name: e.target.value })}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <Input
+                      size="small"
+                      placeholder="显示名（可选）"
+                      value={field.label}
+                      onChange={(e) => handleUpdatePowerDomainCommandField(index, { label: e.target.value })}
+                    />
+                  </div>
+                  <Button
+                    type="text" size="small" icon={<ArrowUpOutlined />}
+                    onClick={() => handleMovePowerDomainCommandField(index, -1)}
+                    disabled={index === 0}
+                  />
+                  <Button
+                    type="text" size="small" icon={<ArrowDownOutlined />}
+                    onClick={() => handleMovePowerDomainCommandField(index, 1)}
+                    disabled={index === powerDomainCommandFields.length - 1}
+                  />
+                  <Button
+                    type="text" danger size="small" icon={<DeleteOutlined />}
+                    onClick={() => handleRemovePowerDomainCommandField(index)}
+                  />
+                </div>
+              ))}
+
+              <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                {!powerDomainFieldAddCustom ? (
+                  <>
+                    <div style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#595959' }}>从预设电源域选择</Text>
+                      <Select
+                        size="small"
+                        style={{ width: '100%' }}
+                        placeholder="选择电源域"
+                        showSearch
+                        value={powerDomainFieldToAddCmd || undefined}
+                        onChange={(v) => setPowerDomainFieldToAddCmd(v)}
+                        options={CPU_POWER_DOMAINS.map((name) => ({
+                          value: name,
+                          label: name,
+                        }))}
+                      />
+                    </div>
+                    <Button size="small" icon={<PlusOutlined />} onClick={handleAddPowerDomainCommandField} disabled={!powerDomainFieldToAddCmd}>
+                      添加
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#595959' }}>自定义电源域名</Text>
+                      <Input
+                        size="small"
+                        placeholder="输入电源域名（如 MY_DOMAIN）"
+                        value={powerDomainFieldToAddCmd}
+                        onChange={(e) => setPowerDomainFieldToAddCmd(e.target.value)}
+                        onPressEnter={handleAddPowerDomainCommandField}
+                      />
+                    </div>
+                    <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleAddPowerDomainCommandField} disabled={!powerDomainFieldToAddCmd.trim()}>
+                      添加
+                    </Button>
+                  </>
+                )}
+                <Button
+                  size="small"
+                  type="link"
+                  onClick={() => {
+                    setPowerDomainFieldAddCustom(!powerDomainFieldAddCustom);
+                    setPowerDomainFieldToAddCmd('');
+                  }}
+                >
+                  {powerDomainFieldAddCustom ? '切换为预设选择' : '自定义输入'}
                 </Button>
               </div>
             </div>

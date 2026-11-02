@@ -1,11 +1,13 @@
 'use client';
 
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { type NodeProps } from '@xyflow/react';
 import NodeIcon from './NodeIcon';
-import { Button } from 'antd';
+import { Button, message } from 'antd';
 import CustomFieldsRenderer from './CustomFieldsRenderer';
 import { useNodeFieldConfig } from './useNodeFieldConfig';
+import { useBMCSessionStore } from '../../../stores/bmcSessionStore';
+import { executeViewCommand } from '../../../services/backendApi';
 import {
   formatVoltage,
   formatCurrent,
@@ -32,6 +34,10 @@ const CPUNode: React.FC<NodeProps> = (props) => {
       powerDomains: { name: string; voltage: number; current: number; power: number }[];
       amuEvents: { type: string; timestamp: number; message: string }[];
     };
+    apiConfig?: {
+      powerDomainCommand?: string;
+      powerDomainCommandFields?: { name: string; label: string }[];
+    };
   };
 
   const cpuData = data.cpuData;
@@ -42,13 +48,81 @@ const CPUNode: React.FC<NodeProps> = (props) => {
   const power = cpuData?.power ?? null;
   const temperature = cpuData?.temperature ?? null;
 
-  const handleOpenDetail = () => {
-    window.dispatchEvent(
-      new CustomEvent('open-cpu-detail', {
-        detail: { nodeId: props.id, data: data.cpuData },
-      })
-    );
-  };
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  // 解析命令输出：按逗号（含中英文逗号）拆分值序列
+  const parseCommandValues = useCallback((stdout: string): (number | null)[] => {
+    const raw = (stdout || '').trim();
+    if (!raw) return [];
+    return raw
+      .split(/[,，\s]+/)
+      .map((s) => s.trim())
+      .filter((s) => s !== '')
+      .map((s) => {
+        const num = Number(s);
+        return Number.isNaN(num) ? null : num;
+      });
+  }, []);
+
+  // 点击"电源域详情"：若配置了电源域获取命令则执行命令并映射值，否则展示已有数据
+  const handleOpenDetail = useCallback(async () => {
+    const apiConfig = data.apiConfig;
+    const command = (apiConfig?.powerDomainCommand || '').trim();
+    const fields = apiConfig?.powerDomainCommandFields || [];
+
+    // 未配置命令或字段：走原有路径展示节点已有 cpuData
+    if (!command || fields.length === 0) {
+      window.dispatchEvent(
+        new CustomEvent('open-cpu-detail', {
+          detail: { nodeId: props.id, data: data.cpuData },
+        })
+      );
+      return;
+    }
+
+    // 命令模式：需已连接 BMC
+    const bmcConfig = useBMCSessionStore.getState().getConnectedConfig();
+    if (!bmcConfig) {
+      message.warning('未连接 BMC，无法获取电源域数据。请先在监控配置中连接 BMC');
+      return;
+    }
+
+    setDetailLoading(true);
+    try {
+      // 自动注入 BMC 连接信息占位符（{ip}/{user}/{password}/{pass}），用户命令可直接使用
+      const paramValues: Record<string, string> = {
+        ip: bmcConfig.ip || '',
+        user: bmcConfig.username || '',
+        password: bmcConfig.password || '',
+        pass: bmcConfig.password || '',
+      };
+      const res = await executeViewCommand(bmcConfig, command, paramValues);
+      if (!res.success) {
+        message.error(res.message || '命令执行失败');
+        return;
+      }
+
+      const values = parseCommandValues(res.stdout || '');
+      const powerDomains = fields.map((f, i) => ({
+        name: f.label || f.name,
+        value: values[i] !== undefined ? values[i] : null,
+      }));
+
+      window.dispatchEvent(
+        new CustomEvent('open-cpu-detail', {
+          detail: {
+            nodeId: props.id,
+            data: data.cpuData,
+            commandMode: true,
+            powerDomains,
+            commandTime: new Date().toLocaleTimeString(),
+          },
+        })
+      );
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [data.apiConfig, data.cpuData, props.id, parseCommandValues]);
 
   const tempLevel = getTemperatureLevel(temperature);
   const tempClass = tempLevel === 'critical' 
@@ -127,7 +201,7 @@ const CPUNode: React.FC<NodeProps> = (props) => {
           </div>
           <div className="node-body">
             {orderedVisibleFieldKeys.map(renderField)}
-            <Button size="small" type="primary" onClick={handleOpenDetail}>
+            <Button size="small" type="primary" onClick={handleOpenDetail} loading={detailLoading}>
               电源域详情
             </Button>
             <CustomFieldsRenderer data={props.data as Record<string, unknown>} />
