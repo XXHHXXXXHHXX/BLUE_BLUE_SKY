@@ -112,7 +112,9 @@ const ViewNode: React.FC<NodeProps> = (props) => {
       {!isDesignMode && (
         <div className="nodrag nopan" style={{ marginTop: 8, borderTop: '1px dashed #87e8de', paddingTop: 8 }}>
           {params.length === 0 ? (
-            <div style={{ fontSize: 12, color: '#8c8c8c' }}>未配置查看参数</div>
+            <div style={{ fontSize: 12, color: '#8c8c8c' }}>
+              {command ? '无参数，可直接点击查看' : '未配置查看参数'}
+            </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {params.map((p) => (
@@ -151,7 +153,7 @@ const ViewNode: React.FC<NodeProps> = (props) => {
               type="primary"
               icon={<EyeOutlined />}
               loading={viewing}
-              disabled={!command || params.length === 0}
+              disabled={!command}
               onClick={handleView}
               style={{ background: '#13c2c2', borderColor: '#13c2c2' }}
             >
