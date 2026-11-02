@@ -7,6 +7,7 @@ import { FIXED_FIELD_DEFS } from '../../../../src/types/topology';
 import type { CPUData, MemoryData, DiskData, FanData, IOData, CardData, SensorData as SensorNodeData, MgmtBoardData, SourceData } from '../../../../src/types/power';
 import { CPU_POWER_DOMAIN_FIELD_DEFS, buildCPUPowerDomains } from '../../../../src/types/power';
 import { calculateEdgeLosses } from '../../../../src/services/lossCalculation';
+import { sanitizeTopologyData } from '../../../../src/utils/topologySanitize';
 
 /** 获取 BMC Sensor 数据（直接使用传入的配置） */
 async function fetchBMCSensorsWithConfig(bmcConfig: BMCConfig | null | undefined): Promise<{ sensors?: SensorData[]; error?: string; errorCode?: string }> {
@@ -430,24 +431,32 @@ export async function POST(request: NextRequest) {
       }, { status: 503 });
     }
     
-    topology.nodes = updatedNodes;
-    
     // 基于真实功率计算边的损耗
     const updatedEdges = calculateEdgeLosses(updatedNodes, topology.edges);
+    topology.nodes = updatedNodes;
     topology.edges = updatedEdges;
-    
+
+    // 剔除画布运行时字段（_mode/_highlighted 等），避免监控页误判设计模式导致交互区不渲染
+    const clean = sanitizeTopologyData({
+      ...topology,
+      nodes: updatedNodes,
+      edges: updatedEdges,
+    });
+    topology.nodes = clean.nodes;
+    topology.edges = clean.edges;
+
     // 保存回存储
     if (topologyId) {
       topologyStore.saveTopology(topologyId, topology);
     } else {
       topologyStore.data = topology;
     }
-    
+
     return NextResponse.json({
       success: true,
       data: {
-        nodes: updatedNodes,
-        edges: updatedEdges,
+        nodes: clean.nodes,
+        edges: clean.edges,
         timestamp: new Date().toISOString()
       }
     });

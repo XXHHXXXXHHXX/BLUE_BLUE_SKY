@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { topologiesStore, versionsStore } from '../../../../lib/store';
 import type { TopologyVersion } from '../../../../lib/store';
 import type { TopologyExportData } from '@/src/types/topology';
+import { sanitizeTopologyData } from '../../../../../../src/utils/topologySanitize';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -22,6 +23,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    // 保存前剔除画布运行时字段，防止版本数据被 _mode/_highlighted 污染
+    const cleanData = sanitizeTopologyData(data);
+
     // 检查拓扑是否存在
     const index = topologiesStore.data;
     const meta = index.topologies.find(t => t.id === id);
@@ -37,7 +41,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (versions.length > 0) {
       // 覆盖最新版本（直接替换 versions[0] 的数据和时间戳）
-      versions[0].data = data;
+      versions[0].data = cleanData;
       versions[0].timestamp = new Date().toISOString();
       // label 保持原样，如果是首次自动保存且原标签为空，设为自动保存
       if (!versions[0].label) {
@@ -50,7 +54,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         label: '自动保存',
         timestamp: new Date().toISOString(),
         isAuto: true,
-        data,
+        data: cleanData,
       };
       versions.unshift(newVersion);
     }

@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { topologiesStore, topologyStore } from '../../lib/store';
 import type { TopologyExportData } from '../../../../src/types/topology';
+import { sanitizeTopologyData } from '../../../../src/utils/topologySanitize';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -43,8 +44,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const topologyData: TopologyExportData = body;
-    
+    // 保存前剔除画布运行时字段（_mode/_highlighted/measured 等），防止再次污染持久化数据
+    const topologyData: TopologyExportData = sanitizeTopologyData(body);
+
     // 检查拓扑是否存在
     const index = topologiesStore.data;
     const meta = index.topologies.find(t => t.id === id);

@@ -28,6 +28,7 @@ import {
   type TopologyMeta,
 } from '../services/backendApi';
 import { useMonitorStore } from './monitorStore';
+import { sanitizeTopologyData, sanitizeNodes, sanitizeEdges } from '../utils/topologySanitize';
 
 interface ClipboardItem {
   node: TopologyNode;
@@ -384,8 +385,8 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
     return {
       version: '1.0.0',
       exportTime: new Date().toISOString(),
-      nodes,
-      edges,
+      nodes: sanitizeNodes(nodes),
+      edges: sanitizeEdges(edges),
       nodeScales,
     };
   },
@@ -395,8 +396,8 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
       return false;
     }
     set({
-      nodes: data.nodes,
-      edges: data.edges,
+      nodes: sanitizeNodes(data.nodes),
+      edges: sanitizeEdges(data.edges),
       nodeScales: data.nodeScales || {},
       selectedNodeIds: [],
       clipboard: [],
@@ -423,9 +424,10 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
       }
       const data = await fetchTopology(topologyId);
       if (data) {
+        const clean = sanitizeTopologyData(data);
         set({
-          nodes: data.nodes,
-          edges: data.edges,
+          nodes: clean.nodes,
+          edges: clean.edges,
           nodeScales: data.nodeScales || {},
         });
       }
@@ -583,10 +585,11 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
       if (result) {
         // 保存用户选择到 localStorage
         saveUserTopologyId(id);
-        
+
+        const clean = sanitizeTopologyData(result);
         set({
-          nodes: result.nodes,
-          edges: result.edges,
+          nodes: clean.nodes,
+          edges: clean.edges,
           nodeScales: result.nodeScales || {},
           currentTopologyId: id,
           selectedNodeIds: [],
@@ -648,11 +651,12 @@ if (typeof window !== 'undefined') {
       useTopologyStore.setState({ isLoading: true, error: null, currentTopologyId: topologyIdToLoad });
       try {
         const data = await fetchTopology(topologyIdToLoad);
-        
+
         if (data) {
+          const clean = sanitizeTopologyData(data);
           useTopologyStore.setState({
-            nodes: data.nodes,
-            edges: data.edges,
+            nodes: clean.nodes,
+            edges: clean.edges,
             nodeScales: data.nodeScales || {},
             selectedNodeIds: [],
             clipboard: [],

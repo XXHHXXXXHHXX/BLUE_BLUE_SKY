@@ -1,6 +1,7 @@
 /** 当前拓扑管理 API */
 import { NextRequest, NextResponse } from 'next/server';
 import { topologyStore, topologiesStore } from '../lib/store';
+import { sanitizeTopologyData } from '../../../src/utils/topologySanitize';
 
 // GET /api/topology - 获取当前拓扑
 export async function GET() {
@@ -27,9 +28,11 @@ export async function GET() {
 // POST /api/topology - 保存到当前拓扑
 export async function POST(request: NextRequest) {
   try {
-    const data = await request.json();
+    const raw = await request.json();
+    // 保存前剔除画布运行时字段（_mode/_highlighted/measured 等），防止污染持久化数据
+    const data = sanitizeTopologyData(raw);
     data.exportTime = new Date().toISOString();
-    
+
     topologyStore.data = data;
     
     console.log('[Topology] Saved to current');

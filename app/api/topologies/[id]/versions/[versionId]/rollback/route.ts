@@ -1,6 +1,7 @@
 /** 版本回滚 API */
 import { NextRequest, NextResponse } from 'next/server';
 import { versionsStore, topologyStore } from '../../../../../lib/store';
+import { sanitizeTopologyData } from '../../../../../../../src/utils/topologySanitize';
 
 interface RouteParams {
   params: Promise<{ id: string; versionId: string }>;
@@ -21,8 +22,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
     
-    // 恢复拓扑数据
-    topologyStore.saveTopology(id, version.data);
+    // 恢复拓扑数据（剔除版本中可能残留的画布运行时字段）
+    topologyStore.saveTopology(id, sanitizeTopologyData(version.data));
     
     console.log('[Versions] Rollback to:', versionId, 'for topology:', id);
     return NextResponse.json({

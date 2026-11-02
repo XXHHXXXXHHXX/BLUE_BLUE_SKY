@@ -1,6 +1,7 @@
 /** 版本回滚 API - 针对当前拓扑 */
 import { NextResponse } from 'next/server';
 import { versionsStore, topologyStore, topologiesStore } from '@/app/api/lib/store';
+import { sanitizeTopologyData } from '@/src/utils/topologySanitize';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -15,7 +16,9 @@ export async function POST(request: Request, { params }: RouteParams) {
     const version = versions.find(v => v.id === id);
     
     if (version) {
-      topologyStore.saveTopology(currentId, JSON.parse(JSON.stringify(version.data)));
+      // 剔除版本中可能残留的画布运行时字段，防止回滚后监控页误判设计模式
+      const clean = sanitizeTopologyData(version.data);
+      topologyStore.saveTopology(currentId, JSON.parse(JSON.stringify(clean)));
       console.log(`[Version] Rolled back ${currentId} to: ${version.label}`);
       return NextResponse.json({ success: true });
     } else {

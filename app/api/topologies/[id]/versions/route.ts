@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { topologiesStore, versionsStore } from '../../../lib/store';
 import type { TopologyVersion } from '../../../lib/store';
 import type { TopologyExportData } from '@/src/types/topology';
+import { sanitizeTopologyData } from '../../../../../src/utils/topologySanitize';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -56,7 +57,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         { status: 400 }
       );
     }
-    
+
+    // 保存前剔除画布运行时字段，防止版本数据被 _mode/_highlighted 污染
+    const cleanData = sanitizeTopologyData(data);
+
     const versions = versionsStore.getVersions(id);
     
     const newVersion: TopologyVersion = {
@@ -65,9 +69,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       notes,
       timestamp: new Date().toISOString(),
       isAuto: false,
-      data
+      data: cleanData
     };
-    
+
     versions.unshift(newVersion);
     
     // 只保留最近 50 个版本

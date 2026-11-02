@@ -10,6 +10,7 @@ import {
   type EdgeChange,
 } from '@xyflow/react';
 import type { TopologyNode, TopologyEdge, TopologyExportData } from '../types/topology';
+import { sanitizeTopologyData, sanitizeNodes, sanitizeEdges } from '../utils/topologySanitize';
 
 import {
   fetchTopology,
@@ -142,8 +143,8 @@ export const useCloneTopologyStore = create<CloneTopologyState>((set, get) => ({
     return {
       version: '1.0.0',
       exportTime: new Date().toISOString(),
-      nodes,
-      edges,
+      nodes: sanitizeNodes(nodes),
+      edges: sanitizeEdges(edges),
       nodeScales,
     };
   },
@@ -153,8 +154,8 @@ export const useCloneTopologyStore = create<CloneTopologyState>((set, get) => ({
       return false;
     }
     set({
-      nodes: data.nodes,
-      edges: data.edges,
+      nodes: sanitizeNodes(data.nodes),
+      edges: sanitizeEdges(data.edges),
       nodeScales: data.nodeScales || {},
       selectedNodeIds: [],
       clipboard: [],
@@ -181,9 +182,10 @@ export const useCloneTopologyStore = create<CloneTopologyState>((set, get) => ({
       }
       const data = await fetchTopology(topologyId);
       if (data) {
+        const clean = sanitizeTopologyData(data);
         set({
-          nodes: data.nodes,
-          edges: data.edges,
+          nodes: clean.nodes,
+          edges: clean.edges,
           nodeScales: data.nodeScales || {},
         });
       }
@@ -224,9 +226,10 @@ export const useCloneTopologyStore = create<CloneTopologyState>((set, get) => ({
         // 保存分身选择到独立的 localStorage key
         saveCloneTopologyId(id);
 
+        const clean = sanitizeTopologyData(result);
         set({
-          nodes: result.nodes,
-          edges: result.edges,
+          nodes: clean.nodes,
+          edges: clean.edges,
           nodeScales: result.nodeScales || {},
           currentTopologyId: id,
           selectedNodeIds: [],

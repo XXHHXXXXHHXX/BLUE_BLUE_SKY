@@ -33,6 +33,7 @@ import {
   type TopologyMeta,
 } from '../services/backendApi';
 import { useTopologyStore } from './topologyStore';
+import { sanitizeTopologyData, sanitizeNodes, sanitizeEdges } from '../utils/topologySanitize';
 
 interface ClipboardItem {
   node: TopologyNode;
@@ -467,8 +468,8 @@ export const useDesignTopologyStore = create<DesignTopologyState>((set, get) => 
     return {
       version: '1.0.0',
       exportTime: new Date().toISOString(),
-      nodes,
-      edges,
+      nodes: sanitizeNodes(nodes),
+      edges: sanitizeEdges(edges),
       nodeScales,
     };
   },
@@ -478,8 +479,8 @@ export const useDesignTopologyStore = create<DesignTopologyState>((set, get) => 
       return;
     }
     set({
-      nodes: data.nodes,
-      edges: data.edges,
+      nodes: sanitizeNodes(data.nodes),
+      edges: sanitizeEdges(data.edges),
       nodeScales: data.nodeScales || {},
       selectedNodeIds: [],
       clipboard: [],
@@ -503,9 +504,10 @@ export const useDesignTopologyStore = create<DesignTopologyState>((set, get) => 
       }
       const data = await fetchTopology(topologyId);
       if (data) {
+        const clean = sanitizeTopologyData(data);
         set({
-          nodes: data.nodes,
-          edges: data.edges,
+          nodes: clean.nodes,
+          edges: clean.edges,
           nodeScales: data.nodeScales || {},
           currentTopologyId: topologyId,
           hasUnsavedChanges: false,
@@ -728,9 +730,10 @@ export const useDesignTopologyStore = create<DesignTopologyState>((set, get) => 
     try {
       const result = await fetchTopologyById(id);
       if (result) {
+        const clean = sanitizeTopologyData(result);
         set({
-          nodes: result.nodes,
-          edges: result.edges,
+          nodes: clean.nodes,
+          edges: clean.edges,
           nodeScales: result.nodeScales || {},
           currentTopologyId: id,
           selectedNodeIds: [],
