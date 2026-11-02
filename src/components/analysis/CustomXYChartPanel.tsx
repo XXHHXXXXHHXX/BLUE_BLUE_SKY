@@ -14,6 +14,7 @@ import {
   Table,
   Tag,
   Input,
+  Checkbox,
 } from 'antd';
 import {
   LineChartOutlined,
@@ -55,6 +56,102 @@ interface DataPoint {
   iteration: number;
   label: string;
   raw: TestResult;
+}
+
+type TrendType = 'linear' | 'poly' | 'exp';
+
+/** 最小二乘拟合。points 需已按 x 升序；返回采样点坐标数组与公式描述 */
+function fitTrendline(
+  points: DataPoint[],
+  type: TrendType,
+  polyOrder: number
+): { coords: [number, number][]; formula: string } | null {
+  const n = points.length;
+  if (n < 2) return null;
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+
+  // 高斯消元解最小二乘正规方程（线性/多项式）
+  const solveLeastSquares = (degree: number): number[] | null => {
+    if (n < degree + 1) return null;
+    const m = degree + 1;
+    const A: number[][] = Array.from({ length: m }, () => new Array(m + 1).fill(0));
+    for (let i = 0; i < m; i++) {
+      for (let j = 0; j < m; j++) {
+        A[i][j] = xs.reduce((s, x) => s + Math.pow(x, i + j), 0);
+      }
+      A[i][m] = xs.reduce((s, x, k) => s + Math.pow(x, i) * ys[k], 0);
+    }
+    // 高斯消元
+    for (let col = 0; col < m; col++) {
+      let piv = col;
+      for (let r = col + 1; r < m; r++) {
+        if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+      }
+      if (Math.abs(A[piv][col]) < 1e-12) return null;
+      [A[col], A[piv]] = [A[piv], A[col]];
+      for (let r = col + 1; r < m; r++) {
+        const f = A[r][col] / A[col][col];
+        for (let c = col; c <= m; c++) A[r][c] -= f * A[col][c];
+      }
+    }
+    const coeffs = new Array(m).fill(0);
+    for (let r = m - 1; r >= 0; r--) {
+      let s = A[r][m];
+      for (let c = r + 1; c < m; c++) s -= A[r][c] * coeffs[c];
+      coeffs[r] = s / A[r][r];
+    }
+    return coeffs;
+  };
+
+  const sampleX = (x0: number, x1: number): number[] => {
+    const step = (x1 - x0) / 40 || 1;
+    const out: number[] = [];
+    for (let i = 0; i <= 40; i++) out.push(x0 + i * step);
+    return out;
+  };
+
+  if (type === 'linear') {
+    const coeffs = solveLeastSquares(1);
+    if (!coeffs) return null;
+    const a = coeffs[0];
+    const b = coeffs[1];
+    return {
+      coords: sampleX(xs[0], xs[n - 1]).map((x) => [x, a + b * x]),
+      formula: `y = ${b >= 0 ? '+' : '-'} ${Math.abs(b).toExponential(2)}x ${a >= 0 ? '+' : '-'} ${Math.abs(a).toExponential(2)}`,
+    };
+  }
+
+  if (type === 'poly') {
+    const order = Math.min(polyOrder, n - 1);
+    if (order < 1) return null;
+    const coeffs = solveLeastSquares(order);
+    if (!coeffs) return null;
+    const evalPoly = (x: number) => coeffs.reduce((s, c, i) => s + c * Math.pow(x, i), 0);
+    return {
+      coords: sampleX(xs[0], xs[n - 1]).map((x) => [x, evalPoly(x)]),
+      formula: `多项式拟合(次数 ${order})`,
+    };
+  }
+
+  // exp: y = a * e^(b*x)，对 ln(y) 做线性回归
+  const pos = points.filter((p) => p.y > 0);
+  if (pos.length < 2) return null;
+  const lxs = pos.map((p) => p.x);
+  const lys = pos.map((p) => Math.log(p.y));
+  const m = lxs.length;
+  const sx = lxs.reduce((s, v) => s + v, 0);
+  const sy = lys.reduce((s, v) => s + v, 0);
+  const sxx = lxs.reduce((s, v) => s + v * v, 0);
+  const sxy = lxs.reduce((s, v, i) => s + v * lys[i], 0);
+  const denom = m * sxx - sx * sx;
+  if (Math.abs(denom) < 1e-12) return null;
+  const b = (m * sxy - sx * sy) / denom;
+  const a = Math.exp((sy - b * sx) / m);
+  return {
+    coords: sampleX(lxs[0], lxs[m - 1]).map((x) => [x, a * Math.exp(b * x)]),
+    formula: `y = ${a.toExponential(2)} · e^(${b >= 0 ? '+' : '-'}${Math.abs(b).toExponential(2)}x)`,
+  };
 }
 
 function getSeriesOptions(report?: TestReport): SeriesOption[] {
@@ -155,6 +252,11 @@ const CustomXYChartPanel: React.FC<CustomXYChartPanelProps> = ({
   const [groupByKey, setGroupByKey] = useState<string>('');
   const [chartType, setChartType] = useState<'scatter' | 'line'>('scatter');
   const [selectedIterations, setSelectedIterations] = useState<string[]>([]);
+  // 散点图拟合：是否显示拟合趋势线 / 是否隐藏散点只显示拟合线
+  const [showTrendline, setShowTrendline] = useState(false);
+  const [hideScatter, setHideScatter] = useState(false);
+  const [trendType, setTrendType] = useState<'linear' | 'poly' | 'exp'>('linear');
+  const [polyOrder, setPolyOrder] = useState(2);
 
   useEffect(() => {
     if (!disableFetch) {
@@ -202,9 +304,9 @@ const CustomXYChartPanel: React.FC<CustomXYChartPanelProps> = ({
     }));
   }, [selectedReport]);
 
-  const { points, seriesData } = useMemo(() => {
+  const { points, seriesData, trendSeries } = useMemo(() => {
     if (!selectedReport || !xSeries || !ySeries) {
-      return { points: [], seriesData: [] as any[] };
+      return { points: [], seriesData: [] as any[], trendSeries: [] as any[] };
     }
     const filtered = selectedIterations.length
       ? selectedReport.results.filter((r) => selectedIterations.includes(String(r.iteration)))
@@ -229,36 +331,79 @@ const CustomXYChartPanel: React.FC<CustomXYChartPanelProps> = ({
       pts.sort((a, b) => a.x - b.x);
     }
 
-    let sdata: any[] = [];
-    if (groupBy) {
-      const groups = new Map<string, DataPoint[]>();
-      pts.forEach((p) => {
-        const gv = getSeriesValue(p.raw, groupBy, seriesOptions);
-        const key = gv === null ? '未分组' : String(gv);
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key)!.push(p);
-      });
-      sdata = Array.from(groups.entries()).map(([name, groupPts]) => ({
-        name,
-        type: chartType,
-        data: groupPts.map((p) => [p.x, p.y, p.iteration, p.label]),
-        symbolSize: chartType === 'scatter' ? 10 : 6,
-        smooth: true,
-      }));
-    } else {
-      sdata = [
-        {
-          name: `${ySeries.label} vs ${xSeries.label}`,
-          type: chartType,
-          data: pts.map((p) => [p.x, p.y, p.iteration, p.label]),
-          symbolSize: chartType === 'scatter' ? 10 : 6,
-          smooth: true,
-        },
-      ];
+    // 散点图拟合：仅散点图可拟合；隐藏散点时只显示拟合趋势线（丢弃散点系列）
+    const fitEnabled = chartType === 'scatter' && showTrendline;
+    let hideDots = fitEnabled && hideScatter;
+
+    // 拟合趋势线系列（仅散点图 + 开启拟合时追加）
+    const trendSeries: any[] = [];
+    if (fitEnabled) {
+      const addTrend = (name: string, groupPts: DataPoint[]) => {
+        const sorted = [...groupPts].sort((a, b) => a.x - b.x);
+        const fit = fitTrendline(sorted, trendType, polyOrder);
+        if (!fit) return;
+        trendSeries.push({
+          name: hideDots ? name : `${name} 拟合`,
+          type: 'line',
+          data: fit.coords,
+          symbol: 'none',
+          lineStyle: { width: 2.5 },
+          tooltip: {
+            formatter: () => `${name}<br/>拟合曲线<br/>${fit.formula}`,
+          },
+        });
+      };
+      if (groupBy) {
+        const groups = new Map<string, DataPoint[]>();
+        pts.forEach((p) => {
+          const gv = getSeriesValue(p.raw, groupBy, seriesOptions);
+          const key = gv === null ? '未分组' : String(gv);
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key)!.push(p);
+        });
+        Array.from(groups.entries()).forEach(([name, groupPts]) => addTrend(name, groupPts));
+      } else {
+        addTrend(`${ySeries.label} vs ${xSeries.label}`, pts);
+      }
     }
 
-    return { points: pts, seriesData: sdata };
-  }, [selectedReport, xSeries, ySeries, groupBy, chartType, selectedIterations, seriesOptions]);
+    // 若勾选了隐藏散点但拟合失败（如点过少），回退显示散点，避免图表空白
+    if (hideDots && trendSeries.length === 0) {
+      hideDots = false;
+    }
+
+    let sdata: any[] = [];
+    if (!hideDots) {
+      if (groupBy) {
+        const groups = new Map<string, DataPoint[]>();
+        pts.forEach((p) => {
+          const gv = getSeriesValue(p.raw, groupBy, seriesOptions);
+          const key = gv === null ? '未分组' : String(gv);
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key)!.push(p);
+        });
+        sdata = Array.from(groups.entries()).map(([name, groupPts]) => ({
+          name,
+          type: chartType,
+          data: groupPts.map((p) => [p.x, p.y, p.iteration, p.label]),
+          symbolSize: chartType === 'scatter' ? 10 : 6,
+          smooth: chartType !== 'scatter',
+        }));
+      } else {
+        sdata = [
+          {
+            name: `${ySeries.label} vs ${xSeries.label}`,
+            type: chartType,
+            data: pts.map((p) => [p.x, p.y, p.iteration, p.label]),
+            symbolSize: chartType === 'scatter' ? 10 : 6,
+            smooth: chartType !== 'scatter',
+          },
+        ];
+      }
+    }
+
+    return { points: pts, seriesData: sdata, trendSeries };
+  }, [selectedReport, xSeries, ySeries, groupBy, chartType, selectedIterations, seriesOptions, showTrendline, hideScatter, trendType, polyOrder]);
 
   const chartOption = useMemo(() => {
     if (!xSeries || !ySeries || points.length === 0) return null;
@@ -272,12 +417,15 @@ const CustomXYChartPanel: React.FC<CustomXYChartPanelProps> = ({
       tooltip: {
         trigger: 'item',
         formatter: (params: any) => {
+          if (params.seriesType === 'line' && typeof params.data === 'string') {
+            return params.data; // 拟合线 tooltip 已在系列内自定义
+          }
           const [x, y, iteration, label] = params.data || [];
           return `迭代 ${iteration}<br/>${label}<br/>${xSeries.label}: ${x}<br/>${ySeries.label}: ${y}`;
         },
       },
       grid: { left: '8%', right: '8%', bottom: '12%', top: '18%' },
-      legend: groupBy ? { bottom: 0, type: 'scroll' } : undefined,
+      legend: groupBy || showTrendline ? { bottom: 0, type: 'scroll' } : undefined,
       xAxis: {
         type: 'value',
         name: xSeries.label,
@@ -292,10 +440,10 @@ const CustomXYChartPanel: React.FC<CustomXYChartPanelProps> = ({
         nameLocation: 'middle',
         nameGap: 45,
       },
-      dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: groupBy ? 30 : 10 }],
-      series: seriesData,
+      dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: groupBy || showTrendline ? 30 : 10 }],
+      series: [...seriesData, ...trendSeries],
     };
-  }, [xSeries, ySeries, points, seriesData, groupBy]);
+  }, [xSeries, ySeries, points, seriesData, trendSeries, groupBy, showTrendline]);
 
   const tableColumns = useMemo(() => {
     return [
@@ -582,6 +730,69 @@ const CustomXYChartPanel: React.FC<CustomXYChartPanelProps> = ({
                   </Radio.Button>
                 </Radio.Group>
               </div>
+
+              {chartType === 'scatter' && (
+                <div
+                  style={{
+                    padding: 10,
+                    background: '#f6ffed',
+                    border: '1px solid #b7eb8f',
+                    borderRadius: 6,
+                  }}
+                >
+                  <Space direction="vertical" style={{ width: '100%' }} size="small">
+                    <div>
+                      <Checkbox
+                        checked={showTrendline}
+                        onChange={(e) => setShowTrendline(e.target.checked)}
+                      >
+                        显示拟合趋势线
+                      </Checkbox>
+                    </div>
+                    {showTrendline && (
+                      <>
+                        <Space size="small" align="center">
+                          <Text type="secondary" style={{ fontSize: 12 }}>拟合方式</Text>
+                          <Select
+                            size="small"
+                            style={{ width: 120 }}
+                            value={trendType}
+                            onChange={(v) => setTrendType(v)}
+                            options={[
+                              { label: '线性', value: 'linear' },
+                              { label: '多项式', value: 'poly' },
+                              { label: '指数', value: 'exp' },
+                            ]}
+                          />
+                          {trendType === 'poly' && (
+                            <Select
+                              size="small"
+                              style={{ width: 100 }}
+                              value={polyOrder}
+                              onChange={(v) => setPolyOrder(v)}
+                              options={[2, 3, 4, 5].map((o) => ({
+                                label: `${o} 次多项式`,
+                                value: o,
+                              }))}
+                            />
+                          )}
+                        </Space>
+                        <div>
+                          <Checkbox
+                            checked={hideScatter}
+                            onChange={(e) => setHideScatter(e.target.checked)}
+                          >
+                            隐藏散点，只显示拟合趋势线
+                          </Checkbox>
+                        </div>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          拟合基于当前选中迭代的数据点，hover 拟合线可查看拟合公式。
+                        </Text>
+                      </>
+                    )}
+                  </Space>
+                </div>
+              )}
 
               <div>
                 <Text type="secondary" style={{ fontSize: 12 }}>
