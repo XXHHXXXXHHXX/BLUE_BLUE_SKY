@@ -41,7 +41,7 @@ interface NodeEditPanelProps {
 }
 
 const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) => {
-  const { updateNodeAlias, updateNodeCustomIconUrl, updateNodeColor, updateNodeApiConfig, updateNodeControlConfig, updateNodeViewConfig, updateNodeFieldMappings, updateNodePowerDomainFieldMappings } = useDesignTopologyStore();
+  const { updateNodeAlias, updateNodeCustomIconUrl, updateNodeColor, updateNodeApiConfig, updateNodeControlConfig, updateNodeViewConfig, updateNodeFieldMappings, updateNodePowerDomainFieldMappings, saveToBackend } = useDesignTopologyStore();
 
   const [alias, setAlias] = useState('');
   const [controlConfig, setControlConfig] = useState<ControlConfig>({ controlShell: '', mode: 'range' });
@@ -153,7 +153,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
   }, [node, updateNodeColor]);
 
   // 保存 API 配置
-  const handleSaveApiConfig = useCallback(() => {
+  const handleSaveApiConfig = useCallback(async () => {
     if (!node) return;
     const config: ApiConfig = {};
     // 保存字段映射（只要 fieldKey 存在即可，BMC 字段名可为空）
@@ -165,11 +165,13 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
     // 保存阈值配置（过滤掉空范围）
     config.fieldThresholds = fieldThresholds.filter(t => t.fieldKey && t.ranges.length > 0);
     updateNodeApiConfig(node.id, config);
+    // 立即落盘并同步到主 store，保证监控页可见
+    await saveToBackend();
     message.success('字段映射配置已保存');
-  }, [node, fieldMappings, powerDomainFieldMappings, customFieldDefs, fieldThresholds, updateNodeApiConfig]);
+  }, [node, fieldMappings, powerDomainFieldMappings, customFieldDefs, fieldThresholds, updateNodeApiConfig, saveToBackend]);
 
   // 保存控制配置（控制模块专用）
-  const handleSaveControlConfig = useCallback(() => {
+  const handleSaveControlConfig = useCallback(async () => {
     if (!node) return;
     const config: ControlConfig = {
       purpose: (controlConfig.purpose || '').trim(),
@@ -190,8 +192,10 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
         .filter((b) => b.label || b.shell),
     };
     updateNodeControlConfig(node.id, config);
+    // 立即落盘并同步到主 store，保证监控页可见
+    await saveToBackend();
     message.success('控制配置已保存');
-  }, [node, controlConfig, updateNodeControlConfig]);
+  }, [node, controlConfig, updateNodeControlConfig, saveToBackend]);
 
   // 解析命令中的参数占位符，同步到参数列表
   const handleViewParseParams = useCallback(() => {
@@ -230,7 +234,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
   }, []);
 
   // 保存查看配置（查看组件专用）
-  const handleSaveViewConfig = useCallback(() => {
+  const handleSaveViewConfig = useCallback(async () => {
     if (!node) return;
     const config: ViewConfig = {
       purpose: (viewConfig.purpose || '').trim(),
@@ -242,8 +246,10 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
       })),
     };
     updateNodeViewConfig(node.id, config);
+    // 立即落盘并同步到主 store，保证监控页可见
+    await saveToBackend();
     message.success('查看配置已保存');
-  }, [node, viewConfig, updateNodeViewConfig]);
+  }, [node, viewConfig, updateNodeViewConfig, saveToBackend]);
 
   // 解析固定选项输入（支持逗号/空格分隔）
   // 支持两种形态：
