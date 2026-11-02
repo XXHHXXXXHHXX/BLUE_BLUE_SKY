@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Tree,
@@ -71,6 +71,10 @@ const ReportPicker: React.FC<ReportPickerProps> = ({
 }) => {
   const { reports, folders, fetchReports, getFolderTree, getSelectedFolderId, setSelectedFolderId } =
     useTestReportStore();
+  // selectedIds 由父组件传入，父组件重渲染时会新建数组引用，不能直接作为 effect 依赖
+  // （否则与 fetchReports 更新 store 引发的父组件重渲染形成死循环，导致 Maximum update depth exceeded）
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
   const [searchKeyword, setSearchKeyword] = useState('');
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>(selectedIds);
@@ -79,11 +83,11 @@ const ReportPicker: React.FC<ReportPickerProps> = ({
   useEffect(() => {
     if (open) {
       fetchReports();
-      setSelectedKeys(selectedIds);
+      setSelectedKeys(selectedIdsRef.current);
       const defaultId = 'uncategorized';
       setExpandedKeys((prev) => Array.from(new Set([...prev, defaultId])));
     }
-  }, [open, fetchReports, selectedIds]);
+  }, [open, fetchReports]);
 
   const folderTree = useMemo(() => getFolderTree(), [getFolderTree]);
 
