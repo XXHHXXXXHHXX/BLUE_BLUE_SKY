@@ -37,7 +37,7 @@ const FanNode: React.FC<NodeProps> = (props) => {
 
   const fanData = data.fanData;
   const displayMetrics = (props.data as Record<string, unknown>)?.displayMetrics as Record<string, number | null> | undefined;
-  const { hasField, getFieldLabel, orderedVisibleFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const { hasField, getFieldLabel, orderedFixedFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
 
   // 从 fanData 获取数据（支持 null 值显示为 NA）
   const power = fanData?.power ?? null;
@@ -131,7 +131,7 @@ const FanNode: React.FC<NodeProps> = (props) => {
             <span>{getNodeDisplayLabel(data as Record<string, unknown>)}</span>
           </div>
           <div className="node-body">
-            {orderedVisibleFieldKeys.map(renderField)}
+            {orderedFixedFieldKeys.map(renderField)}
             <CustomFieldsRenderer data={props.data as Record<string, unknown>} />
           </div>
         </div>

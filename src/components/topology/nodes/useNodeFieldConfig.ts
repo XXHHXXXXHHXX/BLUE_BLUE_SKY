@@ -39,6 +39,13 @@ export function useNodeFieldConfig(data: Record<string, unknown>) {
     return fixedDefs.map((d) => d.fieldKey);
   }, [fieldMappings, visibleFieldKeys, nodeType]);
 
+  // 仅固定字段的有序可见列表（排除自定义字段）
+  // 节点卡片上固定字段由 renderField 渲染，自定义字段由 CustomFieldsRenderer 专门渲染（带阈值颜色），避免同一字段重复显示两行
+  const orderedFixedFieldKeys = useMemo(() => {
+    const fixed = FIXED_FIELD_DEFS[nodeType || ''] || [];
+    return orderedVisibleFieldKeys.filter((key) => fixed.some((d) => d.fieldKey === key));
+  }, [orderedVisibleFieldKeys, nodeType]);
+
   /** 判断某个字段是否可见 */
   const hasField = (fieldKey: string): boolean => {
     return visibleFieldKeys.has(fieldKey);
@@ -61,6 +68,7 @@ export function useNodeFieldConfig(data: Record<string, unknown>) {
   return {
     visibleFieldKeys,
     orderedVisibleFieldKeys,
+    orderedFixedFieldKeys,
     hasField,
     getFieldLabel,
     isCustomField,

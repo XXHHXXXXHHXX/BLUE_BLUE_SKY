@@ -42,7 +42,7 @@ const CPUNode: React.FC<NodeProps> = (props) => {
 
   const cpuData = data.cpuData;
   const displayMetrics = (props.data as Record<string, unknown>)?.displayMetrics as Record<string, number | null> | undefined;
-  const { hasField, getFieldLabel, orderedVisibleFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const { hasField, getFieldLabel, orderedFixedFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
 
   // 从 cpuData 获取数据（支持 null 值显示为 NA）
   const power = cpuData?.power ?? null;
@@ -200,7 +200,7 @@ const CPUNode: React.FC<NodeProps> = (props) => {
             <span>{getNodeDisplayLabel(data as Record<string, unknown>)}</span>
           </div>
           <div className="node-body">
-            {orderedVisibleFieldKeys.map(renderField)}
+            {orderedFixedFieldKeys.map(renderField)}
             <Button size="small" type="primary" onClick={handleOpenDetail} loading={detailLoading}>
               电源域详情
             </Button>

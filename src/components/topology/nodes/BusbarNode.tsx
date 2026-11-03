@@ -27,7 +27,7 @@ const BusbarNode: React.FC<NodeProps> = (props) => {
   };
   const s = data.sourceData;
   const displayMetrics = (props.data as Record<string, unknown>)?.displayMetrics as Record<string, number | null> | undefined;
-  const { hasField, getFieldLabel, orderedVisibleFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const { hasField, getFieldLabel, orderedFixedFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
 
   const busbarVoltage = s?.busbarVoltage ?? null;
   const busbarCurrent = s?.busbarCurrent ?? null;
@@ -71,7 +71,7 @@ const BusbarNode: React.FC<NodeProps> = (props) => {
             <span>{getNodeDisplayLabel(data as Record<string, unknown>)}</span>
           </div>
           <div className="node-body">
-            {orderedVisibleFieldKeys.map(renderField)}
+            {orderedFixedFieldKeys.map(renderField)}
             {hasField('busbarPower') && busbarPower !== null && (
               <div className="efficiency-bar">
                 <div

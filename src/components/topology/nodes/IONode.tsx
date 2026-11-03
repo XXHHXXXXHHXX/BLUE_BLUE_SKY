@@ -33,7 +33,7 @@ const IONode: React.FC<NodeProps> = (props) => {
   };
   const io = data.ioData;
   const displayMetrics = (props.data as Record<string, unknown>)?.displayMetrics as Record<string, number | null> | undefined;
-  const { hasField, getFieldLabel, orderedVisibleFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const { hasField, getFieldLabel, orderedFixedFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
 
   const renderField = (fieldKey: string) => {
     switch (fieldKey) {
@@ -118,7 +118,7 @@ const IONode: React.FC<NodeProps> = (props) => {
             <span>{getNodeDisplayLabel(data as Record<string, unknown>)}</span>
           </div>
           <div className="node-body">
-            {orderedVisibleFieldKeys.map(renderField)}
+            {orderedFixedFieldKeys.map(renderField)}
             <CustomFieldsRenderer data={props.data as Record<string, unknown>} />
           </div>
         </div>

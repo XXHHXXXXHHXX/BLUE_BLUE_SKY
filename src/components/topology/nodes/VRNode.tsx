@@ -40,8 +40,8 @@ const VRNode: React.FC<NodeProps> = (props) => {
   };
   const s = data.sourceData;
   const displayMetrics = (props.data as Record<string, unknown>)?.displayMetrics as Record<string, number | null> | undefined;
-  const { getFieldLabel, orderedVisibleFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
-  
+  const { getFieldLabel, orderedFixedFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
+
   // 处理 null 值
   const inputVoltage = s?.inputVoltage ?? null;
   const outputVoltage = s?.outputVoltage ?? null;
@@ -155,7 +155,7 @@ const VRNode: React.FC<NodeProps> = (props) => {
             <span>{getNodeDisplayLabel(data as Record<string, unknown>)}</span>
           </div>
           <div className="node-body">
-            {orderedVisibleFieldKeys.map(renderField)}
+            {orderedFixedFieldKeys.map(renderField)}
             <CustomFieldsRenderer data={props.data as Record<string, unknown>} />
           </div>
         </div>
