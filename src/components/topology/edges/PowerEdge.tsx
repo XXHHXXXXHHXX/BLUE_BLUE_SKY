@@ -32,6 +32,7 @@ interface PowerEdgeDataLocal {
   animated?: boolean;
   arrowType?: EdgeArrowType;
   label?: string;
+  lossEnabled?: boolean;
   customData?: Record<string, unknown>;
   _mode?: 'design' | 'monitor';
   _highlighted?: boolean;
@@ -151,6 +152,7 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
   const lossPercent = Number.isNaN(rawLossPercent) ? 0 : rawLossPercent;
   const animated = data?.animated !== false;
   const arrowType: EdgeArrowType = data?.arrowType ?? 'forward';
+  const lossEnabled = data?.lossEnabled !== false; // 默认参与链路损耗计算
   const edgeLabel = data?.label;
   const customData = data?.customData;
   const isDesignMode = data?._mode === 'design';
@@ -201,7 +203,8 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
     8,
   );
 
-  const color = getLossColor(lossPercent);
+  // 关闭链路损耗计算的边显示中性灰色，不按损耗着色
+  const color = lossEnabled ? getLossColor(lossPercent) : '#bfbfbf';
 
   // 为每条边生成唯一的 marker ID
   const markerEndId = `arrow-end-${id}`;
@@ -447,7 +450,7 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
             ) : (
               <>
                 {edgeLabel && <div>{edgeLabel}</div>}
-                <div>{loss.toFixed(1)}W ({lossPercent.toFixed(1)}%)</div>
+                {lossEnabled && <div>{loss.toFixed(1)}W ({lossPercent.toFixed(1)}%)</div>}
               </>
             )}
           </div>

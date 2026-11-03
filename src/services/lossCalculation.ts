@@ -145,8 +145,11 @@ export function calculateEdgeLosses(nodes: TopologyNode[], edges: TopologyEdge[]
   });
 
   // 按 actualSource 分组，用于处理一对多情况
+  // 已关闭损耗计算的边不参与分组，避免影响其他边的“一对一/一对多”判定
   const sourceToEdges = new Map<string, TopologyEdge[]>();
   edges.forEach(edge => {
+    const edgeData = (edge.data || {}) as { lossEnabled?: boolean };
+    if (edgeData.lossEnabled === false) return;
     const isReversed = (edge.data as { _reversed?: boolean } | undefined)?._reversed === true;
     const actualSource = isReversed ? edge.target : edge.source;
     if (!sourceToEdges.has(actualSource)) {
@@ -159,6 +162,19 @@ export function calculateEdgeLosses(nodes: TopologyNode[], edges: TopologyEdge[]
     // 控制关系边（controlEdge）与传感器监测边（sensorEdge）不参与功率链路损耗计算
     if (edge.type === 'controlEdge' || edge.type === 'sensorEdge') {
       return edge;
+    }
+    // 用户在右键菜单中关闭了该链路的损耗计算：不参与计算，并清零损耗值
+    const edgeData = (edge.data || {}) as { lossEnabled?: boolean };
+    if (edgeData.lossEnabled === false) {
+      const prevData = edge.data || { loss: 0, lossPercent: 0 };
+      return {
+        ...edge,
+        data: {
+          ...prevData,
+          loss: 0,
+          lossPercent: 0,
+        },
+      };
     }
     // 检查是否反转
     const isReversed = (edge.data as { _reversed?: boolean } | undefined)?._reversed === true;

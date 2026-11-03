@@ -394,6 +394,7 @@ export interface PowerEdgeData {
   animated?: boolean;
   arrowType?: EdgeArrowType;             // 箭头类型：无箭头 / 单向 / 双向
   label?: string;                        // 用户可编辑的标签文本
+  lossEnabled?: boolean;                 // 是否参与链路损耗计算（默认 true；false 时跳过计算且不显示损耗）
   customData?: Record<string, unknown>;  // 自定义 JSON 数据（如 BMC 链路损耗信息）
   _mode?: 'design' | 'monitor';         // 由 Canvas 注入的模式标识
   _highlighted?: boolean;

@@ -78,6 +78,7 @@ interface TopologyState {
   updateEdgeLabel: (edgeId: string, label: string | undefined) => Promise<void>;
   updateEdgeArrowType: (edgeId: string, arrowType: EdgeArrowType) => Promise<void>;
   updateEdgeBendOffset: (edgeId: string, bendOffset: number) => Promise<void>;
+  toggleEdgeLossEnabled: (edgeId: string) => Promise<void>;
   updateNodeIcon: (nodeId: string, iconName: string) => Promise<void>;
 
   // 别名 & 自定义图标 & API配置
@@ -257,7 +258,7 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
         ? { loss: 0, lossPercent: 0, animated: false, label: '控制', color: '#722ed1' }
         : isSensor
         ? { loss: 0, lossPercent: 0, animated: false, label: '监测', color: '#52c41a' }
-        : { loss: 0, lossPercent: 0, animated: true },
+        : { loss: 0, lossPercent: 0, lossEnabled: true, animated: true },
     };
     set({ edges: [...edges, newEdge] });
     await get().saveToBackend();
@@ -303,6 +304,16 @@ export const useTopologyStore = create<TopologyState>((set, get) => ({
     set({
       edges: edges.map(e =>
         e.id === edgeId ? { ...e, data: { ...e.data!, bendOffset } } : e
+      ),
+    });
+    await get().saveToBackend();
+  },
+
+  toggleEdgeLossEnabled: async (edgeId) => {
+    const { edges } = get();
+    set({
+      edges: edges.map(e =>
+        e.id === edgeId ? { ...e, data: { ...e.data!, lossEnabled: e.data?.lossEnabled === false ? true : false } } : e
       ),
     });
     await get().saveToBackend();

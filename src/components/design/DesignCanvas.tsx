@@ -53,6 +53,7 @@ const DesignCanvasInner: React.FC = () => {
     saveToBackend,
     discardChanges,
     reverseEdge,
+    toggleEdgeLossEnabled,
   } = useDesignTopologyStore();
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
@@ -238,6 +239,20 @@ const DesignCanvasInner: React.FC = () => {
       setContextMenu(null);
     }
   }, [contextMenu, reverseEdge]);
+
+  const handleToggleEdgeLoss = useCallback(() => {
+    if (contextMenu?.edgeId) {
+      toggleEdgeLossEnabled(contextMenu.edgeId);
+      setContextMenu(null);
+    }
+  }, [contextMenu, toggleEdgeLossEnabled]);
+
+  // 右键边当前是否参与链路损耗计算（默认参与）
+  const contextEdgeLossEnabled = useMemo(() => {
+    if (!contextMenu?.edgeId) return true;
+    const edge = edges.find((e) => e.id === contextMenu.edgeId);
+    return edge?.data?.lossEnabled !== false;
+  }, [contextMenu, edges]);
 
   // 页面加载时从后端加载拓扑
   useEffect(() => {
@@ -429,21 +444,37 @@ const DesignCanvasInner: React.FC = () => {
               </IconPicker>
             )}
             
-            {/* 连线右键菜单 - 翻转方向 */}
+            {/* 连线右键菜单 - 链路损耗计算开关 + 翻转方向 */}
             {contextMenu.edgeId && (
-              <div
-                style={{
-                  padding: '6px 12px',
-                  cursor: 'pointer',
-                  borderRadius: 4,
-                  fontSize: 13,
-                }}
-                onClick={handleReverseEdge}
-                onMouseEnter={(e) => (e.currentTarget.style.background = '#f0f0f0')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              >
-                翻转方向
-              </div>
+              <>
+                <div
+                  style={{
+                    padding: '6px 12px',
+                    cursor: 'pointer',
+                    borderRadius: 4,
+                    fontSize: 13,
+                    color: contextEdgeLossEnabled ? '#ff4d4f' : '#52c41a',
+                  }}
+                  onClick={handleToggleEdgeLoss}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#f0f0f0')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  {contextEdgeLossEnabled ? '取消链路损耗计算' : '启用链路损耗计算'}
+                </div>
+                <div
+                  style={{
+                    padding: '6px 12px',
+                    cursor: 'pointer',
+                    borderRadius: 4,
+                    fontSize: 13,
+                  }}
+                  onClick={handleReverseEdge}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#f0f0f0')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  翻转方向
+                </div>
+              </>
             )}
           </div>
         )}

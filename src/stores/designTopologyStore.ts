@@ -85,6 +85,7 @@ interface DesignTopologyState {
   updateEdgeLabel: (edgeId: string, label: string | undefined) => void;
   updateEdgeArrowType: (edgeId: string, arrowType: EdgeArrowType) => void;
   updateEdgeBendOffset: (edgeId: string, bendOffset: number) => void;
+  toggleEdgeLossEnabled: (edgeId: string) => void;
   reverseEdge: (edgeId: string) => void;
   updateNodeIcon: (nodeId: string, iconName: string) => void;
 
@@ -270,7 +271,7 @@ export const useDesignTopologyStore = create<DesignTopologyState>((set, get) => 
         ? { loss: 0, lossPercent: 0, animated: false, label: '控制', color: '#722ed1' }
         : isSensor
         ? { loss: 0, lossPercent: 0, animated: false, label: '监测', color: '#52c41a' }
-        : { loss: 0, lossPercent: 0, animated: true },
+        : { loss: 0, lossPercent: 0, lossEnabled: true, animated: true },
     };
     set({
       edges: [...edges, newEdge],
@@ -325,6 +326,16 @@ export const useDesignTopologyStore = create<DesignTopologyState>((set, get) => 
     });
   },
 
+  toggleEdgeLossEnabled: (edgeId) => {
+    const { edges } = get();
+    set({
+      edges: edges.map(e =>
+        e.id === edgeId ? { ...e, data: { ...e.data!, lossEnabled: e.data?.lossEnabled === false ? true : false } } : e
+      ),
+      hasUnsavedChanges: true,
+    });
+  },
+
   reverseEdge: (edgeId) => {
     const { edges } = get();
     const edge = edges.find(e => e.id === edgeId);
@@ -343,6 +354,8 @@ export const useDesignTopologyStore = create<DesignTopologyState>((set, get) => 
         arrowType: currentData.arrowType,
         label: currentData.label,
         customData: currentData.customData,
+        lossEnabled: (currentData as unknown as Record<string, unknown>).lossEnabled as boolean | undefined,
+        bendOffset: (currentData as unknown as Record<string, unknown>).bendOffset as number | undefined,
         _mode: currentData._mode,
         // _reversed 为 true 表示箭头方向反转
         _reversed: !(currentData as unknown as Record<string, unknown>)?._reversed,

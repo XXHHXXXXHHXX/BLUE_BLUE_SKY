@@ -95,12 +95,14 @@ function computePowerSummary(nodes: TopologyNode[], edges: TopologyEdge[]) {
     .filter(m => ['cpu', 'memory', 'fan', 'disk', 'io', 'card'].includes(m.type))
     .reduce((sum, m) => sum + m.power, 0);
 
-  // Total loss from edges
-  const totalEdgeLoss = edges.reduce((sum, e) => sum + (e.data?.loss ?? 0), 0);
+  // Total loss from edges (仅统计参与链路损耗计算的边)
+  const totalEdgeLoss = edges
+    .filter(e => e.data?.lossEnabled !== false)
+    .reduce((sum, e) => sum + (e.data?.loss ?? 0), 0);
 
-  // Power loss rankings from edges
+  // Power loss rankings from edges (仅统计参与链路损耗计算的边)
   const edgeLosses = edges
-    .filter(e => e.data?.loss !== undefined)
+    .filter(e => e.data?.loss !== undefined && e.data?.lossEnabled !== false)
     .map(e => {
       const srcNode = nodes.find(n => n.id === e.source);
       const tgtNode = nodes.find(n => n.id === e.target);
