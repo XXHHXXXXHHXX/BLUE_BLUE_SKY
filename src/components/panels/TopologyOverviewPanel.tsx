@@ -22,6 +22,7 @@ import { useMonitorStore } from '../../stores/monitorStore';
 import { useHistoryRecorder } from '../../hooks/useHistoryRecorder';
 import type { TopologyNode, TopologyEdge } from '../../types/topology';
 import { formatPower, getNodeDisplayLabel } from '../../utils/formatters';
+import { calculateAggregatorStats } from '../../services/lossCalculation';
 
 interface HistoryPoint {
   time: string;
@@ -96,11 +97,28 @@ function computePowerSummary(nodes: TopologyNode[], edges: TopologyEdge[]) {
     .reduce((sum, m) => sum + m.power, 0);
 
   // Total loss from edges (仅统计参与链路损耗计算的边)
+  // 链路聚合器相连的边自身损耗为 0，其整体损耗由聚合器汇总，需单独累加
+  const aggregatorLoss = Array.from(calculateAggregatorStats(nodes, edges).values())
+    .reduce((sum, s) => sum + s.loss, 0);
   const totalEdgeLoss = edges
     .filter(e => e.data?.lossEnabled !== false)
-    .reduce((sum, e) => sum + (e.data?.loss ?? 0), 0);
+    .reduce((sum, e) => sum + (e.data?.loss ?? 0), 0) + aggregatorLoss;
 
   // Power loss rankings from edges (仅统计参与链路损耗计算的边)
+  // 链路聚合器的整体损耗作为一条独立排名项展示
+  const aggregatorLossRows = Array.from(calculateAggregatorStats(nodes, edges).entries())
+    .filter(([, s]) => s.loss > 0)
+    .map(([id, s]) => {
+      const aggNode = nodes.find(n => n.id === id);
+      const label = aggNode?.data
+        ? (getNodeDisplayLabel(aggNode.data as Record<string, unknown>) || aggNode.data.label || id)
+        : id;
+      return {
+        path: `${label}（聚合 ${s.upstreamCount}→${s.downstreamCount} 路）`,
+        loss: s.loss,
+        lossPercent: s.lossPercent,
+      };
+    });
   const edgeLosses = edges
     .filter(e => e.data?.loss !== undefined && e.data?.lossEnabled !== false)
     .map(e => {
@@ -114,6 +132,7 @@ function computePowerSummary(nodes: TopologyNode[], edges: TopologyEdge[]) {
         lossPercent: e.data!.lossPercent,
       };
     })
+    .concat(aggregatorLossRows)
     .sort((a, b) => b.loss - a.loss);
 
   // Module power ranking (loads only)

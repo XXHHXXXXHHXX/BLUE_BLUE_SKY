@@ -24,7 +24,7 @@ import ModulePalette from './ModulePalette';
 import IconPicker from './IconPicker';
 import NodeEditPanel from './NodeEditPanel';
 import { useDesignTopologyStore } from '../../stores/designTopologyStore';
-import { calculateEdgeLosses } from '../../services/lossCalculation';
+import { calculateEdgeLosses, calculateAggregatorStats } from '../../services/lossCalculation';
 import { useAlignmentGuides } from './useAlignmentGuides';
 import type { HardwareNodeType, TopologyNode } from '../../types/topology';
 
@@ -103,6 +103,9 @@ const DesignCanvasInner: React.FC = () => {
     [edges, nodes, highlightedEdgeIds],
   );
 
+  // 链路聚合器统计：上游输出合计、下游输入合计、整体链路损耗
+  const aggregatorStats = useMemo(() => calculateAggregatorStats(nodes, edges), [nodes, edges]);
+
   // 注入高亮标记到节点 data
   const processedNodes = useMemo(
     () =>
@@ -112,9 +115,10 @@ const DesignCanvasInner: React.FC = () => {
           ...n.data,
           _mode: 'design' as const,
           _highlighted: highlightedNodeIds.has(n.id),
+          ...(aggregatorStats.has(n.id) ? { _aggregatorStats: aggregatorStats.get(n.id) } : {}),
         },
       })),
-    [nodes, highlightedNodeIds],
+    [nodes, highlightedNodeIds, aggregatorStats],
   );
 
   // 编辑面板：双击节点打开

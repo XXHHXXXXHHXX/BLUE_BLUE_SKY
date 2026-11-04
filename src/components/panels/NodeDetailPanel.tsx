@@ -17,11 +17,13 @@ import {
   formatRPM,
   getTemperatureColor,
   getNodeDisplayLabel,
+  getLossColor,
 } from '../../utils/formatters';
 import type { SourceData, FanData, LoadData, MemoryData, DiskData, IOData, CardData, SensorData } from '../../types/power';
 import { DEFAULT_FIELD_THRESHOLDS, FIXED_FIELD_DEFS } from '../../types/topology';
 import type { TopologyNode } from '../../types/topology';
 import { getThresholdColorForField } from '../../utils/formatters';
+import { calculateAggregatorStats } from '../../services/lossCalculation';
 import { 
   VideoCameraOutlined, 
   VideoCameraAddOutlined,
@@ -97,6 +99,7 @@ interface NodeDetailPanelProps {
 
 const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: propNode }) => {
   const nodes = useTopologyStore((s) => s.nodes);
+  const edges = useTopologyStore((s) => s.edges);
   const isPolling = useMonitorStore((s) => s.isPolling);
 
   // 从 store 获取实时节点数据
@@ -645,6 +648,36 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
               </div>
             )}
           </div>
+        );
+      }
+
+      case 'aggregator': {
+        // 详情面板读取的是 store 原始节点，统计值在此按当前节点/连线实时计算
+        const stats = calculateAggregatorStats(nodes, edges).get(node.id);
+        const upstreamPower = stats?.upstreamPower ?? 0;
+        const downstreamPower = stats?.downstreamPower ?? 0;
+        const loss = stats?.loss ?? 0;
+        const lossPercent = stats?.lossPercent ?? 0;
+        const complete = (stats?.upstreamCount ?? 0) > 0 && (stats?.downstreamCount ?? 0) > 0;
+
+        return (
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label={`上游输出合计（${stats?.upstreamCount ?? 0} 路）`}>
+              {formatPower(upstreamPower)}
+            </Descriptions.Item>
+            <Descriptions.Item label={`下游输入合计（${stats?.downstreamCount ?? 0} 路）`}>
+              {formatPower(downstreamPower)}
+            </Descriptions.Item>
+            <Descriptions.Item label="整体链路损耗">
+              {complete ? (
+                <span style={{ color: getLossColor(lossPercent) }}>
+                  {formatPower(loss)}（{lossPercent.toFixed(1)}%）
+                </span>
+              ) : (
+                '待连线（需同时连接上游与下游模块）'
+              )}
+            </Descriptions.Item>
+          </Descriptions>
         );
       }
 

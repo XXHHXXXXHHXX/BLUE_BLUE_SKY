@@ -18,6 +18,7 @@ import ThermometerNode from './ThermometerNode';
 import CustomNode from './CustomNode';
 import ControlNode from './ControlNode';
 import ViewNode from './ViewNode';
+import AggregatorNode from './AggregatorNode';
 
 /**
  * 带缩放功能的节点类型 - 用于设计页面
@@ -41,6 +42,7 @@ export const nodeTypes: NodeTypes = {
   custom: withScalable(CustomNode),
   control: withScalable(ControlNode),
   view: withScalable(ViewNode),
+  aggregator: withScalable(AggregatorNode),
 };
 
 /**
@@ -65,4 +67,5 @@ export const staticNodeTypes: NodeTypes = {
   custom: withoutScalable(CustomNode),
   control: withoutScalable(ControlNode),
   view: withoutScalable(ViewNode),
+  aggregator: withoutScalable(AggregatorNode),
 };

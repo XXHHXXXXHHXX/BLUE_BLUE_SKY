@@ -38,6 +38,8 @@ interface PowerEdgeDataLocal {
   _highlighted?: boolean;
   _reversed?: boolean;
   bendOffset?: number;
+  /** 该边连接到链路聚合器，损耗由聚合器整体汇总，边上不单独展示 */
+  _aggregatedLoss?: boolean;
   [key: string]: unknown;
 }
 
@@ -153,6 +155,9 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
   const animated = data?.animated !== false;
   const arrowType: EdgeArrowType = data?.arrowType ?? 'forward';
   const lossEnabled = data?.lossEnabled !== false; // 默认参与链路损耗计算
+  // 连接链路聚合器的边：损耗由聚合器卡片统一展示，边上不显示单条损耗
+  const aggregatedLoss = data?._aggregatedLoss === true;
+  const showLossValue = lossEnabled && !aggregatedLoss;
   const edgeLabel = data?.label;
   const customData = data?.customData;
   const isDesignMode = data?._mode === 'design';
@@ -203,8 +208,8 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
     8,
   );
 
-  // 关闭链路损耗计算的边显示中性灰色，不按损耗着色
-  const color = lossEnabled ? getLossColor(lossPercent) : '#bfbfbf';
+  // 关闭链路损耗计算的边、以及连接链路聚合器的边显示中性灰色，不按损耗着色
+  const color = lossEnabled && !aggregatedLoss ? getLossColor(lossPercent) : '#bfbfbf';
 
   // 为每条边生成唯一的 marker ID
   const markerEndId = `arrow-end-${id}`;
@@ -420,40 +425,45 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
             />
           )}
 
-          {/* Editable label area */}
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 500,
-              background: '#fff',
-              border: `1px solid ${color}`,
-              borderRadius: 4,
-              padding: '1px 6px',
-              color,
-              whiteSpace: 'nowrap',
-              cursor: isDesignMode ? 'text' : 'default',
-              textAlign: 'center',
-              marginTop: 10,
-            }}
-            onClick={handleLabelClick}
-          >
-            {editing ? (
-              <input
-                ref={inputRef}
-                className="edge-label-input"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={commitLabel}
-                onKeyDown={handleKeyDown}
-                style={{ color }}
-              />
-            ) : (
-              <>
-                {edgeLabel && <div>{edgeLabel}</div>}
-                {lossEnabled && <div>{loss.toFixed(1)}W ({lossPercent.toFixed(1)}%)</div>}
-              </>
-            )}
-          </div>
+          {/* Editable label area：聚合器边在监控模式下无标签时不渲染空框 */}
+          {(!aggregatedLoss || !!edgeLabel || isDesignMode) && (
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 500,
+                background: '#fff',
+                border: `1px solid ${color}`,
+                borderRadius: 4,
+                padding: '1px 6px',
+                color,
+                whiteSpace: 'nowrap',
+                cursor: isDesignMode ? 'text' : 'default',
+                textAlign: 'center',
+                marginTop: 10,
+              }}
+              onClick={handleLabelClick}
+            >
+              {editing ? (
+                <input
+                  ref={inputRef}
+                  className="edge-label-input"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onBlur={commitLabel}
+                  onKeyDown={handleKeyDown}
+                  style={{ color }}
+                />
+              ) : (
+                <>
+                  {edgeLabel && <div>{edgeLabel}</div>}
+                  {showLossValue && <div>{loss.toFixed(1)}W ({lossPercent.toFixed(1)}%)</div>}
+                  {aggregatedLoss && !edgeLabel && isDesignMode && (
+                    <div style={{ color: '#8c8c8c' }}>损耗由聚合器汇总</div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           {/* Arrow type toggle button - design mode only */}
           {isDesignMode && (

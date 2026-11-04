@@ -23,6 +23,7 @@ const defaultIconMap: Record<HardwareNodeType, string> = {
   custom: 'BuildOutlined',
   control: 'ControlOutlined',
   view: 'EyeOutlined',
+  aggregator: 'DeploymentUnitOutlined',
 };
 
 /** Fan SVG icon (custom, since Ant Design doesn't have a fan icon) */

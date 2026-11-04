@@ -14,6 +14,7 @@ const categories: ModuleCategory[] = [
   { label: '电源类', types: ['ac', 'psu', 'vr', 'psip', 'busbar'] },
   { label: '负载类', types: ['cpu', 'memory', 'fan', 'disk', 'io', 'card'] },
   { label: '其他', types: ['sensor'] },
+  { label: '聚合', types: ['aggregator'] },
   { label: '自定义', types: ['custom'] },
   { label: '控制', types: ['control'] },
   { label: '查看', types: ['view'] },

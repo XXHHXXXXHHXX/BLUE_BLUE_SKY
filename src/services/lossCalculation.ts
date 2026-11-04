@@ -13,6 +13,24 @@ import type {
   CPUData, MemoryData, FanData, DiskData, IOData, CardData, SourceData,
 } from '../types/power';
 
+/** 链路聚合器节点类型：自身不采集功率，上游输出与下游输入均由连线汇总 */
+export const AGGREGATOR_NODE_TYPE = 'aggregator';
+
+/** 链路聚合器统计结果 */
+export interface AggregatorStats {
+  /** 上游（连线到聚合器）各模块输出功耗之和 */
+  upstreamPower: number;
+  /** 下游（聚合器连线出去）各模块输入功耗之和 */
+  downstreamPower: number;
+  /** 整体链路损耗 = 上游输出之和 − 下游输入之和（不小于 0） */
+  loss: number;
+  /** 损耗百分比 = 损耗 / 上游输出之和 */
+  lossPercent: number;
+  /** 参与统计的上游/下游连线数量 */
+  upstreamCount: number;
+  downstreamCount: number;
+}
+
 /** 电源类模块（使用 sourceData 结构） */
 export const SOURCE_TYPE_NODES = ['ac', 'psu', 'vr', 'psip', 'busbar'];
 
@@ -120,6 +138,83 @@ export function getNodeTargetPower(node: TopologyNode): number | null {
   return null;
 }
 
+/** 计算所有链路聚合器的汇总统计
+ *
+ * 聚合器自身不采集功率，它的“上游输出”是连入它的各模块输出功耗之和，
+ * “下游输入”是它连出的各模块输入功耗之和，二者之差即整体链路损耗。
+ * 这样多个模块共享同一个上游输出时，不会被重复计入每条链路。
+ */
+export function calculateAggregatorStats(
+  nodes: TopologyNode[],
+  edges: TopologyEdge[],
+): Map<string, AggregatorStats> {
+  const result = new Map<string, AggregatorStats>();
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const aggregatorIds = new Set(
+    nodes
+      .filter((n) => (n.data as { nodeType?: string } | undefined)?.nodeType === AGGREGATOR_NODE_TYPE)
+      .map((n) => n.id),
+  );
+  if (aggregatorIds.size === 0) return result;
+
+  const upstreamSum = new Map<string, number>();
+  const downstreamSum = new Map<string, number>();
+  const upstreamCount = new Map<string, number>();
+  const downstreamCount = new Map<string, number>();
+
+  edges.forEach((edge) => {
+    if (edge.type === 'controlEdge' || edge.type === 'sensorEdge') return;
+    const edgeData = (edge.data || {}) as { lossEnabled?: boolean; _reversed?: boolean };
+    if (edgeData.lossEnabled === false) return;
+
+    const actualSource = edgeData._reversed === true ? edge.target : edge.source;
+    const actualTarget = edgeData._reversed === true ? edge.source : edge.target;
+    if (aggregatorIds.has(actualSource) && aggregatorIds.has(actualTarget)) return;
+
+    if (aggregatorIds.has(actualTarget)) {
+      // 上游：普通模块 → 聚合器，取该模块的输出功耗
+      const sourceNode = nodeMap.get(actualSource);
+      const power = sourceNode ? getNodeSourcePower(sourceNode) : null;
+      if (power !== null && power !== undefined && !Number.isNaN(power)) {
+        upstreamSum.set(actualTarget, (upstreamSum.get(actualTarget) ?? 0) + power);
+        upstreamCount.set(actualTarget, (upstreamCount.get(actualTarget) ?? 0) + 1);
+      }
+      return;
+    }
+
+    if (aggregatorIds.has(actualSource)) {
+      // 下游：聚合器 → 普通模块，取该模块的输入功耗
+      const targetNode = nodeMap.get(actualTarget);
+      const power = targetNode ? getNodeTargetPower(targetNode) : null;
+      if (power !== null && power !== undefined && !Number.isNaN(power)) {
+        downstreamSum.set(actualSource, (downstreamSum.get(actualSource) ?? 0) + power);
+        downstreamCount.set(actualSource, (downstreamCount.get(actualSource) ?? 0) + 1);
+      }
+    }
+  });
+
+  aggregatorIds.forEach((id) => {
+    const upstreamPower = upstreamSum.get(id) ?? 0;
+    const downstreamPower = downstreamSum.get(id) ?? 0;
+    const upCount = upstreamCount.get(id) ?? 0;
+    const downCount = downstreamCount.get(id) ?? 0;
+    // 只有上游、下游都有连线时链路才完整，才能计算整体损耗
+    const complete = upCount > 0 && downCount > 0;
+    const loss = complete ? Math.max(0, upstreamPower - downstreamPower) : 0;
+    const lossPercent = complete && upstreamPower > 0 ? (loss / upstreamPower) * 100 : 0;
+    result.set(id, {
+      upstreamPower: Number(upstreamPower.toFixed(2)),
+      downstreamPower: Number(downstreamPower.toFixed(2)),
+      loss: Number(loss.toFixed(2)),
+      lossPercent: Number(lossPercent.toFixed(2)),
+      upstreamCount: upCount,
+      downstreamCount: downCount,
+    });
+  });
+
+  return result;
+}
+
 /** 计算边的损耗（基于真实功率）
  * 损耗 = 源节点输出功率 - 目标节点输入功率
  * 损耗百分比 = 损耗 / 源节点输出功率 * 100
@@ -144,6 +239,13 @@ export function calculateEdgeLosses(nodes: TopologyNode[], edges: TopologyEdge[]
     nodeTargetPowerMap.set(node.id, getNodeTargetPower(node));
   });
 
+  // 链路聚合器节点：与其相连的边不单独计算损耗，损耗统一由聚合器汇总展示
+  const aggregatorIds = new Set(
+    nodes
+      .filter((n) => (n.data as { nodeType?: string } | undefined)?.nodeType === AGGREGATOR_NODE_TYPE)
+      .map((n) => n.id),
+  );
+
   // 按 actualSource 分组，用于处理一对多情况
   // 已关闭损耗计算的边不参与分组，避免影响其他边的“一对一/一对多”判定
   const sourceToEdges = new Map<string, TopologyEdge[]>();
@@ -152,6 +254,9 @@ export function calculateEdgeLosses(nodes: TopologyNode[], edges: TopologyEdge[]
     if (edgeData.lossEnabled === false) return;
     const isReversed = (edge.data as { _reversed?: boolean } | undefined)?._reversed === true;
     const actualSource = isReversed ? edge.target : edge.source;
+    const actualTarget = isReversed ? edge.source : edge.target;
+    // 聚合器相连的边不参与普通节点的“一对多”分组，避免影响其他链路的分摊
+    if (aggregatorIds.has(actualSource) || aggregatorIds.has(actualTarget)) return;
     if (!sourceToEdges.has(actualSource)) {
       sourceToEdges.set(actualSource, []);
     }
@@ -162,6 +267,19 @@ export function calculateEdgeLosses(nodes: TopologyNode[], edges: TopologyEdge[]
     // 控制关系边（controlEdge）与传感器监测边（sensorEdge）不参与功率链路损耗计算
     if (edge.type === 'controlEdge' || edge.type === 'sensorEdge') {
       return edge;
+    }
+    // 链路聚合器相连的边：损耗由聚合器整体汇总，单条边不再单独计算与展示
+    if (aggregatorIds.has(edge.source) || aggregatorIds.has(edge.target)) {
+      const prevData = edge.data || { loss: 0, lossPercent: 0 };
+      return {
+        ...edge,
+        data: {
+          ...prevData,
+          loss: 0,
+          lossPercent: 0,
+          _aggregatedLoss: true,
+        },
+      };
     }
     // 用户在右键菜单中关闭了该链路的损耗计算：不参与计算，并清零损耗值
     const edgeData = (edge.data || {}) as { lossEnabled?: boolean };

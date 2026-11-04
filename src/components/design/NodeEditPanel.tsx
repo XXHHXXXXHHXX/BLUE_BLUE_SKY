@@ -31,7 +31,7 @@ const typeTagMap: Record<HardwareNodeType, string> = {
   ac: 'AC', psu: 'PSU', vr: 'VR', psip: 'PSIP', busbar: 'BUSBAR',
   cpu: 'CPU', memory: 'MEM', fan: 'FAN', disk: 'DISK',
   io: 'IO', card: 'CARD', sensor: 'SENSOR', mgmtBoard: 'MGMT', chassis: 'CHASSIS',
-  thermometer: 'THERM', custom: 'CUSTOM', control: 'CTRL', view: 'VIEW',
+  thermometer: 'THERM', custom: 'CUSTOM', control: 'CTRL', view: 'VIEW', aggregator: 'AGG',
 };
 
 interface NodeEditPanelProps {
@@ -796,6 +796,22 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
   const lossAnnotation = nodeType ? getNodeLossFieldAnnotation(nodeType) : null;
 
   const renderApiTab = () => {
+    // 链路聚合器不采集自身数据，功率完全由连线汇总，无需字段映射
+    if (nodeType === 'aggregator') {
+      return (
+        <div style={{ padding: 12, background: '#fff7e6', borderRadius: 6, border: '1px solid #ffd591' }}>
+          <Text strong style={{ fontSize: 13, color: '#d46b08', display: 'block', marginBottom: 4 }}>
+            <InfoCircleOutlined /> 链路聚合器说明
+          </Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            链路聚合器不采集自身数据，也无需配置字段映射。将其上游模块连线到本组件、本组件再连线到下游模块后：
+            上游各模块的输出功耗会在此求和，下游各模块的输入功耗也会在此求和，
+            卡片上显示「上游输出合计 − 下游输入合计」的整体链路损耗。
+          </Text>
+        </div>
+      );
+    }
+
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 

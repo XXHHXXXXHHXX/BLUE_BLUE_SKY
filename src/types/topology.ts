@@ -10,7 +10,7 @@ export type HardwareNodeType =
   | 'ac' | 'psu' | 'vr' | 'psip' | 'busbar'
   | 'cpu' | 'memory' | 'fan' | 'disk'
   | 'io' | 'card' | 'sensor' | 'mgmtBoard' | 'chassis'
-  | 'thermometer' | 'custom' | 'control' | 'view';
+  | 'thermometer' | 'custom' | 'control' | 'view' | 'aggregator';
 
 /** BMC 连接配置（通过 SSH） */
 export interface BMCConfig {
@@ -160,6 +160,8 @@ export const FIXED_FIELD_DEFS: Record<string, FixedFieldDef[]> = {
   custom: [],
   control: [],
   view: [],
+  // 链路聚合器：不采集自身数据，上游输出与下游输入均由连线汇总计算
+  aggregator: [],
 };
 
 /** 默认字段阈值配置 */
@@ -379,6 +381,7 @@ export type HardwareNodeData = {
   | { nodeType: 'custom'; }
   | { nodeType: 'control'; controlConfig?: ControlConfig }
   | { nodeType: 'view'; viewConfig?: ViewConfig }
+  | { nodeType: 'aggregator'; }
 );
 
 /** React Flow节点类型 */

@@ -19,6 +19,7 @@ import CloneNodeDetailPanel from '../panels/CloneNodeDetailPanel';
 import CloneTopologyOverviewPanel from '../panels/CloneTopologyOverviewPanel';
 import CPUPowerDomain from '../panels/CPUPowerDomain';
 import { useCloneTopologyStore, initCloneStore, loadCloneTopologyId } from '../../stores/cloneTopologyStore';
+import { calculateAggregatorStats, AGGREGATOR_NODE_TYPE } from '../../services/lossCalculation';
 import type { TopologyNode } from '../../types/topology';
 import type { CPUData } from '../../types/power';
 
@@ -123,17 +124,30 @@ const CloneCanvas: React.FC<CloneCanvasProps> = ({ initialTopologyId }) => {
     return ids;
   }, [edges, selectedNodeIds]);
 
+  // 链路聚合器统计：上游输出合计、下游输入合计、整体链路损耗
+  const aggregatorStats = useMemo(() => calculateAggregatorStats(nodes, edges), [nodes, edges]);
+
   // 注入高亮标记和控制回调到节点 data
   const processedNodes = useMemo(
     () =>
       nodes.map((n) => {
         const extra: Record<string, unknown> = {
           _highlighted: highlightedNodeIds.has(n.id),
+          ...(aggregatorStats.has(n.id) ? { _aggregatorStats: aggregatorStats.get(n.id) } : {}),
         };
         return { ...n, data: { ...n.data, ...extra } };
       }),
-    [nodes, highlightedNodeIds],
+    [nodes, highlightedNodeIds, aggregatorStats],
   );
+
+  // 与链路聚合器相连的边：损耗由聚合器卡片汇总，边上不再显示单条损耗
+  const aggregatorEdgeIds = useMemo(() => {
+    const ids = new Set(
+      nodes.filter((n) => (n.data as { nodeType?: string }).nodeType === AGGREGATOR_NODE_TYPE).map((n) => n.id),
+    );
+    if (ids.size === 0) return new Set<string>();
+    return new Set(edges.filter((e) => ids.has(e.source) || ids.has(e.target)).map((e) => e.id));
+  }, [nodes, edges]);
 
   // 注入高亮标记到边 data
   const processedEdges = useMemo(
@@ -143,9 +157,10 @@ const CloneCanvas: React.FC<CloneCanvasProps> = ({ initialTopologyId }) => {
         data: {
           ...e.data!,
           _highlighted: highlightedEdgeIds.has(e.id),
+          ...(aggregatorEdgeIds.has(e.id) ? { _aggregatedLoss: true } : {}),
         },
       })),
-    [edges, highlightedEdgeIds],
+    [edges, highlightedEdgeIds, aggregatorEdgeIds],
   );
 
   const handleSelectionChange = useCallback(

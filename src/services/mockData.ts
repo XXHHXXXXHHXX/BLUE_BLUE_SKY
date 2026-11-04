@@ -197,6 +197,7 @@ export const nodeTypeLabels: Record<string, string> = {
   custom: '自定义模块',
   control: '控制模块',
   view: '查看组件',
+  aggregator: '链路聚合器',
 };
 
 /** 各模块类型的默认字段映射配置（使用 fieldKey，显示名固定） */
@@ -311,6 +312,8 @@ export const defaultFieldMappings: Record<string, FieldMapping[]> = {
   ],
   control: [],
   view: [],
+  // 链路聚合器不采集自身数据，功率由连线汇总得出
+  aggregator: [],
   thermometer: [
     { fieldKey: 'temperature', bmcField: 'Thermometer Temp' },
     { fieldKey: 'temperatureStatus', bmcField: 'Thermometer Status' },
@@ -408,6 +411,12 @@ export function createDefaultNodeData(type: string): HardwareNodeData {
           command: '',
           params: [],
         },
+      };
+    case 'aggregator':
+      return {
+        label,
+        nodeType: 'aggregator' as const,
+        category: 'other' as const,
       };
     default:
       return { label, nodeType: 'chassis' as const, category, apiConfig };
