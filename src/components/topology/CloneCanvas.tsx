@@ -56,6 +56,11 @@ const CloneCanvas: React.FC<CloneCanvasProps> = ({ initialTopologyId }) => {
   const [cpuModalCommandDomains, setCpuModalCommandDomains] = useState<{ name: string; value: number | null }[]>([]);
   const [cpuModalCommandTime, setCpuModalCommandTime] = useState<string>();
   const [cpuModalCommandError, setCpuModalCommandError] = useState<string>();
+  // 电源域命令配置（用于弹窗内刷新按钮重新下发命令）
+  const [cpuModalApiConfig, setCpuModalApiConfig] = useState<{
+    powerDomainCommand?: string;
+    powerDomainCommandFields?: { name: string; label: string }[];
+  }>();
 
   // 从 store 实时获取选中的节点数据
   const selectedNode = useMemo(() => {
@@ -209,6 +214,9 @@ const CloneCanvas: React.FC<CloneCanvasProps> = ({ initialTopologyId }) => {
       setCpuModalCommandDomains(commandMode ? powerDomains || [] : []);
       setCpuModalCommandTime(commandMode ? commandTime : undefined);
       setCpuModalCommandError(commandMode ? commandError : undefined);
+      // 取该节点当前的电源域命令配置，供弹窗刷新按钮使用
+      const node = useCloneTopologyStore.getState().nodes.find((n) => n.id === nodeId);
+      setCpuModalApiConfig(node?.data?.apiConfig);
       setCpuModalOpen(true);
     };
     window.addEventListener('open-cpu-detail', handler);
@@ -254,6 +262,8 @@ const CloneCanvas: React.FC<CloneCanvasProps> = ({ initialTopologyId }) => {
         commandPowerDomains={cpuModalCommandDomains}
         commandTime={cpuModalCommandTime}
         commandError={cpuModalCommandError}
+        powerDomainCommand={cpuModalApiConfig?.powerDomainCommand}
+        powerDomainCommandFields={cpuModalApiConfig?.powerDomainCommandFields}
       />
 
       <CloneTopologyOverviewPanel

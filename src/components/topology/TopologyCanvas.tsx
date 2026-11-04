@@ -47,6 +47,11 @@ const TopologyCanvas: React.FC = () => {
   const [cpuModalCommandDomains, setCpuModalCommandDomains] = useState<{ name: string; value: number | null }[]>([]);
   const [cpuModalCommandTime, setCpuModalCommandTime] = useState<string>();
   const [cpuModalCommandError, setCpuModalCommandError] = useState<string>();
+  // 电源域命令配置（用于弹窗内刷新按钮重新下发命令）
+  const [cpuModalApiConfig, setCpuModalApiConfig] = useState<{
+    powerDomainCommand?: string;
+    powerDomainCommandFields?: { name: string; label: string }[];
+  }>();
   const [overviewOpen, setOverviewOpen] = useState(false);
 
   // 从 store 实时获取选中的节点数据
@@ -171,6 +176,9 @@ const TopologyCanvas: React.FC = () => {
       setCpuModalCommandDomains(commandMode ? powerDomains || [] : []);
       setCpuModalCommandTime(commandMode ? commandTime : undefined);
       setCpuModalCommandError(commandMode ? commandError : undefined);
+      // 取该节点当前的电源域命令配置，供弹窗刷新按钮使用
+      const node = useTopologyStore.getState().nodes.find((n) => n.id === nodeId);
+      setCpuModalApiConfig(node?.data?.apiConfig);
       setCpuModalOpen(true);
     };
     window.addEventListener('open-cpu-detail', handler);
@@ -216,6 +224,8 @@ const TopologyCanvas: React.FC = () => {
         commandPowerDomains={cpuModalCommandDomains}
         commandTime={cpuModalCommandTime}
         commandError={cpuModalCommandError}
+        powerDomainCommand={cpuModalApiConfig?.powerDomainCommand}
+        powerDomainCommandFields={cpuModalApiConfig?.powerDomainCommandFields}
       />
 
       <TopologyOverviewPanel
