@@ -161,6 +161,8 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
   const edgeLabel = data?.label;
   const customData = data?.customData;
   const isDesignMode = data?._mode === 'design';
+  // 标签框只在有内容时渲染，避免关闭损耗计算后留下一个空的扁平方框
+  const hasLabelContent = !!edgeLabel || showLossValue || (aggregatedLoss && isDesignMode);
   const isHighlighted = data?._highlighted === true;
   const isReversed = data?._reversed === true;
   const bendOffset = data?.bendOffset ?? 0;
@@ -208,8 +210,9 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
     8,
   );
 
-  // 关闭链路损耗计算的边、以及连接链路聚合器的边显示中性灰色，不按损耗着色
-  const color = lossEnabled && !aggregatedLoss ? getLossColor(lossPercent) : '#bfbfbf';
+  // 关闭链路损耗计算不改变链路颜色，固定显示绿色（即使残留旧损耗值）；
+  // 连接链路聚合器的边损耗由聚合器统一展示，仍用中性灰色区分
+  const color = aggregatedLoss ? '#bfbfbf' : lossEnabled ? getLossColor(lossPercent) : '#52c41a';
 
   // 为每条边生成唯一的 marker ID
   const markerEndId = `arrow-end-${id}`;
@@ -425,8 +428,8 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
             />
           )}
 
-          {/* Editable label area：聚合器边在监控模式下无标签时不渲染空框 */}
-          {(!aggregatedLoss || !!edgeLabel || isDesignMode) && (
+          {/* Editable label area：有内容时才渲染标签框 */}
+          {(hasLabelContent || editing) && (
             <div
               style={{
                 fontSize: 11,
@@ -462,6 +465,31 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
                   )}
                 </>
               )}
+            </div>
+          )}
+
+          {/* 设计模式下无标签内容时，用一个小圆形「+」按钮作为添加标签入口，避免出现空的扁平方框 */}
+          {!hasLabelContent && !editing && isDesignMode && (
+            <div
+              style={{
+                width: 16,
+                height: 16,
+                margin: '10px auto 0',
+                borderRadius: '50%',
+                background: '#fff',
+                border: `1px solid ${color}`,
+                color,
+                fontSize: 12,
+                lineHeight: '14px',
+                textAlign: 'center',
+                cursor: 'text',
+                userSelect: 'none',
+                opacity: 0.75,
+              }}
+              onClick={handleLabelClick}
+              title="点击添加标签"
+            >
+              +
             </div>
           )}
 
