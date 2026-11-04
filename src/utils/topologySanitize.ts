@@ -12,7 +12,7 @@
 import type { TopologyExportData, TopologyNode, TopologyEdge } from '../types/topology';
 
 /** 节点/边 data 中由画布注入的纯运行时字段（必须剔除） */
-const NODE_DATA_RUNTIME_KEYS = ['_mode', '_highlighted', '_aggregatorStats'];
+const NODE_DATA_RUNTIME_KEYS = ['_mode', '_highlighted', '_aggregatorStats', '_linkedViews'];
 const EDGE_DATA_RUNTIME_KEYS = ['_mode', '_highlighted', '_aggregatedLoss'];
 
 /** 节点顶层由 React Flow 维护的运行时字段（不应持久化） */

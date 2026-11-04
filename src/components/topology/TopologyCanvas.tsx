@@ -21,6 +21,7 @@ import TopologyOverviewPanel from '../panels/TopologyOverviewPanel';
 import { useTopologyStore } from '../../stores/topologyStore';
 import { useMonitorStore } from '../../stores/monitorStore';
 import { calculateAggregatorStats, AGGREGATOR_NODE_TYPE } from '../../services/lossCalculation';
+import { collectLinkedViews } from '../../utils/linkedViews';
 import type { TopologyNode } from '../../types/topology';
 import type { CPUData } from '../../types/power';
 
@@ -94,6 +95,9 @@ const TopologyCanvas: React.FC = () => {
   // 链路聚合器统计：上游输出合计、下游输入合计、整体链路损耗
   const aggregatorStats = useMemo(() => calculateAggregatorStats(nodes, edges), [nodes, edges]);
 
+  // 关联查看组件：与每个节点相连的「查看组件」列表（用于节点旁的抽屉）
+  const linkedViews = useMemo(() => collectLinkedViews(nodes, edges), [nodes, edges]);
+
   // 注入高亮标记和控制回调到节点 data
   const processedNodes = useMemo(
     () =>
@@ -101,10 +105,11 @@ const TopologyCanvas: React.FC = () => {
         const extra: Record<string, unknown> = {
           _highlighted: highlightedNodeIds.has(n.id),
           ...(aggregatorStats.has(n.id) ? { _aggregatorStats: aggregatorStats.get(n.id) } : {}),
+          ...(linkedViews.has(n.id) ? { _linkedViews: linkedViews.get(n.id) } : {}),
         };
         return { ...n, data: { ...n.data, ...extra } };
       }),
-    [nodes, highlightedNodeIds, aggregatorStats],
+    [nodes, highlightedNodeIds, aggregatorStats, linkedViews],
   );
 
   // 与链路聚合器相连的边：损耗由聚合器卡片汇总，边上不再显示单条损耗

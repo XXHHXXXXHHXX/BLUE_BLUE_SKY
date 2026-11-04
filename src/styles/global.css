@@ -485,6 +485,78 @@ html, body, #root {
   pointer-events: none;
 }
 
+/* === 关联查看组件抽屉 === */
+.linked-views-drawer {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 8px);
+  z-index: 20;
+}
+
+.linked-views-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: #13c2c2;
+  background: #fff;
+  border: 1px solid #87e8de;
+  border-radius: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  transition: background 0.15s, border-color 0.15s;
+  user-select: none;
+}
+
+.linked-views-toggle:hover,
+.linked-views-toggle.is-open {
+  background: #e6fffb;
+  border-color: #13c2c2;
+}
+
+.linked-views-toggle-count {
+  font-weight: 600;
+}
+
+.linked-views-panel {
+  margin-top: 6px;
+  width: max-content;
+  min-width: 240px;
+  max-width: 360px;
+  max-height: 420px;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+}
+
+.linked-views-panel-header {
+  position: sticky;
+  top: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #595959;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.linked-views-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+
+.linked-views-item .hardware-node {
+  min-width: 200px;
+  box-shadow: none;
+}
+
 /* === 连线高亮 - 选中节点的关联节点高亮 === */
 .node-highlighted .hardware-node {
   box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.3), 0 0 16px rgba(22, 119, 255, 0.15);

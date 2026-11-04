@@ -25,6 +25,7 @@ import IconPicker from './IconPicker';
 import NodeEditPanel from './NodeEditPanel';
 import { useDesignTopologyStore } from '../../stores/designTopologyStore';
 import { calculateEdgeLosses, calculateAggregatorStats } from '../../services/lossCalculation';
+import { collectLinkedViews } from '../../utils/linkedViews';
 import { useAlignmentGuides } from './useAlignmentGuides';
 import type { HardwareNodeType, TopologyNode } from '../../types/topology';
 
@@ -106,6 +107,9 @@ const DesignCanvasInner: React.FC = () => {
   // 链路聚合器统计：上游输出合计、下游输入合计、整体链路损耗
   const aggregatorStats = useMemo(() => calculateAggregatorStats(nodes, edges), [nodes, edges]);
 
+  // 关联查看组件：与每个节点相连的「查看组件」列表（用于节点旁的抽屉）
+  const linkedViews = useMemo(() => collectLinkedViews(nodes, edges), [nodes, edges]);
+
   // 注入高亮标记到节点 data
   const processedNodes = useMemo(
     () =>
@@ -116,9 +120,10 @@ const DesignCanvasInner: React.FC = () => {
           _mode: 'design' as const,
           _highlighted: highlightedNodeIds.has(n.id),
           ...(aggregatorStats.has(n.id) ? { _aggregatorStats: aggregatorStats.get(n.id) } : {}),
+          ...(linkedViews.has(n.id) ? { _linkedViews: linkedViews.get(n.id) } : {}),
         },
       })),
-    [nodes, highlightedNodeIds, aggregatorStats],
+    [nodes, highlightedNodeIds, aggregatorStats, linkedViews],
   );
 
   // 编辑面板：双击节点打开

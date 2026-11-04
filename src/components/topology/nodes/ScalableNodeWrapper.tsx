@@ -4,6 +4,14 @@ import React, { useCallback, useRef } from 'react';
 import { type NodeProps, Handle, Position } from '@xyflow/react';
 import { useTopologyStore } from '../../../stores/topologyStore';
 import { getNodeLossFieldAnnotation } from '../../../services/lossCalculation';
+import LinkedViewsDrawer from './LinkedViewsDrawer';
+import type { TopologyNode } from '../../../types/topology';
+
+/** 读取画布注入的关联查看组件列表 */
+function getLinkedViews(data: Record<string, unknown>): TopologyNode[] {
+  const views = data?._linkedViews;
+  return Array.isArray(views) ? (views as TopologyNode[]) : [];
+}
 
 /**
  * 四侧连接点组件：为节点提供上/下/左/右各方向的 source 和 target Handle。
@@ -176,6 +184,9 @@ export function withScalable(Component: React.FC<NodeProps>): React.FC<NodeProps
           {isDesignMode && <LossFieldBadge data={data} />}
         </div>
         
+        {/* 关联查看组件抽屉（放在缩放区域外，保持固定尺寸） */}
+        <LinkedViewsDrawer views={getLinkedViews(data)} mode="design" />
+
         {/* 缩放手柄 */}
         <div {...cornerHandleProps} style={{ top: -4, left: -4, cursor: 'nwse-resize' }} />
         <div {...cornerHandleProps} style={{ top: -4, right: -4, cursor: 'nesw-resize' }} />
@@ -229,6 +240,8 @@ export function withoutScalable(Component: React.FC<NodeProps>): React.FC<NodePr
       >
         <StaticHandles />
         <Component {...props} />
+        {/* 关联查看组件抽屉 */}
+        <LinkedViewsDrawer views={getLinkedViews(data)} mode="monitor" />
       </div>
     );
   };
