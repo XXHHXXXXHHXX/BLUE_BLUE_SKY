@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { type NodeProps, Handle, Position } from '@xyflow/react';
 import { useTopologyStore } from '../../../stores/topologyStore';
 import { getNodeLossFieldAnnotation } from '../../../services/lossCalculation';
 import LinkedViewsDrawer from './LinkedViewsDrawer';
+import { useNodeScaleContext } from './NodeScaleContext';
 import type { TopologyNode } from '../../../types/topology';
 
 /** 读取画布注入的关联查看组件列表 */
@@ -85,19 +86,84 @@ const LossFieldBadge: React.FC<{ data: Record<string, unknown> }> = ({ data }) =
   );
 };
 
+/** 读取当前节点缩放：优先使用画布传入的上下文，未提供时回退到 topologyStore */
+function useNodeScale(nodeId: string): [number, (id: string, scale: number) => void] {
+  const ctx = useNodeScaleContext();
+  const storeScale = useTopologyStore((s) => s.nodeScales[nodeId] ?? 1);
+  const storeSetNodeScale = useTopologyStore((s) => s.setNodeScale);
+  if (ctx) {
+    return [ctx.nodeScales[nodeId] ?? 1, ctx.setNodeScale ?? storeSetNodeScale];
+  }
+  return [storeScale, storeSetNodeScale];
+}
+
+/**
+ * 缩放容器：外层尺寸严格等于「内容原始尺寸 × 缩放比例」，
+ * 内层用 transform 缩放。
+ *
+ * 这样 React Flow 测量到的节点尺寸与实际可见尺寸一致，
+ * 不会出现「外面还有一层透明边框」以及连线吸附在未缩放位置的问题。
+ */
+const ScaledContent: React.FC<{
+  scale: number;
+  children: React.ReactNode;
+}> = ({ scale, children }) => {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+
+  // 测量内容原始尺寸（transform 不影响 offsetWidth/offsetHeight）
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    const measure = () => {
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      if (w > 0 && h > 0) {
+        setNatural((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
+      }
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div
+      className="scalable-node-size"
+      style={{
+        position: 'relative',
+        width: natural ? Math.round(natural.w * scale) : undefined,
+        height: natural ? Math.round(natural.h * scale) : undefined,
+      }}
+    >
+      <div
+        ref={contentRef}
+        className="scalable-node-content"
+        style={{
+          // 按内容自然宽度渲染，不受外层（已被缩放）宽度约束，避免测量值随缩放抖动
+          width: 'max-content',
+          transform: `scale(${scale})`,
+          transformOrigin: 'top left',
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+};
+
 /**
  * HOC: 给节点添加缩放功能和关联高亮
- * - transform: scale() 等比例缩放节点内容
+ * - 外层尺寸随缩放变化，避免透明边框与连线错位
  * - hover 时在四个角显示缩放手柄，拖拽可等比例缩放
  * - _highlighted 标记时显示高亮边框
- * 
- * 关键点：Handle 放在缩放区域之外，这样无论节点如何缩放，
- * 连线的箭头始终吸附在相同的位置（节点边缘固定位置）
  */
 export function withScalable(Component: React.FC<NodeProps>): React.FC<NodeProps> {
   const WrappedComponent: React.FC<NodeProps> = (props) => {
-    const scale = useTopologyStore((s) => s.nodeScales[props.id] ?? 1);
-    const setNodeScale = useTopologyStore((s) => s.setNodeScale);
+    const [scale, setNodeScale] = useNodeScale(props.id);
     const data = props.data as Record<string, unknown>;
     const highlighted = data?._highlighted === true;
     const isDesignMode = data?._mode === 'design';
@@ -169,21 +235,15 @@ export function withScalable(Component: React.FC<NodeProps>): React.FC<NodeProps
       >
         {/* Handle 放在缩放区域之外，保持固定位置 */}
         <ScalableHandles />
-        
-        {/* 内容区域：应用缩放 */}
-        <div
-          className="scalable-node-content"
-          style={{
-            transform: `scale(${scale})`,
-            transformOrigin: 'top left',
-          }}
-        >
+
+        {/* 内容区域：外层尺寸随缩放变化 */}
+        <ScaledContent scale={scale}>
           {/* 渲染节点内容 - Handle 由 HOC 统一管理 */}
           <Component {...props} />
           {/* 设计模式下标注链路损耗计算字段 */}
           {isDesignMode && <LossFieldBadge data={data} />}
-        </div>
-        
+        </ScaledContent>
+
         {/* 关联查看组件抽屉（放在缩放区域外，保持固定尺寸） */}
         <LinkedViewsDrawer views={getLinkedViews(data)} mode="design" />
 
@@ -225,11 +285,12 @@ const StaticHandles: React.FC = () => (
 );
 
 /**
- * HOC: 不启用缩放的节点包装器
- * 用于监控页面和分身页面，禁用缩放功能
+ * HOC: 不启用缩放手柄的节点包装器
+ * 用于监控页面和分身页面：仍按设计页保存的缩放比例展示（只读），但不提供拖拽缩放手柄。
  */
 export function withoutScalable(Component: React.FC<NodeProps>): React.FC<NodeProps> {
   const WrappedComponent: React.FC<NodeProps> = (props) => {
+    const [scale] = useNodeScale(props.id);
     const data = props.data as Record<string, unknown>;
     const highlighted = data?._highlighted === true;
 
@@ -239,7 +300,9 @@ export function withoutScalable(Component: React.FC<NodeProps>): React.FC<NodePr
         style={getNodeColorVar(data)}
       >
         <StaticHandles />
-        <Component {...props} />
+        <ScaledContent scale={scale}>
+          <Component {...props} />
+        </ScaledContent>
         {/* 关联查看组件抽屉 */}
         <LinkedViewsDrawer views={getLinkedViews(data)} mode="monitor" />
       </div>

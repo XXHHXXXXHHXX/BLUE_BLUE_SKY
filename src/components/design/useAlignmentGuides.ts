@@ -34,11 +34,13 @@ interface SnapResult {
   guides: AlignmentGuide[];
 }
 
-/** 获取节点矩形（考虑节点缩放比例） */
+/** 获取节点矩形
+ * 节点外层尺寸已按缩放比例设置，React Flow 的 measured 即为缩放后的实际尺寸，
+ * 这里不能再乘 scale，否则会重复计算。
+ */
 function getNodeBox(node: TopologyNode): NodeBox {
-  const scale = useDesignTopologyStore.getState().nodeScales[node.id] ?? 1;
-  const w = (node.measured?.width ?? DEFAULT_W) * scale;
-  const h = (node.measured?.height ?? DEFAULT_H) * scale;
+  const w = node.measured?.width ?? DEFAULT_W;
+  const h = node.measured?.height ?? DEFAULT_H;
   const x = node.position.x;
   const y = node.position.y;
   return {

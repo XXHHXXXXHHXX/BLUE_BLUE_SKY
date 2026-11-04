@@ -552,7 +552,13 @@ export const useDesignTopologyStore = create<DesignTopologyState>((set, get) => 
         const mainStore = useTopologyStore.getState();
         mainStore.updateNodes(data.nodes);
         mainStore.updateEdges(data.edges);
-        
+        // 同步节点缩放比例，否则监控页仍按 100% 显示
+        if (data.nodeScales) {
+          Object.entries(data.nodeScales).forEach(([nodeId, scale]) => {
+            mainStore.setNodeScale(nodeId, scale);
+          });
+        }
+
         // 3. 标记为已保存
         set({ hasUnsavedChanges: false });
         

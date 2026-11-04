@@ -16,6 +16,7 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { nodeTypes } from '../topology/nodes';
+import { NodeScaleProvider } from '../topology/nodes/NodeScaleContext';
 import PowerEdge from '../topology/edges/PowerEdge';
 import ControlEdge from '../topology/edges/ControlEdge';
 import SensorEdge from '../topology/edges/SensorEdge';
@@ -55,6 +56,8 @@ const DesignCanvasInner: React.FC = () => {
     discardChanges,
     reverseEdge,
     toggleEdgeLossEnabled,
+    nodeScales,
+    setNodeScale,
   } = useDesignTopologyStore();
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
@@ -330,6 +333,7 @@ const DesignCanvasInner: React.FC = () => {
     <div style={{ width: '100%', height: '100%', display: 'flex' }}>
       <ModulePalette />
       <div ref={reactFlowWrapper} style={{ flex: 1, position: 'relative' }}>
+        <NodeScaleProvider value={{ nodeScales, setNodeScale }}>
         <ReactFlow
           nodes={processedNodes}
           edges={designEdges}
@@ -371,6 +375,7 @@ const DesignCanvasInner: React.FC = () => {
             hasUnsavedChanges={hasUnsavedChanges}
           />
         </ReactFlow>
+        </NodeScaleProvider>
 
         {/* 拖拽对齐参考线：贯穿画布的辅助线 */}
         {alignmentGuides.map((g, idx) => {

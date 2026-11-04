@@ -11,6 +11,7 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { staticNodeTypes } from './nodes';
+import { NodeScaleProvider } from './nodes/NodeScaleContext';
 import PowerEdge from './edges/PowerEdge';
 import ControlEdge from './edges/ControlEdge';
 import SensorEdge from './edges/SensorEdge';
@@ -46,6 +47,7 @@ const CloneCanvas: React.FC<CloneCanvasProps> = ({ initialTopologyId }) => {
     setSelectedNodeId,
     loadTopologiesList,
     switchTopology,
+    nodeScales,
   } = useCloneTopologyStore();
 
   // 监控状态现在存储在 sessionStorage 中，每个标签页独立
@@ -236,6 +238,7 @@ const CloneCanvas: React.FC<CloneCanvasProps> = ({ initialTopologyId }) => {
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#fff' }}>
+      <NodeScaleProvider value={{ nodeScales }}>
       <ReactFlow
         nodes={processedNodes}
         edges={processedEdges}
@@ -257,6 +260,7 @@ const CloneCanvas: React.FC<CloneCanvasProps> = ({ initialTopologyId }) => {
         <MiniMap />
         <CloneToolbar />
       </ReactFlow>
+      </NodeScaleProvider>
 
       <CloneNodeDetailPanel
         open={selectedNodeId !== null}

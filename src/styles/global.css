@@ -441,9 +441,15 @@ html, body, #root {
   position: relative;
 }
 
-/* 缩放内容区域：保持固定尺寸，内部内容缩放 */
-.scalable-node-content {
+/* 缩放外层：尺寸由 JS 按「内容原始尺寸 × 缩放比例」设置，与可见内容一致。
+   内层按原始尺寸布局并整体 transform 缩放，因此会溢出外层，需允许溢出显示。 */
+.scalable-node-size {
   position: relative;
+  overflow: visible;
+}
+
+/* 缩放内容区域：按原始尺寸渲染后整体 transform 缩放 */
+.scalable-node-content {
   /* 基础尺寸，与 .hardware-node 的 min-width 一致 */
   min-width: 200px;
 }

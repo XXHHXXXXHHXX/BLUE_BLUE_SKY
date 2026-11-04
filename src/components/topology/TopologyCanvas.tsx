@@ -11,6 +11,7 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { staticNodeTypes } from './nodes';
+import { NodeScaleProvider } from './nodes/NodeScaleContext';
 import PowerEdge from './edges/PowerEdge';
 import ControlEdge from './edges/ControlEdge';
 import SensorEdge from './edges/SensorEdge';
@@ -35,6 +36,7 @@ const TopologyCanvas: React.FC = () => {
     onNodesChange,
     onEdgesChange,
     setSelectedNodeIds,
+    nodeScales,
   } = useTopologyStore();
 
   // 从 monitorStore 获取监控状态
@@ -198,6 +200,7 @@ const TopologyCanvas: React.FC = () => {
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#fff' }}>
+      <NodeScaleProvider value={{ nodeScales }}>
       <ReactFlow
         nodes={processedNodes}
         edges={processedEdges}
@@ -219,6 +222,7 @@ const TopologyCanvas: React.FC = () => {
         <MiniMap />
         <Toolbar />
       </ReactFlow>
+      </NodeScaleProvider>
 
       <NodeDetailPanel
         open={selectedNodeId !== null}
