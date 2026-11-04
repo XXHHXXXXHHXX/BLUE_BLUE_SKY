@@ -201,10 +201,11 @@ const CPUNode: React.FC<NodeProps> = (props) => {
           </div>
           <div className="node-body">
             {orderedFixedFieldKeys.map(renderField)}
+            {/* 自定义字段始终显示在「电源域详情」按钮上方，按钮固定在卡片最下方 */}
+            <CustomFieldsRenderer data={props.data as Record<string, unknown>} />
             <Button size="small" type="primary" onClick={handleOpenDetail} loading={detailLoading}>
               电源域详情
             </Button>
-            <CustomFieldsRenderer data={props.data as Record<string, unknown>} />
           </div>
         </div>
       </div>
