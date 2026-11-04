@@ -21,7 +21,7 @@ import TopologyOverviewPanel from '../panels/TopologyOverviewPanel';
 import { useTopologyStore } from '../../stores/topologyStore';
 import { useMonitorStore } from '../../stores/monitorStore';
 import { calculateAggregatorStats, AGGREGATOR_NODE_TYPE } from '../../services/lossCalculation';
-import { collectLinkedViews } from '../../utils/linkedViews';
+import { collectLinkedViews, collectFoldedViewIds } from '../../utils/linkedViews';
 import type { TopologyNode } from '../../types/topology';
 import type { CPUData } from '../../types/power';
 
@@ -97,19 +97,23 @@ const TopologyCanvas: React.FC = () => {
 
   // 关联查看组件：与每个节点相连的「查看组件」列表（用于节点旁的抽屉）
   const linkedViews = useMemo(() => collectLinkedViews(nodes, edges), [nodes, edges]);
+  // 已折叠进抽屉的查看组件不再单独显示在画布上
+  const foldedViewIds = useMemo(() => collectFoldedViewIds(linkedViews), [linkedViews]);
 
   // 注入高亮标记和控制回调到节点 data
   const processedNodes = useMemo(
     () =>
-      nodes.map((n) => {
-        const extra: Record<string, unknown> = {
-          _highlighted: highlightedNodeIds.has(n.id),
-          ...(aggregatorStats.has(n.id) ? { _aggregatorStats: aggregatorStats.get(n.id) } : {}),
-          ...(linkedViews.has(n.id) ? { _linkedViews: linkedViews.get(n.id) } : {}),
-        };
-        return { ...n, data: { ...n.data, ...extra } };
-      }),
-    [nodes, highlightedNodeIds, aggregatorStats, linkedViews],
+      nodes
+        .filter((n) => !foldedViewIds.has(n.id))
+        .map((n) => {
+          const extra: Record<string, unknown> = {
+            _highlighted: highlightedNodeIds.has(n.id),
+            ...(aggregatorStats.has(n.id) ? { _aggregatorStats: aggregatorStats.get(n.id) } : {}),
+            ...(linkedViews.has(n.id) ? { _linkedViews: linkedViews.get(n.id) } : {}),
+          };
+          return { ...n, data: { ...n.data, ...extra } };
+        }),
+    [nodes, highlightedNodeIds, aggregatorStats, linkedViews, foldedViewIds],
   );
 
   // 与链路聚合器相连的边：损耗由聚合器卡片汇总，边上不再显示单条损耗
@@ -121,18 +125,20 @@ const TopologyCanvas: React.FC = () => {
     return new Set(edges.filter((e) => ids.has(e.source) || ids.has(e.target)).map((e) => e.id));
   }, [nodes, edges]);
 
-  // 注入高亮标记到边 data
+  // 注入高亮标记到边 data（隐藏与已折叠查看组件相连的边）
   const processedEdges = useMemo(
     () =>
-      edges.map((e) => ({
-        ...e,
-        data: {
-          ...e.data!,
-          _highlighted: highlightedEdgeIds.has(e.id),
-          ...(aggregatorEdgeIds.has(e.id) ? { _aggregatedLoss: true } : {}),
-        },
-      })),
-    [edges, highlightedEdgeIds, aggregatorEdgeIds],
+      edges
+        .filter((e) => !foldedViewIds.has(e.source) && !foldedViewIds.has(e.target))
+        .map((e) => ({
+          ...e,
+          data: {
+            ...e.data!,
+            _highlighted: highlightedEdgeIds.has(e.id),
+            ...(aggregatorEdgeIds.has(e.id) ? { _aggregatedLoss: true } : {}),
+          },
+        })),
+    [edges, highlightedEdgeIds, aggregatorEdgeIds, foldedViewIds],
   );
 
   const handleSelectionChange = useCallback(

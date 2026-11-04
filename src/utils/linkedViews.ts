@@ -43,3 +43,17 @@ export function collectLinkedViews(
 
   return result;
 }
+
+/**
+ * 收集已折叠进抽屉的查看组件 id。
+ *
+ * 这些查看组件已经通过宿主节点旁的抽屉展示，不应再单独出现在画布白板上，
+ * 其相关连线也应一并隐藏。
+ */
+export function collectFoldedViewIds(linkedViews: Map<string, TopologyNode[]>): Set<string> {
+  const ids = new Set<string>();
+  linkedViews.forEach((views) => {
+    views.forEach((v) => ids.add(v.id));
+  });
+  return ids;
+}
