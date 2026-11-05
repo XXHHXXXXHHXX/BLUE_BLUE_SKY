@@ -309,9 +309,22 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
 
   // ==================== 自定义参数模式（控制模块） ====================
 
-  // 解析控制命令中的参数占位符，同步到参数列表
+  // 解析控制命令中的参数占位符，同步到参数列表。
+  // 同时解析专属命令按钮的命令，保证按钮里用到的占位符也有对应输入框
   const handleControlParseParams = useCallback(() => {
-    const names = extractCommandParams(controlConfig.controlShell || '');
+    const names: string[] = [];
+    const seen = new Set<string>();
+    const collect = (shell: string) => {
+      extractCommandParams(shell || '').forEach((name) => {
+        if (!seen.has(name)) {
+          seen.add(name);
+          names.push(name);
+        }
+      });
+    };
+    collect(controlConfig.controlShell || '');
+    (controlConfig.buttons || []).forEach((btn) => collect(btn.shell || ''));
+
     if (names.length === 0) {
       message.info('命令中未找到 {参数} 占位符');
       return;
@@ -325,7 +338,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
       return { ...prev, params: merged };
     });
     message.success(`已解析 ${names.length} 个参数`);
-  }, [controlConfig.controlShell]);
+  }, [controlConfig.controlShell, controlConfig.buttons]);
 
   // 更新某个控制参数定义（显示名 / 是否加密）
   const handleControlParamChange = useCallback((idx: number, updates: Partial<ViewParamDef>) => {
@@ -1429,7 +1442,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
             /* 自定义参数配置 */
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <Text style={{ display: 'block', fontSize: 12 }}>
-                自定义参数模式：在监控页面会要求填写这些参数，然后点击下发执行命令。命令使用 {'{参数名}'} 占位符；点击“解析参数”可自动从命令中提取参数。还可添加“专属命令按钮”，每个按钮有独立命令（同样支持占位符），点击后直接下发。
+                自定义参数模式：在监控页面会要求填写这些参数，然后点击下发执行命令。命令使用 {'{参数名}'} 占位符；点击“解析参数”可自动从全局命令和专属命令按钮中提取参数。还可添加“专属命令按钮”，每个按钮有独立命令（同样支持占位符），点击后直接下发。每个按钮只校验自己命令里用到的参数，与全局命令的参数输入互不影响。
               </Text>
               <Button size="small" icon={<ReloadOutlined />} onClick={handleControlParseParams}>
                 解析参数

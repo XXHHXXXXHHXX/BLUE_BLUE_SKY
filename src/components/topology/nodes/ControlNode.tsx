@@ -8,6 +8,7 @@ import { getNodeDisplayLabel } from '../../../utils/formatters';
 import type { ControlConfig, ControlOption, ControlOptionItem, ViewParamDef } from '../../../types/topology';
 import { useBMCSessionStore } from '../../../stores/bmcSessionStore';
 import { executeControlCommand, executeCustomControlCommand } from '../../../services/backendApi';
+import { extractCommandParams } from '../../../utils/commandParams';
 
 /** 生成步进点标记：0~100 步进 25 → {0,25,50,75,100} */
 function buildSliderMarks(min: number, max: number, step: number, unit: string): Record<number, React.ReactNode> {
@@ -98,13 +99,29 @@ const ControlNode: React.FC<NodeProps> = (props) => {
   const params = controlConfig.params || [];
   const buttons = controlConfig.buttons || [];
 
-  /** 校验自定义参数是否已填齐 */
-  const validateParams = useCallback(
-    (list: ViewParamDef[]): string | null => {
-      const missing = list.filter((p) => !paramValues[p.name] || !paramValues[p.name].trim());
+  /** 某个命令模板实际需要的参数：只包含命令里出现、且有对应输入框的参数。
+   *  这样专属命令按钮只校验自己命令用到的参数，不会被全局命令的参数拖住 */
+  const getRequiredParams = useCallback(
+    (shell: string): ViewParamDef[] => {
+      const names = extractCommandParams(shell || '');
+      if (names.length === 0) return [];
+      const byName = new Map(params.map((p) => [p.name, p]));
+      return names
+        .map((name) => byName.get(name))
+        .filter((p): p is ViewParamDef => !!p);
+    },
+    [params],
+  );
+
+  /** 校验某个命令模板所需的参数是否已填齐，返回缺失参数名（无缺失返回 null） */
+  const getMissingParams = useCallback(
+    (shell: string): string | null => {
+      const missing = getRequiredParams(shell).filter(
+        (p) => !paramValues[p.name] || !paramValues[p.name].trim(),
+      );
       return missing.length > 0 ? missing.map((p) => p.label || p.name).join('、') : null;
     },
-    [paramValues],
+    [getRequiredParams, paramValues],
   );
 
   /** 选项展示：数字带单位，字符串忽略单位 */
@@ -181,7 +198,8 @@ const ControlNode: React.FC<NodeProps> = (props) => {
         message.warning('未连接 BMC，请先在监控配置中连接 BMC');
         return;
       }
-      const missing = validateParams(params);
+      // 只校验当前这条命令实际用到的参数，未用到的输入框不影响按钮可用性
+      const missing = getMissingParams(finalShell);
       if (missing) {
         message.warning(`请填写参数：${missing}`);
         return;
@@ -200,10 +218,10 @@ const ControlNode: React.FC<NodeProps> = (props) => {
         ),
         okText: '确认下发',
         cancelText: '取消',
-        onOk: () => doSendCustom(shell),
+        onOk: () => doSendCustom(finalShell),
       });
     },
-    [command, bmcConfig, validateParams, params, doSendCustom],
+    [command, bmcConfig, getMissingParams, doSendCustom],
   );
 
   /** 点击控制时先弹确认框，确认后才下发，避免误操作 */
@@ -314,7 +332,7 @@ const ControlNode: React.FC<NodeProps> = (props) => {
                   size="small"
                   type="primary"
                   loading={sending}
-                  disabled={params.length > 0 && validateParams(params) !== null}
+                  disabled={getMissingParams(command) !== null}
                   onClick={() => handleSendCustom(command)}
                   style={{ borderColor: '#d3adf7' }}
                 >
@@ -330,7 +348,8 @@ const ControlNode: React.FC<NodeProps> = (props) => {
                       size="small"
                       type="default"
                       loading={sending}
-                      disabled={params.length > 0 && validateParams(params) !== null}
+                      // 专属命令按钮只校验自己命令里的参数，与全局命令的参数输入互不影响
+                      disabled={getMissingParams(btn.shell || command) !== null}
                       onClick={() => handleSendCustom(btn.shell)}
                       style={{ borderColor: '#d3adf7' }}
                     >
