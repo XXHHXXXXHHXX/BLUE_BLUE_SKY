@@ -149,6 +149,11 @@ def analyze(data: dict) -> dict:
     for r in results:
         if target == 'score':
             y_list.append(r.get('score', 0))
+        elif isinstance(target, str) and target.startswith('score:'):
+            # 命名分数：score:<分数名>
+            score_name = target[len('score:'):]
+            scores = r.get('scores') or {}
+            y_list.append(scores.get(score_name, 0) if score_name in scores else 0)
         else:
             mr = r.get('monitorResults', {})
             if target in mr:

@@ -31,6 +31,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
+import { collectScoreNames } from '../../utils/scoreParsing';
 import BaselineComparisonPanel from './BaselineComparisonPanel';
 import MultiXYChartPanel from './MultiXYChartPanel';
 import AIAnalysisAssistant from './AIAnalysisAssistant';
@@ -106,6 +107,10 @@ const DataAnalysisPanel: React.FC = () => {
   const targetOptions = useMemo(() => {
     const opts = [{ label: '性能分数 (score)', value: 'score' }];
     if (selectedReport?.results?.length) {
+      // 命名多分数：每个分数名作为独立分析目标
+      collectScoreNames(selectedReport.results).forEach((name) => {
+        opts.push({ label: `分数: ${name}`, value: `score:${name}` });
+      });
       const firstResult = selectedReport.results[0];
       const monitorIds = firstResult?.monitorResults ? Object.keys(firstResult.monitorResults) : [];
       monitorIds.forEach((id) => {

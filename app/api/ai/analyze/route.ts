@@ -112,6 +112,26 @@ function buildFolderTree(folders: ReportFolderData[], parentId: string | null = 
 
 function summarizeReport(report: TestReportData) {
   const scores = report.results?.map((r) => r.score) || [];
+  // 命名多分数：给出每个分数名的取值范围，便于 AI 分析引用
+  const namedScores: Record<string, { min: number; max: number; avg: number }> = {};
+  const scoreNames: string[] = [];
+  (report.results || []).forEach((r) => {
+    Object.keys((r as { scores?: Record<string, number> }).scores || {}).forEach((name) => {
+      if (!scoreNames.includes(name)) scoreNames.push(name);
+    });
+  });
+  scoreNames.forEach((name) => {
+    const values = (report.results || [])
+      .map((r) => (r as { scores?: Record<string, number> }).scores?.[name])
+      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+    if (values.length) {
+      namedScores[name] = {
+        min: Math.min(...values),
+        max: Math.max(...values),
+        avg: values.reduce((a, b) => a + b, 0) / values.length,
+      };
+    }
+  });
   return {
     id: report.id,
     name: report.name,
@@ -131,6 +151,7 @@ function summarizeReport(report: TestReportData) {
           avg: scores.reduce((a, b) => a + b, 0) / scores.length,
         }
       : null,
+    namedScoreRanges: Object.keys(namedScores).length ? namedScores : undefined,
   };
 }
 

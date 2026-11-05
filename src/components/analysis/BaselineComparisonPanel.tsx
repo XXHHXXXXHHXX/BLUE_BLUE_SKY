@@ -31,6 +31,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
+import { collectScoreNames } from '../../utils/scoreParsing';
 
 const { Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -111,6 +112,10 @@ const BaselineComparisonPanel: React.FC = () => {
   const targetOptions = useMemo(() => {
     const opts = [{ label: '性能分数 (score)', value: 'score' }];
     if (baselineReport?.results?.length) {
+      // 命名多分数：每个分数名作为独立对比指标
+      collectScoreNames(baselineReport.results).forEach((name) => {
+        opts.push({ label: `分数: ${name}`, value: `score:${name}` });
+      });
       const firstResult = baselineReport.results[0];
       const monitorIds = firstResult?.monitorResults ? Object.keys(firstResult.monitorResults) : [];
       monitorIds.forEach((id) => {
@@ -159,6 +164,11 @@ const BaselineComparisonPanel: React.FC = () => {
 
   function getTargetValue(result: any, target: string): number {
     if (target === 'score') return result.score ?? 0;
+    // 命名分数：score:<分数名>
+    if (target.startsWith('score:')) {
+      const name = target.slice('score:'.length);
+      return result.scores?.[name] ?? 0;
+    }
     const mr = result.monitorResults;
     if (mr && mr[target]) return mr[target].averageValue ?? 0;
     return 0;

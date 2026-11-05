@@ -26,11 +26,12 @@ import ReactECharts from 'echarts-for-react';
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
 import type { TestResult } from '../../stores/testStore';
 import ReportPicker from './ReportPicker';
+import { collectScoreNames } from '../../utils/scoreParsing';
 
 const { Text } = Typography;
 const { Option } = Select;
 
-type SeriesType = 'score' | 'monitor' | 'param' | 'computed';
+type SeriesType = 'score' | 'namedScore' | 'monitor' | 'param' | 'computed';
 
 interface SeriesOption {
   key: string;
@@ -159,6 +160,11 @@ function getSeriesOptions(report?: TestReport): SeriesOption[] {
   const firstResult = report.results[0];
   const opts: SeriesOption[] = [{ key: 'score', label: '性能分数 (score)', type: 'score' }];
 
+  // 命名多分数：每个分数名作为独立序列
+  collectScoreNames(report.results).forEach((name) => {
+    opts.push({ key: `score:${name}`, label: `分数: ${name}`, type: 'namedScore', id: name });
+  });
+
   Object.keys(firstResult.monitorResults || {}).forEach((id) => {
     const name = firstResult.monitorResults?.[id]?.commandName || id;
     opts.push({ key: `monitor:${id}`, label: `监控: ${name}`, type: 'monitor', id });
@@ -179,6 +185,7 @@ function getSeriesOptions(report?: TestReport): SeriesOption[] {
 function getSeriesValue(result: TestResult, series?: SeriesOption | null, allOptions?: SeriesOption[]): number | null {
   if (!series) return null;
   if (series.type === 'score') return result.score ?? null;
+  if (series.type === 'namedScore') return result.scores?.[series.id!] ?? null;
   if (series.type === 'monitor') {
     const mr = result.monitorResults?.[series.id!];
     return mr ? (mr.averageValue ?? null) : null;
