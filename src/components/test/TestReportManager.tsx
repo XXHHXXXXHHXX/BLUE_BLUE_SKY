@@ -967,16 +967,25 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          gap: 8,
           width: '100%',
+          minWidth: 0,
           paddingRight: 8,
         }}
       >
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
-          {isDefault ? <FolderOutlined style={{ color: '#1890ff' }} /> : <FolderOpenOutlined style={{ color: '#faad14' }} />}
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.title}</span>
-          <Tag style={{ marginLeft: 4 }}>{count}</Tag>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, overflow: 'hidden' }}>
+          <span style={{ display: 'flex', flexShrink: 0 }}>
+            {isDefault ? <FolderOutlined style={{ color: '#1890ff' }} /> : <FolderOpenOutlined style={{ color: '#faad14' }} />}
+          </span>
+          <span
+            title={node.title}
+            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}
+          >
+            {node.title}
+          </span>
+          <Tag style={{ marginLeft: 4, flexShrink: 0 }}>{count}</Tag>
         </span>
-        <span style={{ display: 'flex', gap: 4 }}>
+        <span style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
           <Tooltip title="添加子目录">
             <Button
               type="text"
@@ -1172,10 +1181,19 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
         ]}
       >
         <Row gutter={16}>
-          <Col span={6}>
-            <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Col xs={24} md={8} lg={6}>
+            <div
+              style={{
+                marginBottom: 8,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 8,
+              }}
+            >
               <Text strong>报告目录</Text>
-              <Space>
+              <Space size={4} wrap>
                 <Button
                   size="small"
                   icon={<ImportOutlined />}
@@ -1194,6 +1212,7 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
               </Space>
             </div>
             <Tree
+              className="report-folder-tree"
               treeData={folderTree}
               titleRender={renderTreeTitle}
               selectedKeys={selectedFolderId ? [selectedFolderId] : []}
@@ -1206,11 +1225,17 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
               }}
               showLine
               blockNode
-              style={{ background: '#fafafa', padding: 8, borderRadius: 4, minHeight: 300 }}
+              style={{
+                background: '#fafafa',
+                padding: 8,
+                borderRadius: 4,
+                minHeight: 300,
+                overflowX: 'hidden',
+              }}
             />
           </Col>
 
-          <Col span={18}>
+          <Col xs={24} md={16} lg={18}>
             <Space direction="vertical" style={{ width: '100%' }} size="middle">
               <Space direction="vertical" style={{ width: '100%' }} size="small">
                 <Input
