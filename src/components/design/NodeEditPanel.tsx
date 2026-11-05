@@ -1140,7 +1140,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                 <ApartmentOutlined /> 命令获取电源域数据
               </Title>
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-                配置一条命令，监控页点击"电源域详情"时执行，命令返回逗号分隔的值序列（如 100,200），按下方字段顺序一一映射到电源域
+                配置一条命令，监控页点击"电源域详情"时执行。命令在最后一行输出逗号分隔的值序列（如 100,200），系统会自动跳过前面的执行日志，按下方字段顺序一一映射到电源域
               </Text>
 
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 12 }}>

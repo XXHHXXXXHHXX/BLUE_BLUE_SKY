@@ -8,6 +8,7 @@ import CustomFieldsRenderer from './CustomFieldsRenderer';
 import { useNodeFieldConfig } from './useNodeFieldConfig';
 import { useBMCSessionStore } from '../../../stores/bmcSessionStore';
 import { executeViewCommand } from '../../../services/backendApi';
+import { parseCommandValues } from '../../../utils/commandOutput';
 import {
   formatVoltage,
   formatCurrent,
@@ -50,20 +51,6 @@ const CPUNode: React.FC<NodeProps> = (props) => {
 
   const [detailLoading, setDetailLoading] = useState(false);
 
-  // 解析命令输出：按逗号（含中英文逗号）拆分值序列
-  const parseCommandValues = useCallback((stdout: string): (number | null)[] => {
-    const raw = (stdout || '').trim();
-    if (!raw) return [];
-    return raw
-      .split(/[,，\s]+/)
-      .map((s) => s.trim())
-      .filter((s) => s !== '')
-      .map((s) => {
-        const num = Number(s);
-        return Number.isNaN(num) ? null : num;
-      });
-  }, []);
-
   // 点击"电源域详情"：若配置了电源域获取命令则执行命令并映射值，否则展示已有数据
   const handleOpenDetail = useCallback(async () => {
     const apiConfig = data.apiConfig;
@@ -102,7 +89,7 @@ const CPUNode: React.FC<NodeProps> = (props) => {
         return;
       }
 
-      const values = parseCommandValues(res.stdout || '');
+      const values = parseCommandValues(res.stdout || '', fields.length);
       const powerDomains = fields.map((f, i) => ({
         name: f.label || f.name,
         value: values[i] !== undefined ? values[i] : null,
@@ -122,7 +109,7 @@ const CPUNode: React.FC<NodeProps> = (props) => {
     } finally {
       setDetailLoading(false);
     }
-  }, [data.apiConfig, data.cpuData, props.id, parseCommandValues]);
+  }, [data.apiConfig, data.cpuData, props.id]);
 
   const tempLevel = getTemperatureLevel(temperature);
   const tempClass = tempLevel === 'critical' 

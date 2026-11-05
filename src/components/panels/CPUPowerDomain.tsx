@@ -9,6 +9,7 @@ import AMUEventList from '../charts/AMUEventList';
 import { useTopologyStore } from '../../stores/topologyStore';
 import { useBMCSessionStore } from '../../stores/bmcSessionStore';
 import { executeViewCommand } from '../../services/backendApi';
+import { parseCommandValues } from '../../utils/commandOutput';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import type { CPUData, CPUPowerDomain as CPUPowerDomainType } from '../../types/power';
 
@@ -41,20 +42,6 @@ interface CommandRow {
   key: string;
   name: string;
   value: number | null;
-}
-
-/** 解析命令输出：按逗号（含中英文逗号）或空白拆分值序列 */
-function parseCommandValues(stdout: string): (number | null)[] {
-  const raw = (stdout || '').trim();
-  if (!raw) return [];
-  return raw
-    .split(/[,，\s]+/)
-    .map((s) => s.trim())
-    .filter((s) => s !== '')
-    .map((s) => {
-      const num = Number(s);
-      return Number.isNaN(num) ? null : num;
-    });
 }
 
 const CPUPowerDomain: React.FC<CPUPowerDomainProps> = ({
@@ -147,7 +134,7 @@ const CPUPowerDomain: React.FC<CPUPowerDomainProps> = ({
         return;
       }
 
-      const values = parseCommandValues(res.stdout || '');
+      const values = parseCommandValues(res.stdout || '', commandFields.length);
       setCommandRowsState(
         commandFields.map((f, i) => ({
           name: f.label || f.name,
