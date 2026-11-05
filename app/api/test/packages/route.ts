@@ -129,6 +129,73 @@ const DEMO_README = `# Demo 功耗测试包
 - 每个功耗点会有 ±100 分的随机波动
 `;
 
+// 多分数演示用例包的内容
+const MULTI_SCORE_RUN_SH = `#!/bin/bash
+# 多分数演示用例包 - run.sh
+# 参数 $1: 当前功耗值（W）
+# 输出：命名多分数 {"scores": {"CPU性能": n, "内存带宽": n, "IO吞吐": n}}
+
+POWER=$1
+
+echo "=========================================="
+echo "Blue Sky 多分数演示用例包"
+echo "当前功耗: \${POWER}W"
+echo "开始执行测试..."
+echo "=========================================="
+
+# 模拟测试耗时
+sleep 1
+
+# 模拟三个维度的性能分数：功耗越高，分数越低
+CPU_SCORE=$((10000 - POWER * 15 + RANDOM % 100))
+MEM_SCORE=$((8000 - POWER * 10 + RANDOM % 100))
+IO_SCORE=$((6000 - POWER * 8 + RANDOM % 100))
+
+# 保证分数非负
+[ \${CPU_SCORE} -lt 0 ] && CPU_SCORE=0
+[ \${MEM_SCORE} -lt 0 ] && MEM_SCORE=0
+[ \${IO_SCORE} -lt 0 ] && IO_SCORE=0
+
+echo "CPU性能: \${CPU_SCORE}"
+echo "内存带宽: \${MEM_SCORE}"
+echo "IO吞吐: \${IO_SCORE}"
+
+# 最后一行输出 JSON（必需）：命名多分数格式
+echo "{\\"scores\\": {\\"CPU性能\\": \${CPU_SCORE}, \\"内存带宽\\": \${MEM_SCORE}, \\"IO吞吐\\": \${IO_SCORE}}}"
+`;
+
+const MULTI_SCORE_README = `# 多分数演示用例包
+
+这是 Blue Sky 系统的多分数（命名分数）演示用例包。
+
+## 文件说明
+
+- run.sh: 测试执行脚本
+- README.md: 本说明文件
+
+## 测试逻辑
+
+1. 接收功耗值参数（$1）
+2. 模拟测试耗时（1 秒）
+3. 分别计算三个维度的分数，功耗越高分数越低：
+   - CPU性能 = 10000 - 功耗 × 15
+   - 内存带宽 = 8000 - 功耗 × 10
+   - IO吞吐   = 6000 - 功耗 × 8
+4. 最后一行输出命名多分数 JSON
+
+## 输出格式
+
+{"scores": {"CPU性能": 9850, "内存带宽": 7900, "IO吞吐": 5920}}
+
+系统会把每个名称解析为独立指标，并在测试面板、任务中心、报告、导出、
+数据分析等位置展示。
+
+## 兼容说明
+
+若只需要单个分数，仍可使用 {"score": 1234}；
+也可以同时给出主分数与明细：{"score": 9850, "scores": {...}}。
+`;
+
 /** 迁移旧数据：删除 testSuite 字段 */
 function migratePackages() {
   const index = loadIndex();
@@ -153,16 +220,18 @@ export async function GET(request: NextRequest) {
   migratePackages();
 
   if (action === 'download' && id) {
-    if (id === 'demo-power-test') {
-      // 动态生成并返回demo压缩包
+    if (id === 'demo-power-test' || id === 'demo-multi-score') {
+      // 动态生成并返回内置压缩包
+      const isMultiScore = id === 'demo-multi-score';
       const zip = new JSZip();
-      zip.file('run.sh', DEMO_RUN_SH);
-      zip.file('README.md', DEMO_README);
+      zip.file('run.sh', isMultiScore ? MULTI_SCORE_RUN_SH : DEMO_RUN_SH);
+      zip.file('README.md', isMultiScore ? MULTI_SCORE_README : DEMO_README);
       const zipContent = await zip.generateAsync({ type: 'nodebuffer' });
+      const filename = isMultiScore ? 'demo_multi_score.zip' : 'demo_power_test.zip';
       return new NextResponse(new Uint8Array(zipContent), {
         headers: {
           'Content-Type': 'application/zip',
-          'Content-Disposition': 'attachment; filename="demo_power_test.zip"',
+          'Content-Disposition': `attachment; filename="${filename}"`,
         },
       });
     }
@@ -199,6 +268,16 @@ export async function GET(request: NextRequest) {
       size: '约 2KB',
       createdAt: '2026-04-13',
       updatedAt: '2026-04-13',
+      builtin: true,
+    },
+    {
+      id: 'demo-multi-score',
+      name: '多分数演示用例包',
+      description: '演示 run.sh 返回命名多分数 {"scores": {"CPU性能": n, "内存带宽": n, "IO吞吐": n}}，可同时展示多个指标',
+      filename: 'demo_multi_score.zip',
+      size: '约 2KB',
+      createdAt: '2026-11-05',
+      updatedAt: '2026-11-05',
       builtin: true,
     },
     ...index.map((p) => ({ ...p, builtin: false })),

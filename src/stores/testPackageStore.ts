@@ -77,7 +77,7 @@ export const useTestPackageStore = create<TestPackageState>()(
     },
 
     removePackage: async (id) => {
-      if (id.startsWith('builtin-') || id === 'demo-power-test') return;
+      if (id.startsWith('builtin-') || id === 'demo-power-test' || id === 'demo-multi-score') return;
 
       const response = await fetch(`/api/test/packages?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',

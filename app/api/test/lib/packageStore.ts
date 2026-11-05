@@ -119,6 +119,86 @@ const DEMO_README = `# Demo 功耗测试包
 - 每个功耗点会有 ±100 分的随机波动
 `;
 
+// ========== 多分数演示用例包内容 ==========
+const MULTI_SCORE_RUN_SH = `#!/bin/bash
+# 多分数演示用例包 - run.sh
+# 参数 $1: 当前功耗值（W）
+# 输出：命名多分数 {"scores": {"CPU性能": n, "内存带宽": n, "IO吞吐": n}}
+
+POWER=$1
+
+echo "=========================================="
+echo "Blue Sky 多分数演示用例包"
+echo "当前功耗: \${POWER}W"
+echo "开始执行测试..."
+echo "=========================================="
+
+# 模拟测试耗时
+sleep 1
+
+# 模拟三个维度的性能分数：功耗越高，分数越低
+CPU_SCORE=$((10000 - POWER * 15 + RANDOM % 100))
+MEM_SCORE=$((8000 - POWER * 10 + RANDOM % 100))
+IO_SCORE=$((6000 - POWER * 8 + RANDOM % 100))
+
+# 保证分数非负
+[ \${CPU_SCORE} -lt 0 ] && CPU_SCORE=0
+[ \${MEM_SCORE} -lt 0 ] && MEM_SCORE=0
+[ \${IO_SCORE} -lt 0 ] && IO_SCORE=0
+
+echo "CPU性能: \${CPU_SCORE}"
+echo "内存带宽: \${MEM_SCORE}"
+echo "IO吞吐: \${IO_SCORE}"
+
+# 最后一行输出 JSON（必需）：命名多分数格式
+echo "{\\"scores\\": {\\"CPU性能\\": \${CPU_SCORE}, \\"内存带宽\\": \${MEM_SCORE}, \\"IO吞吐\\": \${IO_SCORE}}}"
+`;
+
+const MULTI_SCORE_README = `# 多分数演示用例包
+
+这是 Blue Sky 系统的多分数（命名分数）演示用例包。
+
+## 文件说明
+
+- run.sh: 测试执行脚本
+- README.md: 本说明文件
+
+## 测试逻辑
+
+1. 接收功耗值参数（\$1）
+2. 模拟测试耗时（1 秒）
+3. 分别计算三个维度的分数，功耗越高分数越低：
+   - CPU性能 = 10000 - 功耗 × 15
+   - 内存带宽 = 8000 - 功耗 × 10
+   - IO吞吐   = 6000 - 功耗 × 8
+4. 最后一行输出命名多分数 JSON
+
+## 输出格式
+
+\`\`\`json
+{"scores": {"CPU性能": 9850, "内存带宽": 7900, "IO吞吐": 5920}}
+\`\`\`
+
+系统会把每个名称解析为独立指标，并在以下位置展示：
+
+- 测试主面板结果表「分数」列（彩色标签）
+- 任务中心列表「分数」列（各分数取迭代最大值）
+- 任务详情与报告的趋势图（每个分数一条曲线）
+- 报告明细表与 Excel / AI 报告导出（按分数名展开独立列）
+- 数据分析 / 基线对比 / 自定义 XY 图表的指标下拉（「分数: 名称」）
+
+## 使用方法
+
+1. 在用例包库下载本包，或直接在功耗遍历测试中选择「多分数演示用例包」
+2. 设置起始功耗、终止功耗和步长
+3. 开始测试后即可看到多个分数
+
+## 兼容说明
+
+若只需要单个分数，仍可使用 \`{"score": 1234}\`；
+也可以同时给出主分数与明细：\`{"score": 9850, "scores": {...}}\`。
+`;
+
 /** 将用例包解析为服务器端 buffer + 文件名
  *  内置 demo 动态生成，其余从服务器文件系统读取，文件不会传输到浏览器
  */
@@ -129,6 +209,14 @@ export async function resolvePackage(id: string): Promise<{ buffer: Buffer; file
     zip.file('README.md', DEMO_README);
     const zipContent = await zip.generateAsync({ type: 'nodebuffer' });
     return { buffer: Buffer.from(zipContent), filename: 'demo_power_test.zip' };
+  }
+
+  if (id === 'demo-multi-score') {
+    const zip = new JSZip();
+    zip.file('run.sh', MULTI_SCORE_RUN_SH);
+    zip.file('README.md', MULTI_SCORE_README);
+    const zipContent = await zip.generateAsync({ type: 'nodebuffer' });
+    return { buffer: Buffer.from(zipContent), filename: 'demo_multi_score.zip' };
   }
 
   ensureDirs();

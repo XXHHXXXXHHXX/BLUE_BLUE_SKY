@@ -36,6 +36,12 @@ interface TestPackageLibraryProps {
   onClose: () => void;
 }
 
+/** 内置模板的输出格式示例（展开行展示，方便直接复制） */
+const BUILTIN_TEMPLATES: Record<string, string> = {
+  'demo-power-test': `{"score": 8500}`,
+  'demo-multi-score': `{"scores": {"CPU性能": 9850, "内存带宽": 7900, "IO吞吐": 5920}}`,
+};
+
 const TestPackageLibrary: React.FC<TestPackageLibraryProps> = ({
   visible,
   onClose,
@@ -131,7 +137,7 @@ const TestPackageLibrary: React.FC<TestPackageLibraryProps> = ({
       render: (text: string, record: TestPackage) => (
         <Space>
           <span>{text}</span>
-          {record.id.startsWith('builtin-') && <Tag color="blue">内置</Tag>}
+          {record.builtin && <Tag color="blue">内置</Tag>}
         </Space>
       ),
     },
@@ -171,7 +177,7 @@ const TestPackageLibrary: React.FC<TestPackageLibraryProps> = ({
             onClick={() => handleDownload(record.id, record.name)}
             title="下载"
           />
-          {!record.id.startsWith('builtin-') && (
+          {!record.builtin && (
             <Popconfirm
               title="确定删除？"
               onConfirm={() => handleDelete(record.id)}
@@ -289,15 +295,37 @@ const TestPackageLibrary: React.FC<TestPackageLibraryProps> = ({
               scroll={mainModal.tableScroll}
               expandable={{
                 expandedRowRender: (record) => (
-                  <Descriptions size="small" bordered column={2}>
-                    <Descriptions.Item label="ID">{record.id}</Descriptions.Item>
-                    <Descriptions.Item label="创建时间">{record.createdAt}</Descriptions.Item>
-                    <Descriptions.Item label="文件名">{record.filename}</Descriptions.Item>
-                    <Descriptions.Item label="文件大小">{record.size}</Descriptions.Item>
-                    <Descriptions.Item label="描述" span={2}>
-                      {record.description || '无'}
-                    </Descriptions.Item>
-                  </Descriptions>
+                  <Space direction="vertical" style={{ width: '100%' }} size="small">
+                    <Descriptions size="small" bordered column={2}>
+                      <Descriptions.Item label="ID">{record.id}</Descriptions.Item>
+                      <Descriptions.Item label="创建时间">{record.createdAt}</Descriptions.Item>
+                      <Descriptions.Item label="文件名">{record.filename}</Descriptions.Item>
+                      <Descriptions.Item label="文件大小">{record.size}</Descriptions.Item>
+                      <Descriptions.Item label="描述" span={2}>
+                        {record.description || '无'}
+                      </Descriptions.Item>
+                    </Descriptions>
+                    {BUILTIN_TEMPLATES[record.id] && (
+                      <div>
+                        <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>
+                          输出格式示例（run.sh 最后一行）：
+                        </div>
+                        <pre
+                          style={{
+                            background: '#1e1e1e',
+                            color: '#d4d4d4',
+                            padding: 8,
+                            borderRadius: 4,
+                            fontSize: 11,
+                            margin: 0,
+                            whiteSpace: 'pre-wrap',
+                          }}
+                        >
+                          {BUILTIN_TEMPLATES[record.id]}
+                        </pre>
+                      </div>
+                    )}
+                  </Space>
                 ),
               }}
             />
