@@ -84,9 +84,11 @@ function buildRoundedPath(
     const inLen = Math.hypot(cx - px, cy - py);
     const outLen = Math.hypot(nx - cx, ny - cy);
     const r = Math.min(radius, inLen / 2, outLen / 2);
+    // 三点共线（例如源与目标同高）时没有拐角，不需要倒角
+    const cross = (cx - px) * (ny - cy) - (cy - py) * (nx - cx);
 
-    if (r < 0.5) {
-      // 段太短，倒角没有意义，直接保留拐点
+    if (r < 0.5 || Math.abs(cross) < 0.01) {
+      // 段太短或共线，倒角没有意义，直接保留拐点
       d += ` L ${cx} ${cy}`;
       continue;
     }
@@ -115,7 +117,7 @@ function getBendableSmoothStepPath(
   sourcePosition: Position,
   targetPosition: Position,
   bendOffset: number = 0,
-  borderRadius: number = 16,
+  borderRadius: number = 8,
 ): [string, number, number] {
   const isHorizontalFlow =
     (sourcePosition === Position.Right || sourcePosition === Position.Left) &&
@@ -142,18 +144,9 @@ function getBendableSmoothStepPath(
     const midX = (sourceX + targetX) / 2 + bendOffset;
     const midY = (sourceY + targetY) / 2;
 
-    // 两端高度差小于两倍圆角半径时，两个 90° 拐角会互相重叠，
-    // 此时改用一条 S 形三次贝塞尔，避免退化成一根细针似的尖角
-    if (Math.abs(targetY - sourceY) < borderRadius * 2) {
-      // 三次贝塞尔 t=0.5 处的点：(P0 + 3P1 + 3P2 + P3) / 8，
-      // 即 x = 中点 + 0.75 * bendOffset，y = 中点，标签按此定位
-      return [
-        `M ${sourceX} ${sourceY} C ${midX} ${sourceY}, ${midX} ${targetY}, ${targetX} ${targetY}`,
-        (sourceX + targetX) / 2 + bendOffset * 0.75,
-        midY,
-      ];
-    }
-
+    // 始终保持「水平 - 垂直 - 水平」的 90° 折线，只在拐点做小圆角；
+    // 两端高度差极小时两个拐角会靠得很近，圆角半径会自动收缩到
+    // 相邻线段长度的一半，不会退化成弧线或折返的尖刺
     const path = buildRoundedPath(
       [
         [sourceX, sourceY],
@@ -169,14 +162,6 @@ function getBendableSmoothStepPath(
   // Vertical flow
   const midY = (sourceY + targetY) / 2 + bendOffset;
   const midX = (sourceX + targetX) / 2;
-
-  if (Math.abs(targetX - sourceX) < borderRadius * 2) {
-    return [
-      `M ${sourceX} ${sourceY} C ${sourceX} ${midY}, ${targetX} ${midY}, ${targetX} ${targetY}`,
-      midX,
-      (sourceY + targetY) / 2 + bendOffset * 0.75,
-    ];
-  }
 
   const path = buildRoundedPath(
     [
@@ -262,7 +247,7 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
     sourcePosition as Position,
     targetPosition as Position,
     bendOffset,
-    16,
+    8,
   );
 
   // 关闭链路损耗计算不改变链路颜色，固定显示绿色（即使残留旧损耗值）；
