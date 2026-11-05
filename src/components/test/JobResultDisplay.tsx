@@ -8,6 +8,8 @@ import { bindYAxisWheelZoom } from '../../utils/chartWheelZoom';
 import { getScrollLegend, tooltipBase, formatAxisTooltip } from '../../utils/monitorChartFormat';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import { useTestJobStore, type JobResult, type JobConfig } from '../../stores/testJobStore';
+import { collectScoreNames } from '../../utils/scoreParsing';
+import ScoreDisplay from './ScoreDisplay';
 
 interface JobResultDisplayProps {
   results: JobResult[];
@@ -188,70 +190,86 @@ export default function JobResultDisplay({ results, config, jobId, onAverageRang
       .sort((a, b) => a.originalId.localeCompare(b.originalId));
   }, [allMonitorCommandIds, config.monitorCommands]);
 
-  // 性能分数趋势图
+  // 性能分数趋势图（支持多命名分数：每个分数名一条曲线）
   const scoreChartOption = useMemo(() => {
     const labels = results.map((r) => r.iterationLabel || `${r.power}`);
-    const scoreData = results.map((r) => r.score);
+    const scoreNames = collectScoreNames(results);
 
+    // 无命名分数：沿用单曲线「性能分数」
+    if (scoreNames.length === 0) {
+      return {
+        title: { text: '性能分数趋势', left: 'center', textStyle: { fontSize: 14 } },
+        tooltip: {
+          trigger: 'axis',
+          formatter: (params: any[]) => {
+            const data = params[0];
+            return `迭代: ${data.dataIndex + 1}<br/>参数: ${labels[data.dataIndex]}<br/>分数: ${data.value}`;
+          },
+        },
+        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+        xAxis: { type: 'category', name: '迭代', data: labels, boundaryGap: false },
+        yAxis: { type: 'value', name: '分数' },
+        series: [
+          {
+            name: '性能分数',
+            type: 'line',
+            data: results.map((r) => r.score),
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 8,
+            lineStyle: { width: 2, color: '#1890ff' },
+            itemStyle: { color: '#1890ff' },
+            areaStyle: {
+              color: {
+                type: 'linear',
+                x: 0,
+                y: 0,
+                x2: 0,
+                y2: 1,
+                colorStops: [
+                  { offset: 0, color: 'rgba(24,144,255,0.3)' },
+                  { offset: 1, color: 'rgba(24,144,255,0.05)' },
+                ],
+              },
+            },
+          },
+        ],
+      };
+    }
+
+    const multi = scoreNames.length > 1;
     return {
-      title: {
-        text: '性能分数趋势',
-        left: 'center',
-        textStyle: { fontSize: 14 },
-      },
+      title: { text: multi ? '多分数趋势' : `性能分数趋势（${scoreNames[0]}）`, left: 'center', textStyle: { fontSize: 14 } },
       tooltip: {
         trigger: 'axis',
         formatter: (params: any[]) => {
-          const data = params[0];
-          return `迭代: ${data.dataIndex + 1}<br/>参数: ${labels[data.dataIndex]}<br/>分数: ${data.value}`;
+          const idx = params[0]?.dataIndex ?? 0;
+          const lines = [
+            `迭代: ${idx + 1}`,
+            `参数: ${labels[idx]}`,
+            ...params.map((p: any) => `${p.seriesName}: ${p.value ?? '--'}`),
+          ];
+          return lines.join('<br/>');
         },
       },
-      grid: {
-        left: '3%',
-        right: '4%',
-        bottom: '3%',
-        containLabel: true,
-      },
-      xAxis: {
-        type: 'category',
-        name: '迭代',
-        data: labels,
-        boundaryGap: false,
-      },
-      yAxis: {
-        type: 'value',
-        name: '分数',
-      },
-      series: [
-        {
-          name: '性能分数',
+      legend: getScrollLegend(scoreNames),
+      grid: { left: '3%', right: '4%', bottom: multi ? '12%' : '3%', containLabel: true },
+      xAxis: { type: 'category', name: '迭代', data: labels, boundaryGap: false },
+      yAxis: { type: 'value', name: '分数' },
+      series: scoreNames.map((name, idx) => {
+        const color = COLORS[idx % COLORS.length];
+        return {
+          name,
           type: 'line',
-          data: scoreData,
+          data: results.map((r) => r.scores?.[name] ?? null),
           smooth: true,
           symbol: 'circle',
           symbolSize: 8,
-          lineStyle: {
-            width: 2,
-            color: '#1890ff',
-          },
-          itemStyle: {
-            color: '#1890ff',
-          },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(24,144,255,0.3)' },
-                { offset: 1, color: 'rgba(24,144,255,0.05)' },
-              ],
-            },
-          },
-        },
-      ],
+          connectNulls: true,
+          lineStyle: { width: 2, color },
+          itemStyle: { color },
+        };
+      }),
     };
   }, [results]);
 
@@ -452,6 +470,14 @@ export default function JobResultDisplay({ results, config, jobId, onAverageRang
                       pagination={false}
                       columns={[
                         { title: '迭代', dataIndex: 'iteration', width: 70 },
+                        {
+                          title: '分数',
+                          dataIndex: 'score',
+                          width: 220,
+                          render: (_: unknown, record: JobResult) => (
+                            <ScoreDisplay score={record.score} scores={record.scores} compact />
+                          ),
+                        },
                         {
                           title: '迭代参数',
                           dataIndex: 'iterationLabel',

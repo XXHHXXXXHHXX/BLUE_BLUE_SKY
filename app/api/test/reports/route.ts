@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getJob } from '../jobs/lib/jobStore';
+import { buildScoreSeries } from '../../../../src/utils/scoreParsing';
 
 // ========== 数据目录配置 ==========
 const DATA_DIR = path.join(process.cwd(), '.data');
@@ -32,6 +33,8 @@ interface TestReportData {
     iteration: number;
     power: number;
     score: number;
+    /** 命名多分数：分数名 → 数值 */
+    scores?: Record<string, number>;
     status: string;
     message?: string;
     timestamp: string;
@@ -49,6 +52,8 @@ interface TestReportData {
   chartData?: {
     powerData: number[];
     scoreData: number[];
+    /** 命名多分数序列：分数名 → 每轮数值 */
+    scoreSeries?: Record<string, Array<number | null>>;
   };
   monitorResults?: Record<string, {
     commandId: string;
@@ -512,6 +517,7 @@ export async function POST(request: NextRequest) {
       }
     });
 
+    const scoreSeries = buildScoreSeries(trimmedResults);
     const newReport: TestReportData = {
       id: reportId,
       createdAt: new Date().toISOString(),
@@ -524,6 +530,7 @@ export async function POST(request: NextRequest) {
       chartData: {
         powerData: trimmedResults.map((r: { power: number }) => r.power),
         scoreData: trimmedResults.map((r: { score: number }) => r.score),
+        ...(scoreSeries ? { scoreSeries } : {}),
       },
       // 保留迭代参数信息到报告
       monitorResults: trimmedResults[0]?.monitorResults ? {} : undefined,

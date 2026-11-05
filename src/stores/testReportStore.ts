@@ -4,6 +4,7 @@
  */
 import { create } from 'zustand';
 import type { TestResult } from './testStore';
+import { collectScoreNames } from '../utils/scoreParsing';
 
 export interface ReportFolder {
   id: string;
@@ -35,6 +36,8 @@ export interface TestReport {
   chartData?: {
     powerData: number[];
     scoreData: number[];
+    /** 命名多分数序列：分数名 → 每轮数值 */
+    scoreSeries?: Record<string, Array<number | null>>;
   };
   monitorResults?: Record<string, {
     commandId: string;
@@ -98,70 +101,104 @@ export function isDefaultFolder(folderId?: string | null) {
   return folderId === DEFAULT_FOLDER_ID;
 }
 
-// 生成ECharts配置
+const REPORT_SCORE_COLORS = ['#1890ff', '#52c41a', '#fa8c16', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa541c'];
+
+// 生成ECharts配置（支持多命名分数：每个分数名一条曲线）
 export const generateChartOption = (report: TestReport) => {
   const labels = report.results.map((r) => r.iterationLabel || `${r.power}`);
-  const scoreData = report.results.map((r) => r.score);
+  const scoreNames = collectScoreNames(report.results);
 
-  return {
+  const base = {
     title: {
       text: report.name,
       subtext: `测试主机: ${report.config.host}`,
       left: 'center',
     },
-    tooltip: {
-      trigger: 'axis',
-      formatter: (params: any[]) => {
-        const data = params[0];
-        return `迭代: ${data.dataIndex + 1}<br/>参数: ${labels[data.dataIndex]}<br/>分数: ${data.value}`;
-      },
-    },
     grid: {
       left: '3%',
       right: '4%',
-      bottom: '3%',
+      bottom: scoreNames.length > 1 ? '12%' : '3%',
       containLabel: true,
     },
     xAxis: {
-      type: 'category',
+      type: 'category' as const,
       name: '迭代',
       data: labels,
       boundaryGap: false,
     },
     yAxis: {
-      type: 'value',
+      type: 'value' as const,
       name: '分数',
     },
-    series: [
-      {
-        name: '性能分数',
+  };
+
+  // 无命名分数：沿用单曲线「性能分数」
+  if (scoreNames.length === 0) {
+    return {
+      ...base,
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any[]) => {
+          const data = params[0];
+          return `迭代: ${data.dataIndex + 1}<br/>参数: ${labels[data.dataIndex]}<br/>分数: ${data.value}`;
+        },
+      },
+      series: [
+        {
+          name: '性能分数',
+          type: 'line',
+          data: report.results.map((r) => r.score),
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 8,
+          lineStyle: { width: 2, color: '#1890ff' },
+          itemStyle: { color: '#1890ff' },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: 'rgba(24,144,255,0.3)' },
+                { offset: 1, color: 'rgba(24,144,255,0.05)' },
+              ],
+            },
+          },
+        },
+      ],
+    };
+  }
+
+  return {
+    ...base,
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: any[]) => {
+        const idx = params[0]?.dataIndex ?? 0;
+        return [
+          `迭代: ${idx + 1}`,
+          `参数: ${labels[idx]}`,
+          ...params.map((p: any) => `${p.seriesName}: ${p.value ?? '--'}`),
+        ].join('<br/>');
+      },
+    },
+    legend: { type: 'scroll', top: 28 },
+    series: scoreNames.map((name, idx) => {
+      const color = REPORT_SCORE_COLORS[idx % REPORT_SCORE_COLORS.length];
+      return {
+        name,
         type: 'line',
-        data: scoreData,
+        data: report.results.map((r) => r.scores?.[name] ?? null),
         smooth: true,
         symbol: 'circle',
         symbolSize: 8,
-        lineStyle: {
-          width: 2,
-          color: '#1890ff',
-        },
-        itemStyle: {
-          color: '#1890ff',
-        },
-        areaStyle: {
-          color: {
-            type: 'linear',
-            x: 0,
-            y: 0,
-            x2: 0,
-            y2: 1,
-            colorStops: [
-              { offset: 0, color: 'rgba(24,144,255,0.3)' },
-              { offset: 1, color: 'rgba(24,144,255,0.05)' },
-            ],
-          },
-        },
-      },
-    ],
+        connectNulls: true,
+        lineStyle: { width: 2, color },
+        itemStyle: { color },
+      };
+    }),
   };
 };
 

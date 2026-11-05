@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { buildScoreSeries } from '../../../../../src/utils/scoreParsing';
 
 const DATA_DIR = path.join(process.cwd(), '.data');
 const REPORTS_FILE = path.join(DATA_DIR, 'test-reports.json');
@@ -20,6 +21,8 @@ interface TestResult {
   iteration: number;
   power: number;
   score: number;
+  /** 命名多分数：分数名 → 数值 */
+  scores?: Record<string, number>;
   status: string;
   message?: string;
   timestamp: string;
@@ -169,6 +172,7 @@ export async function POST(request: NextRequest) {
     copyDataPointsWithRename(source1DataDir, newReportDataDir, 0);
     copyDataPointsWithRename(source2DataDir, newReportDataDir, maxIteration1);
 
+    const mergedScoreSeries = buildScoreSeries(newResults);
     const mergedReport: TestReportData = {
       id: newReportId,
       name: `${report1.name} + ${report2.name}`,
@@ -181,6 +185,7 @@ export async function POST(request: NextRequest) {
       chartData: {
         powerData: newResults.map((r) => r.power),
         scoreData: newResults.map((r) => r.score),
+        ...(mergedScoreSeries ? { scoreSeries: mergedScoreSeries } : {}),
       },
       environment: { ...report1.environment, ...report2.environment },
       stageId: report1.stageId,

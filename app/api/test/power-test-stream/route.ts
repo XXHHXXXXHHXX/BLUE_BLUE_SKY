@@ -1,6 +1,7 @@
 /** 迭代测试 - 流式执行 API（实时输出） */
 import { NextRequest } from 'next/server';
 import { NodeSSH } from 'node-ssh';
+import { parseScoreFromOutput } from '../../../../src/utils/scoreParsing';
 
 interface IterationParameterConfig {
   id: string;
@@ -604,23 +605,14 @@ export async function POST(request: NextRequest) {
             }
             monitorStates.clear();
 
-            // 解析score
+            // 解析score（支持单分数与命名多分数）
             let score = 0;
+            let scores: Record<string, number> | undefined;
             if (exitCode === 0) {
-              const lines = roundOutput.trim().split('\n');
-              for (let i = lines.length - 1; i >= 0; i--) {
-                const line = lines[i].trim();
-                if (line.startsWith('{') && line.endsWith('}')) {
-                  try {
-                    const parsed = JSON.parse(line);
-                    if (typeof parsed.score === 'number') {
-                      score = parsed.score;
-                      break;
-                    }
-                  } catch {
-                    // 继续尝试上一行
-                  }
-                }
+              const parsedScore = parseScoreFromOutput(roundOutput);
+              score = parsedScore.score;
+              if (Object.keys(parsedScore.scores).length > 0) {
+                scores = parsedScore.scores;
               }
             }
 
@@ -644,6 +636,7 @@ export async function POST(request: NextRequest) {
               iterationValues: currentValues,
               iterationLabel,
               score,
+              ...(scores ? { scores } : {}),
               monitorResults,
               message: '本轮测试完成',
             });

@@ -54,6 +54,8 @@ import { bindYAxisWheelZoom } from '../../utils/chartWheelZoom';
 import { getScrollLegend, tooltipBase, formatAxisTooltip } from '../../utils/monitorChartFormat';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import EnvironmentInfoModal from './EnvironmentInfoModal';
+import { collectScoreNames } from '../../utils/scoreParsing';
+import ScoreDisplay from './ScoreDisplay';
 
 interface TestReportManagerProps {
   visible: boolean;
@@ -712,6 +714,7 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
         power: r.power,
         iterationLabel: r.iterationLabel,
         score: r.score,
+        scores: r.scores,
         averageValue: r.monitorResults![commandId].averageValue,
         ratio: r.monitorResults![commandId].averageValue > 0 ? r.score / r.monitorResults![commandId].averageValue : 0,
       }));
@@ -727,7 +730,10 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
           const p = params[0];
           const d = data[p.dataIndex];
           const label = d.iterationLabel || `${d.power}`;
-          return `迭代: ${d.iteration}<br/>参数: ${label}<br/>分数: ${d.score}<br/>平均值: ${d.averageValue.toFixed(4)}<br/>分数/平均值: ${p.value.toFixed(4)}`;
+          const scoreText = d.scores && Object.keys(d.scores).length > 0
+            ? Object.entries(d.scores).map(([k, v]) => `${k}=${v}`).join('，')
+            : String(d.score);
+          return `迭代: ${d.iteration}<br/>参数: ${label}<br/>分数: ${scoreText}<br/>平均值: ${d.averageValue.toFixed(4)}<br/>分数/平均值: ${p.value.toFixed(4)}`;
         },
       },
       grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
@@ -1059,6 +1065,34 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
       title: '数据点',
       key: 'dataPoints',
       render: (_: unknown, record: TestReport) => <Tag>{record.results.length} 个</Tag>,
+    },
+    {
+      title: '分数',
+      key: 'scores',
+      width: 220,
+      render: (_: unknown, record: TestReport) => {
+        const names = collectScoreNames(record.results);
+        if (names.length === 0) {
+          const best = record.results.length > 0
+            ? Math.max(...record.results.map((r) => r.score))
+            : 0;
+          return <Text strong style={{ color: '#52c41a' }}>最高 {best}</Text>;
+        }
+        return (
+          <Space size={[4, 4]} wrap>
+            {names.map((name) => {
+              const best = Math.max(
+                ...record.results.map((r) => r.scores?.[name] ?? -Infinity),
+              );
+              return (
+                <Tag key={name} color="green">
+                  {name}: <strong>{Number.isFinite(best) ? best : '-'}</strong>
+                </Tag>
+              );
+            })}
+          </Space>
+        );
+      },
     },
     {
       title: '阶段',
@@ -1421,6 +1455,14 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
                               },
                             },
                             {
+                              title: '分数',
+                              dataIndex: 'score',
+                              width: 200,
+                              render: (_: unknown, record: any) => (
+                                <ScoreDisplay score={record.score} scores={record.scores} compact />
+                              ),
+                            },
+                            {
                               title: '分数/平均值',
                               dataIndex: 'scoreRatio',
                               width: 110,
@@ -1489,6 +1531,8 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
                               iteration: r.iteration,
                               power: r.power,
                               iterationLabel: r.iterationLabel || `${r.power}`,
+                              score: r.score,
+                              scores: r.scores,
                               averageValue: r.monitorResults![cmdId].averageValue.toFixed(4),
                               scoreRatio:
                                 r.monitorResults![cmdId].averageValue > 0 && r.score > 0

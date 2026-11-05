@@ -35,6 +35,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useTestJobStore, type Job } from '../../../src/stores/testJobStore';
 import { useTestReportStore, type TestReport } from '../../../src/stores/testReportStore';
 import useMaximizableModal from '../../../src/hooks/useMaximizableModal';
+import { collectScoreNames } from '../../../src/utils/scoreParsing';
 
 const { Title, Text } = Typography;
 
@@ -253,6 +254,35 @@ export default function JobListPage() {
           <Space>
             <Tag color="success">成功 {successCount}</Tag>
             {errorCount > 0 && <Tag color="error">失败 {errorCount}</Tag>}
+          </Space>
+        );
+      },
+    },
+    {
+      title: '分数',
+      key: 'scores',
+      width: 220,
+      render: (_, record) => {
+        const successResults = record.results.filter((r) => r.status === 'success');
+        if (successResults.length === 0) return '-';
+        const names = collectScoreNames(successResults);
+        if (names.length === 0) {
+          const best = Math.max(...successResults.map((r) => r.score));
+          return <Text strong style={{ color: '#52c41a' }}>最高 {best}</Text>;
+        }
+        // 每个命名分数取所有迭代中的最大值
+        return (
+          <Space size={[4, 4]} wrap>
+            {names.map((name) => {
+              const best = Math.max(
+                ...successResults.map((r) => r.scores?.[name] ?? -Infinity),
+              );
+              return (
+                <Tag key={name} color="green">
+                  {name}: <strong>{Number.isFinite(best) ? best : '-'}</strong>
+                </Tag>
+              );
+            })}
           </Space>
         );
       },

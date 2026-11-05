@@ -58,6 +58,8 @@ interface TestDraftData {
     iteration: number;
     power: number;
     score: number;
+    /** 命名多分数：分数名 → 数值 */
+    scores?: Record<string, number>;
     status: string;
     message?: string;
     timestamp: string;

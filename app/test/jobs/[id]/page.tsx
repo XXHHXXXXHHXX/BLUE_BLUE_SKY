@@ -356,6 +356,7 @@ export default function JobDetailPage() {
         iteration: r.iteration,
         power: r.power,
         score: r.score,
+        scores: r.scores,
         status: r.status,
         message: r.message,
         timestamp: r.timestamp,

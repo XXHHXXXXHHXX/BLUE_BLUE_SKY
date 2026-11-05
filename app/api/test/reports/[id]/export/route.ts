@@ -99,15 +99,28 @@ async function buildExcel(
     overviewSheet.addRow([]).commit();
   }
 
+  // 命名分数列（每条结果可能带多个命名分数，按首次出现顺序展开为独立列）
+  const scoreNames: string[] = [];
+  report.results.forEach((r) => {
+    const scores = (r as { scores?: Record<string, number> }).scores;
+    Object.keys(scores || {}).forEach((name) => {
+      if (!scoreNames.includes(name)) scoreNames.push(name);
+    });
+  });
+
   overviewSheet.addRow(['迭代结果']).commit();
-  const resultHeader = overviewSheet.addRow(['迭代', '参数', '分数', '状态', '迭代标签']);
+  const resultHeader = overviewSheet.addRow([
+    '迭代', '参数', '分数', ...scoreNames, '状态', '迭代标签',
+  ]);
   resultHeader.font = { bold: true };
   resultHeader.commit();
   report.results.forEach((r) => {
+    const scores = (r as { scores?: Record<string, number> }).scores;
     const row = overviewSheet.addRow([
       r.iteration,
       r.iterationLabel || `${r.power}`,
       r.score,
+      ...scoreNames.map((name) => scores?.[name] ?? ''),
       r.status,
       r.iterationLabel || '-',
     ]);

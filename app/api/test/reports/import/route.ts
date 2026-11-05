@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { buildScoreSeries } from '../../../../../src/utils/scoreParsing';
 
 const DATA_DIR = path.join(process.cwd(), '.data');
 const REPORTS_FILE = path.join(DATA_DIR, 'test-reports.json');
@@ -27,6 +28,8 @@ interface ReportResultInput {
   iteration: number;
   power: number;
   score: number;
+  /** 命名多分数：分数名 → 数值 */
+  scores?: Record<string, number>;
   status: 'success' | 'error';
   message?: string;
   timestamp: string;
@@ -352,6 +355,7 @@ export async function POST(request: NextRequest) {
         return { ...r, monitorResults };
       });
 
+      const importedScoreSeries = buildScoreSeries(trimmedResults);
       const newReport = {
         id: reportId,
         createdAt: new Date().toISOString(),
@@ -364,6 +368,7 @@ export async function POST(request: NextRequest) {
         chartData: {
           powerData: trimmedResults.map((r: { power: number }) => r.power),
           scoreData: trimmedResults.map((r: { score: number }) => r.score),
+          ...(importedScoreSeries ? { scoreSeries: importedScoreSeries } : {}),
         },
         monitorResults: trimmedResults[0]?.monitorResults ? {} : undefined,
         jobId: reportData.jobId,

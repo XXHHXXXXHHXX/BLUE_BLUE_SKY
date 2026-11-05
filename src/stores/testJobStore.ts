@@ -12,7 +12,10 @@ export interface JobLog {
 export interface JobResult {
   iteration: number;
   power: number;
+  /** 主分数（兼容旧数据；多分数时取 scores 的第一个值） */
   score: number;
+  /** 命名多分数：分数名 → 数值 */
+  scores?: Record<string, number>;
   status: 'success' | 'error';
   message?: string;
   timestamp: string;

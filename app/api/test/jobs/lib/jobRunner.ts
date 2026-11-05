@@ -16,6 +16,7 @@ import {
   type JobResult,
   type PipelineStage,
 } from './jobStore';
+import { parseScoreFromOutput } from '../../../../../src/utils/scoreParsing';
 
 /** 生成笛卡尔积迭代组合（支持从高到低和自定义列表） */
 function generateIterations(
@@ -1159,23 +1160,14 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       // ========== 停止日志监控并打包 ==========
       const logArchivePath = await stopAndArchiveLogs(iteration, stage);
 
-      // 解析 score
+      // 解析 score（支持单分数与命名多分数）
       let score = 0;
+      let scores: Record<string, number> | undefined;
       if (exitCode === 0) {
-        const lines = roundOutput.trim().split('\n');
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const line = lines[i].trim();
-          if (line.startsWith('{') && line.endsWith('}')) {
-            try {
-              const parsed = JSON.parse(line);
-              if (typeof parsed.score === 'number') {
-                score = parsed.score;
-                break;
-              }
-            } catch {
-              // 继续尝试上一行
-            }
-          }
+        const parsedScore = parseScoreFromOutput(roundOutput);
+        score = parsedScore.score;
+        if (Object.keys(parsedScore.scores).length > 0) {
+          scores = parsedScore.scores;
         }
       }
 
@@ -1205,6 +1197,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
         iteration,
         power,
         score,
+        ...(scores ? { scores } : {}),
         status: 'success',
         iterationValues: currentValues,
         iterationLabel,
@@ -1216,7 +1209,10 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       };
       appendJobResult(jobId, resultItem);
       stageResults.push(resultItem);
-      addJobLog(jobId, 'iteration_end', `阶段 [${stage.name}] 第 ${iteration} 轮测试完成 - Score: ${score}`);
+      const scoreDetail = scores
+        ? ` - Score: ${score}（${Object.entries(scores).map(([k, v]) => `${k}=${v}`).join('，')}）`
+        : ` - Score: ${score}`;
+      addJobLog(jobId, 'iteration_end', `阶段 [${stage.name}] 第 ${iteration} 轮测试完成${scoreDetail}`);
 
       // 迭代完成后执行 stop.sh 清理（如存在）
       try {

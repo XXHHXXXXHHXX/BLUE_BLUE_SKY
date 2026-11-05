@@ -78,6 +78,7 @@ import TestDraftManager from './TestDraftManager';
 import BMCConfigPanel from '../monitor/BMCConfigPanel';
 import MonitorConfigPanel from './MonitorConfigPanel';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
+import ScoreDisplay from './ScoreDisplay';
 import { getClientId } from '../../utils/clientId';
 
 const { Dragger } = Upload;
@@ -323,6 +324,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
               iteration: r.iteration,
               power: r.power,
               score: r.score,
+              scores: r.scores,
               status: r.status,
               message: r.message,
               timestamp: r.timestamp,
@@ -487,6 +489,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
             iteration: r.iteration,
             power: r.power,
             score: r.score,
+            scores: r.scores,
             status: r.status,
             message: r.message,
             timestamp: r.timestamp,
@@ -1466,11 +1469,10 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       title: '分数 (Score)',
       dataIndex: 'score',
       key: 'score',
-      width: 120,
-      render: (score, record) => {
-        if (record.status === 'error') return <Tag color="error">失败</Tag>;
-        return <span style={{ fontWeight: 'bold', color: '#52c41a' }}>{score}</span>;
-      },
+      width: 240,
+      render: (score, record) => (
+        <ScoreDisplay score={score} scores={record.scores} failed={record.status === 'error'} compact />
+      ),
     },
     {
       title: '状态',
@@ -1754,19 +1756,45 @@ sleep 1
 
 # 模拟计算得分
 SCORE=$((10000 / ($1 + 1) + RANDOM % 100))
+CPU_SCORE=$((SCORE + 50))
+MEM_SCORE=$((SCORE - 30))
 
-# 必须输出 JSON 格式结果
-echo "{\"score\": \${SCORE}}"`}
+# 必须输出 JSON 格式结果（最后一行）
+# 单分数：
+echo "{\"score\": \${SCORE}}"
+
+# 或者命名多分数（推荐，可同时返回多个指标）：
+# echo "{\"scores\": {\"CPU性能\": \${CPU_SCORE}, \"内存带宽\": \${MEM_SCORE}}}"`}
       </pre>
 
       <Divider style={{ margin: '8px 0' }} />
 
       <p><strong>输出格式要求：</strong></p>
       <pre style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 4, fontSize: 11, border: '1px solid #333' }}>
-{`{
-  "score": 1234,  // 性能分数（数值类型，必需）
+{`// 方式一：单分数（向后兼容）
+{
+  "score": 1234
+}
+
+// 方式二：命名多分数（名称可自定义，会显示在表格/图表/报告/导出中）
+{
+  "scores": {
+    "CPU性能": 1234,
+    "内存带宽": 980,
+    "IO吞吐": 512
+  }
+}
+
+// 方式三：主分数 + 明细（score 作为主分数，scores 作为各指标）
+{
+  "score": 1234,
+  "scores": { "CPU性能": 1234, "内存带宽": 980 }
 }`}
       </pre>
+      <p style={{ fontSize: 12, color: '#8c8c8c', marginTop: 4 }}>
+        说明：脚本最后一行输出 JSON 即可，系统会自下而上查找第一条有效记录。
+        使用 <code>scores</code> 时，若未提供 <code>score</code>，主分数默认取第一个命名分数的值。
+      </p>
     </div>
   );
 

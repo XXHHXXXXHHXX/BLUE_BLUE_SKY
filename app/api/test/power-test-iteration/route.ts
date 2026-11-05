@@ -1,6 +1,7 @@
 /** 功耗遍历测试 - 单轮测试 API */
 import { NextRequest, NextResponse } from 'next/server';
 import { NodeSSH } from 'node-ssh';
+import { parseScoreFromOutput } from '../../../../src/utils/scoreParsing';
 
 interface IterationConfig {
   host: string;
@@ -13,6 +14,8 @@ interface IterationConfig {
 
 interface TestResult {
   score: number;
+  /** 命名多分数：分数名 → 数值 */
+  scores?: Record<string, number>;
   power?: number;
   [key: string]: unknown;
 }
@@ -21,7 +24,7 @@ interface TestResult {
 async function runIteration(
   config: IterationConfig,
   remotePath: string
-): Promise<{ success: boolean; message: string; score?: number; rawOutput?: string }> {
+): Promise<{ success: boolean; message: string; score?: number; scores?: Record<string, number>; rawOutput?: string }> {
   const ssh = new NodeSSH();
   
   try {
@@ -68,43 +71,22 @@ async function runIteration(
     
     // 解析输出中的 JSON
     const output = runResult.stdout;
-    let result: TestResult | null = null;
-    
-    // 尝试从输出中提取 JSON
-    // 支持多行输出，查找最后一行有效的 JSON
-    const lines = output.trim().split('\n');
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i].trim();
-      if (line.startsWith('{') && line.endsWith('}')) {
-        try {
-          result = JSON.parse(line) as TestResult;
-          break;
-        } catch {
-          // 继续尝试上一行
-        }
-      }
-    }
-    
-    if (!result) {
+
+    // 解析分数：支持 {"score": n} 与 {"scores": {名称: n}}
+    const parsed = parseScoreFromOutput(output);
+    if (parsed.score === 0 && Object.keys(parsed.scores).length === 0) {
       return {
         success: false,
-        message: '无法解析测试结果，run.sh 必须输出 JSON 格式: {"score": number}',
+        message: '无法解析测试结果，run.sh 必须输出 JSON 格式: {"score": number} 或 {"scores": {"名称": number}}',
         rawOutput: output,
       };
     }
-    
-    if (typeof result.score !== 'number') {
-      return {
-        success: false,
-        message: '结果中缺少 score 字段或类型不正确',
-        rawOutput: output,
-      };
-    }
-    
+
     return {
       success: true,
       message: '测试完成',
-      score: result.score,
+      score: parsed.score,
+      scores: parsed.scores,
       rawOutput: output,
     };
   } catch (error) {
@@ -185,6 +167,7 @@ export async function POST(request: NextRequest) {
       success: result.success,
       message: result.message,
       score: result.score,
+      scores: result.scores,
       rawOutput: result.rawOutput,
       timestamp: new Date().toISOString(),
     });

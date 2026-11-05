@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import ExcelJS from 'exceljs';
 import PptxGenJS from 'pptxgenjs';
+import { collectScoreNames } from './scoreParsing';
 
 const DATA_DIR = path.join(process.cwd(), '.data');
 const REPORTS_FILE = path.join(DATA_DIR, 'test-reports.json');
@@ -27,11 +28,15 @@ export interface ReportDetail {
   results: Array<{
     iteration: number;
     score: number;
+    /** 命名多分数：分数名 → 数值 */
+    scores?: Record<string, number>;
     power: number;
     iterationLabel?: string;
     monitorValues: Record<string, number>;
   }>;
   monitors: string[];
+  /** 该报告出现过的命名分数名（按首次出现顺序） */
+  scoreNames: string[];
 }
 
 function ensureGeneratedDir() {
@@ -83,6 +88,7 @@ function buildReportDetails(reportIds: string[]): ReportDetail[] {
         Object.keys(res.monitorResults || {}).forEach((id) => monitorIds.add(id));
       });
       const monitors = Array.from(monitorIds);
+      const scoreNames = collectScoreNames(r.results || []);
       return {
         id: r.id,
         name: r.name || '未命名',
@@ -91,6 +97,7 @@ function buildReportDetails(reportIds: string[]): ReportDetail[] {
         results: r.results?.map((res: any) => ({
           iteration: res.iteration,
           score: res.score ?? 0,
+          ...(res.scores ? { scores: res.scores } : {}),
           power: res.power ?? 0,
           iterationLabel: res.iterationLabel,
           monitorValues: monitors.reduce((acc: Record<string, number>, id) => {
@@ -99,6 +106,7 @@ function buildReportDetails(reportIds: string[]): ReportDetail[] {
           }, {}),
         })) || [],
         monitors,
+        scoreNames,
       };
     });
 }
@@ -131,7 +139,7 @@ export async function generateExcelReport(reportIds: string[], title?: string): 
     details.forEach((detail) => {
       const sheet = workbook.addWorksheet(detail.name.slice(0, 31)); // Excel sheet 名最大 31 字符
       sheet.addRow([`报告: ${detail.name}`, `主机: ${detail.host}`, `生成时间: ${detail.createdAt}`]);
-      const header = ['迭代', '参数', '功耗', '分数', ...detail.monitors];
+      const header = ['迭代', '参数', '功耗', '分数', ...detail.scoreNames, ...detail.monitors];
       sheet.addRow(header);
       detail.results.forEach((r) => {
         sheet.addRow([
@@ -139,6 +147,7 @@ export async function generateExcelReport(reportIds: string[], title?: string): 
           r.iterationLabel || `${r.power}`,
           r.power,
           r.score,
+          ...detail.scoreNames.map((name) => r.scores?.[name] ?? ''),
           ...detail.monitors.map((m) => r.monitorValues[m] ?? 0),
         ]);
       });
@@ -203,12 +212,13 @@ export async function generatePPTReport(reportIds: string[], title?: string): Pr
           r.iterationLabel || `${r.power}`,
           String(r.power),
           String(r.score),
+          ...detail.scoreNames.map((name) => String(r.scores?.[name] ?? '-')),
           ...detail.monitors.map((m) => String(r.monitorValues[m] ?? 0)),
         ].map((text) => ({ text }))
       );
       slide.addTable(
         [
-          ['迭代', '参数', '功耗', '分数', ...detail.monitors].map((text) => ({ text })),
+          ['迭代', '参数', '功耗', '分数', ...detail.scoreNames, ...detail.monitors].map((text) => ({ text })),
           ...rows,
         ],
         { x: 0.5, y: 1.4, w: 9, h: 4, fontSize: 10, border: { pt: 1, color: 'CCCCCC' } }
