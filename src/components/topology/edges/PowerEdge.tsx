@@ -53,6 +53,57 @@ const arrowLabels: Record<EdgeArrowType, string> = {
 const arrowCycle: EdgeArrowType[] = ['forward', 'none'];
 
 /**
+ * 把折线转成带圆角的 SVG 路径
+ * 每个拐点按「实际行进方向」倒角，半径不超过相邻两段长度的一半。
+ * 这样即使 bendOffset 把中间段拖到源/目标之外，拐角也不会因为方向判断
+ * 错误而反向折回，形成尖锐的针状尖刺。
+ */
+function buildRoundedPath(
+  points: Array<[number, number]>,
+  radius: number,
+): string {
+  if (points.length < 2) return '';
+
+  // 去掉连续重复点，避免长度为 0 的线段导致除零
+  const pts: Array<[number, number]> = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    const prev = pts[pts.length - 1];
+    if (Math.hypot(points[i][0] - prev[0], points[i][1] - prev[1]) > 0.01) {
+      pts.push(points[i]);
+    }
+  }
+  if (pts.length < 2) return `M ${pts[0][0]} ${pts[0][1]}`;
+
+  let d = `M ${pts[0][0]} ${pts[0][1]}`;
+
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [px, py] = pts[i - 1];
+    const [cx, cy] = pts[i];
+    const [nx, ny] = pts[i + 1];
+
+    const inLen = Math.hypot(cx - px, cy - py);
+    const outLen = Math.hypot(nx - cx, ny - cy);
+    const r = Math.min(radius, inLen / 2, outLen / 2);
+
+    if (r < 0.5) {
+      // 段太短，倒角没有意义，直接保留拐点
+      d += ` L ${cx} ${cy}`;
+      continue;
+    }
+
+    const inX = cx - ((cx - px) / inLen) * r;
+    const inY = cy - ((cy - py) / inLen) * r;
+    const outX = cx + ((nx - cx) / outLen) * r;
+    const outY = cy + ((ny - cy) / outLen) * r;
+    d += ` L ${inX} ${inY} Q ${cx} ${cy} ${outX} ${outY}`;
+  }
+
+  const last = pts[pts.length - 1];
+  d += ` L ${last[0]} ${last[1]}`;
+  return d;
+}
+
+/**
  * 计算可弯曲的 SmoothStep 路径
  * bendOffset 用于将中间段向垂直于主方向的方向平移
  */
@@ -64,7 +115,7 @@ function getBendableSmoothStepPath(
   sourcePosition: Position,
   targetPosition: Position,
   bendOffset: number = 0,
-  borderRadius: number = 8,
+  borderRadius: number = 16,
 ): [string, number, number] {
   const isHorizontalFlow =
     (sourcePosition === Position.Right || sourcePosition === Position.Left) &&
@@ -90,48 +141,52 @@ function getBendableSmoothStepPath(
   if (isHorizontalFlow) {
     const midX = (sourceX + targetX) / 2 + bendOffset;
     const midY = (sourceY + targetY) / 2;
-    const dirX = sourceX < targetX ? 1 : -1;
-    const dirY = sourceY < targetY ? 1 : -1;
 
-    const r = Math.min(
-      borderRadius,
-      Math.abs(targetY - sourceY) / 2,
-      Math.abs(midX - sourceX) / 2,
-      Math.abs(targetX - midX) / 2,
-    );
-
-    let path: string;
-    if (Math.abs(targetY - sourceY) < 0.1) {
-      path = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
-    } else if (r < 1) {
-      path = `M ${sourceX} ${sourceY} L ${midX} ${sourceY} L ${midX} ${targetY} L ${targetX} ${targetY}`;
-    } else {
-      path = `M ${sourceX} ${sourceY} L ${midX - dirX * r} ${sourceY} Q ${midX} ${sourceY} ${midX} ${sourceY + dirY * r} L ${midX} ${targetY - dirY * r} Q ${midX} ${targetY} ${midX + dirX * r} ${targetY} L ${targetX} ${targetY}`;
+    // 两端高度差小于两倍圆角半径时，两个 90° 拐角会互相重叠，
+    // 此时改用一条 S 形三次贝塞尔，避免退化成一根细针似的尖角
+    if (Math.abs(targetY - sourceY) < borderRadius * 2) {
+      // 三次贝塞尔 t=0.5 处的点：(P0 + 3P1 + 3P2 + P3) / 8，
+      // 即 x = 中点 + 0.75 * bendOffset，y = 中点，标签按此定位
+      return [
+        `M ${sourceX} ${sourceY} C ${midX} ${sourceY}, ${midX} ${targetY}, ${targetX} ${targetY}`,
+        (sourceX + targetX) / 2 + bendOffset * 0.75,
+        midY,
+      ];
     }
+
+    const path = buildRoundedPath(
+      [
+        [sourceX, sourceY],
+        [midX, sourceY],
+        [midX, targetY],
+        [targetX, targetY],
+      ],
+      borderRadius,
+    );
     return [path, midX, midY];
   }
 
   // Vertical flow
   const midY = (sourceY + targetY) / 2 + bendOffset;
   const midX = (sourceX + targetX) / 2;
-  const dirX = sourceX < targetX ? 1 : -1;
-  const dirY = sourceY < targetY ? 1 : -1;
 
-  const r = Math.min(
-    borderRadius,
-    Math.abs(targetX - sourceX) / 2,
-    Math.abs(midY - sourceY) / 2,
-    Math.abs(targetY - midY) / 2,
-  );
-
-  let path: string;
-  if (Math.abs(targetX - sourceX) < 0.1) {
-    path = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
-  } else if (r < 1) {
-    path = `M ${sourceX} ${sourceY} L ${sourceX} ${midY} L ${targetX} ${midY} L ${targetX} ${targetY}`;
-  } else {
-    path = `M ${sourceX} ${sourceY} L ${sourceX} ${midY - dirY * r} Q ${sourceX} ${midY} ${sourceX + dirX * r} ${midY} L ${targetX - dirX * r} ${midY} Q ${targetX} ${midY} ${targetX} ${midY + dirY * r} L ${targetX} ${targetY}`;
+  if (Math.abs(targetX - sourceX) < borderRadius * 2) {
+    return [
+      `M ${sourceX} ${sourceY} C ${sourceX} ${midY}, ${targetX} ${midY}, ${targetX} ${targetY}`,
+      midX,
+      (sourceY + targetY) / 2 + bendOffset * 0.75,
+    ];
   }
+
+  const path = buildRoundedPath(
+    [
+      [sourceX, sourceY],
+      [sourceX, midY],
+      [targetX, midY],
+      [targetX, targetY],
+    ],
+    borderRadius,
+  );
   return [path, midX, midY];
 }
 
@@ -207,7 +262,7 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
     sourcePosition as Position,
     targetPosition as Position,
     bendOffset,
-    8,
+    16,
   );
 
   // 关闭链路损耗计算不改变链路颜色，固定显示绿色（即使残留旧损耗值）；
@@ -371,6 +426,8 @@ const PowerEdge: React.FC<EdgeProps> = (props) => {
         fill="none"
         stroke={color}
         strokeWidth={isHighlighted ? 3 : 2}
+        strokeLinejoin="round"
+        strokeLinecap="round"
         markerEnd={arrowType !== 'none' && !isReversed ? `url(#${markerEndId})` : undefined}
         markerStart={arrowType !== 'none' && isReversed ? `url(#${markerStartId})` : undefined}
         style={style}
