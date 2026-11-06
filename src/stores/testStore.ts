@@ -166,6 +166,8 @@ export interface TestTab {
     globalBmcSessionId: string | null;
     // 自定义任务名称
     jobName?: string;
+    // 定时启动时间（ISO 字符串）；为空表示立即启动
+    scheduledStartAt?: string | null;
   };
   
   // 测试结果
