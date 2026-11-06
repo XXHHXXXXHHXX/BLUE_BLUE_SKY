@@ -38,7 +38,3 @@ tsconfig.tsbuildinfo
 
 # CodeAgent local config
 .cac/
-
-# fe-runner 结果与临时文件
-/spec2017-results/
-/.tmp-ferunner/
