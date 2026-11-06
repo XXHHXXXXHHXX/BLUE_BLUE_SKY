@@ -13,13 +13,16 @@ import {
   type JobConfig,
 } from './lib/jobStore';
 import { runJob } from './lib/jobRunner';
-import { scheduleJobStart, cancelScheduledStart } from './lib/jobScheduler';
+import { scheduleJobStart, cancelScheduledStart, restoreScheduledJobs } from './lib/jobScheduler';
 
 /** GET /api/test/jobs - 获取任务列表 */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const includeLogs = searchParams.get('includeLogs') !== 'false';
   const includeDataPoints = searchParams.get('includeDataPoints') !== 'false';
+
+  // 服务器重启后，前端首次拉取任务列表时重新挂起未执行的定时任务（幂等）
+  restoreScheduledJobs();
 
   const jobs = getAllJobs().map((job) =>
     toJobView(job, { includeLogs, includeDataPoints })
