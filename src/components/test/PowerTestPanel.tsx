@@ -117,6 +117,24 @@ const generateIterationLabel = (values: Record<string, string>): string => {
   return Object.entries(values).map(([k, v]) => `${k}=${v}`).join(', ');
 };
 
+/** 校验定时启动时间；返回错误提示，合法时返回 null */
+const validateScheduledStartAt = (iso?: string | null): string | null => {
+  if (!iso) return null;
+  const ts = new Date(iso).getTime();
+  if (!Number.isFinite(ts)) return '定时启动时间格式无效';
+  if (ts <= Date.now()) return '定时启动时间必须晚于当前时间';
+  return null;
+};
+
+/** ISO 时间 → datetime-local 输入框需要的本地时间格式（YYYY-MM-DDTHH:mm） */
+const toLocalDateTimeValue = (iso?: string | null): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const {
     addShellOutput,
@@ -382,6 +400,8 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           setIsRunningTest(tab.id, true);
           setTestStatus(tab.id, 'testing');
           setCurrentIteration(tab.id, runningJob.progress.currentIteration);
+          // 先清空本地结果再按服务端结果重建，避免恢复任务清除数据后本地仍残留旧结果造成重复
+          clearTestResults(tab.id);
           // 恢复已有结果
           for (const r of runningJob.results) {
             addTestResult(tab.id, {
@@ -423,7 +443,10 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           }
           processedLogCountRef.current = runningJob.logs.length;
           prevJobStatusRef.current = runningJob.status;
-          addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 已恢复关联到运行中的后台任务 [${runningJob.id}]`);
+          const pendingHint = runningJob.status === 'pending' && runningJob.scheduledStartAt
+            ? `（定时任务，将于 ${new Date(runningJob.scheduledStartAt).toLocaleString()} 自动开始）`
+            : '';
+          addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 已恢复关联到后台任务 [${runningJob.id}]${pendingHint}`);
         } else if (activeJobIdRef.current || tab.isRunningTest) {
           // 当前主机没有运行中的后台任务，但标签页仍被标记为运行中：
           // 说明任务已在页面隐藏/离开期间结束，主动同步清理运行状态，避免一直显示“运行中”
@@ -544,6 +567,13 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
               updatePipelineStage(tab.id, sr.stageId, { status: sr.status });
             }
           }
+        }
+
+        // 服务端结果变少（恢复任务时清除了被中止阶段的数据）：
+        // 本地结果需要整体重建，否则会残留旧数据造成重复
+        if (job.results.length < processedResultCountRef.current) {
+          clearTestResults(tab.id);
+          processedResultCountRef.current = 0;
         }
 
         // 处理新增结果
@@ -676,6 +706,12 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const handleStartTest = async () => {
     if (!tab.isSSHConnected) {
       message.error('请先连接SSH');
+      return;
+    }
+
+    const scheduleError = validateScheduledStartAt(tab.powerTestConfig.scheduledStartAt);
+    if (scheduleError) {
+      message.error(scheduleError);
       return;
     }
 
@@ -942,10 +978,12 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         };
       }
 
+      const scheduledStartAt = tab.powerTestConfig.scheduledStartAt || undefined;
       const job = await startJob({
         name: tab.powerTestConfig.jobName || `${selectedLibraryPackageId ? (getPackageById(selectedLibraryPackageId)?.name || '用例包') : (packageFile ? packageFile.name : '默认名称')} - ${new Date().toLocaleDateString()}`,
         tabId: tab.id,
         clientId: getClientId(),
+        scheduledStartAt,
         config: {
           host: tab.sshConfig.host,
           port: tab.sshConfig.port,
@@ -969,7 +1007,13 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         processedLogCountRef.current = 0;
         processedResultCountRef.current = 0;
         prevJobStatusRef.current = job.status;
-        addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 后台任务已创建 [${job.id}]，正在运行中...`);
+        const scheduleHint = job.scheduledStartAt
+          ? `，将于 ${new Date(job.scheduledStartAt).toLocaleString()} 自动开始`
+          : '，正在运行中';
+        addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 后台任务已创建 [${job.id}]${scheduleHint}...`);
+        if (job.scheduledStartAt) {
+          message.success(`定时任务已创建，将于 ${new Date(job.scheduledStartAt).toLocaleString()} 自动开始`);
+        }
       } else {
         throw new Error('创建后台任务失败');
       }
@@ -986,6 +1030,12 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const handleStartPipeline = async () => {
     if (!tab.isSSHConnected) {
       message.error('请先连接SSH');
+      return;
+    }
+
+    const scheduleError = validateScheduledStartAt(tab.powerTestConfig.scheduledStartAt);
+    if (scheduleError) {
+      message.error(scheduleError);
       return;
     }
 
@@ -1157,6 +1207,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         name: tab.powerTestConfig.jobName || `${tab.name} - 流水线 - ${new Date().toLocaleString()}`,
         tabId: tab.id,
         clientId: getClientId(),
+        scheduledStartAt: tab.powerTestConfig.scheduledStartAt || undefined,
         config: {
           host: tab.sshConfig.host,
           port: tab.sshConfig.port,
@@ -1174,7 +1225,13 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         processedLogCountRef.current = 0;
         processedResultCountRef.current = 0;
         prevJobStatusRef.current = job.status;
-        addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 流水线后台任务已创建 [${job.id}]，正在运行中...`);
+        const scheduleHint = job.scheduledStartAt
+          ? `，将于 ${new Date(job.scheduledStartAt).toLocaleString()} 自动开始`
+          : '，正在运行中';
+        addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 流水线后台任务已创建 [${job.id}]${scheduleHint}...`);
+        if (job.scheduledStartAt) {
+          message.success(`定时流水线任务已创建，将于 ${new Date(job.scheduledStartAt).toLocaleString()} 自动开始`);
+        }
       } else {
         throw new Error('创建流水线后台任务失败');
       }
@@ -3133,6 +3190,37 @@ echo "{\"score\": \${SCORE}}"
                         style={{ width: 300 }}
                       />
                     </Space>
+                    <Space size="small">
+                      <span style={{ fontSize: 12, color: '#666' }}>定时启动:</span>
+                      <Input
+                        size="small"
+                        type="datetime-local"
+                        value={toLocalDateTimeValue(tab.powerTestConfig.scheduledStartAt)}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setPowerTestConfig(tab.id, {
+                            scheduledStartAt: raw ? new Date(raw).toISOString() : null,
+                          });
+                        }}
+                        disabled={tab.isRunningTest}
+                        style={{ width: 210 }}
+                      />
+                      {tab.powerTestConfig.scheduledStartAt && (
+                        <Button
+                          size="small"
+                          type="text"
+                          onClick={() => setPowerTestConfig(tab.id, { scheduledStartAt: null })}
+                          disabled={tab.isRunningTest}
+                        >
+                          清除
+                        </Button>
+                      )}
+                    </Space>
+                    {tab.powerTestConfig.scheduledStartAt && (
+                      <span style={{ fontSize: 11, color: '#fa8c16' }}>
+                        将于 {new Date(tab.powerTestConfig.scheduledStartAt).toLocaleString()} 自动开始，在此之前任务处于「等待中」
+                      </span>
+                    )}
                   </Space>
                   <Button
                     type="primary"
@@ -3140,7 +3228,9 @@ echo "{\"score\": \${SCORE}}"
                     icon={<PlayCircleOutlined />}
                     onClick={tab.pipelineMode ? handleStartPipeline : handleStartTest}
                   >
-                    {tab.pipelineMode ? '开始流水线测试' : '开始迭代测试'}
+                    {tab.powerTestConfig.scheduledStartAt
+                      ? (tab.pipelineMode ? '定时流水线测试' : '定时迭代测试')
+                      : (tab.pipelineMode ? '开始流水线测试' : '开始迭代测试')}
                   </Button>
                 </>
               )}

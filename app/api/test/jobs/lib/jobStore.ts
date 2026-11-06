@@ -159,6 +159,8 @@ export interface Job {
   clientId?: string;
   name: string;
   status: 'pending' | 'running' | 'completed' | 'aborted' | 'error';
+  /** 定时启动时间（ISO 字符串）；设置后任务保持 pending，到点自动开始执行 */
+  scheduledStartAt?: string;
   config: JobConfig;
   progress: {
     currentIteration: number;
@@ -206,8 +208,11 @@ function loadJobs(): void {
       const data = JSON.parse(raw) as Job[];
       console.log('[JobStore] loadJobs: loaded', data.length, 'jobs from', JOBS_FILE);
       for (const job of data) {
+        // 定时任务：仍处于 pending 且计划时间未到，保留 pending 由调度器重新挂起；
+        // 计划时间已过的定时任务同样保留 pending，由调度器立即启动
+        const isScheduled = job.status === 'pending' && !!job.scheduledStartAt;
         // 恢复时，正在运行或等待中的任务标记为中断（因为服务器可能已重启）
-        if (job.status === 'running' || job.status === 'pending') {
+        if (!isScheduled && (job.status === 'running' || job.status === 'pending')) {
           job.status = 'aborted';
           job.errorMessage = '服务器重启，任务已中止';
           if (job.logs.length >= MAX_LOGS_PER_JOB) {
@@ -550,6 +555,11 @@ export function unregisterJobRunner(id: string): void {
   activeJobRunners.delete(id);
 }
 
+/** 该任务的运行器是否仍在收尾（用于恢复前判断） */
+export function isJobRunnerActive(id: string): boolean {
+  return activeJobRunners.has(id);
+}
+
 export function requestAbortJob(id: string): boolean {
   const job = jobs.get(id);
   if (!job || (job.status !== 'running' && job.status !== 'pending')) return false;
@@ -567,10 +577,12 @@ export function requestAbortJob(id: string): boolean {
     }
   }
 
-  // 20秒后如果任务还在running，强制改为aborted
+  // 20秒后如果任务还在running，强制改为aborted。
+  // 必须同时确认 abortRequested 仍为 true：任务可能已在中止后立即恢复，
+  // 此时 abortRequested 被清空，不能再把它强制中止
   setTimeout(() => {
     const currentJob = jobs.get(id);
-    if (currentJob && currentJob.status === 'running') {
+    if (currentJob && currentJob.status === 'running' && currentJob.abortRequested) {
       console.warn(`[JobStore] Job ${id} abort timeout (20s), forcing aborted status`);
       currentJob.status = 'aborted';
       currentJob.updatedAt = new Date().toISOString();
@@ -587,23 +599,101 @@ export function requestAbortJob(id: string): boolean {
   return true;
 }
 
+/** 清空指定阶段在磁盘上的采样点与日志归档，避免恢复后新旧数据混在一起 */
+function cleanStageArtifacts(
+  jobId: string,
+  stageId: string | undefined,
+  stageName: string | undefined,
+  isPipeline: boolean,
+): void {
+  const dirs: string[] = [];
+  if (stageId) {
+    // 采样点始终按 stageId 分目录（单阶段任务的 stageId 为 'default'）
+    dirs.push(path.join(JOB_DATA_POINTS_DIR, jobId, `stage-${stageId}`));
+    // 日志归档：流水线按 stageId 分目录，单阶段直接位于任务根目录
+    dirs.push(
+      isPipeline
+        ? path.join(process.cwd(), '.data', 'logs', jobId, stageId)
+        : path.join(process.cwd(), '.data', 'logs', jobId),
+    );
+  } else {
+    dirs.push(path.join(JOB_DATA_POINTS_DIR, jobId));
+    dirs.push(path.join(process.cwd(), '.data', 'logs', jobId));
+  }
+  for (const dir of dirs) {
+    try {
+      if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+        console.log(`[JobStore] Cleaned stage artifacts for job ${jobId}${stageName ? ` [${stageName}]` : ''}:`, dir);
+      }
+    } catch (err) {
+      console.error('[JobStore] Failed to clean stage artifacts:', dir, err);
+    }
+  }
+}
+
+/**
+ * 恢复已中止的任务：从被中止的阶段重新开始。
+ *
+ * 语义：
+ *  - 定位被中止的阶段（流水线取 config.currentStageIndex，单阶段视为唯一阶段）；
+ *  - 清除该阶段的全部结果（job.results 中该 stageId 的项、stageResults 条目）
+ *    以及磁盘上的采样点 / 日志归档，保证恢复后数据不重复、不残留半轮脏数据；
+ *  - 已完成的更早阶段结果保留不动；
+ *  - 从该阶段第 1 轮重新执行，后续阶段继续执行到结束。
+ */
 export function resumeJob(id: string): Job | undefined {
   const job = jobs.get(id);
   if (!job || job.status !== 'aborted') return undefined;
 
-  const resumeFrom = job.progress.currentIteration;
+  const stages = (job.config.stages || []).slice().sort((a, b) => a.order - b.order);
+  const isPipeline = stages.length > 0;
+  const stageIndex = Math.min(
+    Math.max(0, job.config.currentStageIndex ?? 0),
+    Math.max(0, stages.length - 1),
+  );
+  const abortedStage = isPipeline ? stages[stageIndex] : undefined;
+  const abortedStageId = abortedStage?.id;
+  const abortedStageName = abortedStage?.name;
 
-  // 清除可能不完整的结果（大于等于恢复起始迭代的结果）
-  if (resumeFrom > 0) {
-    job.results = job.results.filter((r) => r.iteration < resumeFrom);
+  // 1. 清除被中止阶段的结果（保留更早阶段）
+  if (isPipeline && abortedStageId) {
+    job.results = job.results.filter((r) => r.stageId !== abortedStageId);
+    if (job.stageResults) {
+      const nextStageResults = { ...job.stageResults };
+      delete nextStageResults[abortedStageId];
+      job.stageResults = nextStageResults;
+    }
+    // 清除中止阶段之后（理论上不会有）的阶段结果，避免残留
+    const laterStageIds = new Set(stages.slice(stageIndex + 1).map((s) => s.id));
+    if (laterStageIds.size > 0) {
+      job.results = job.results.filter((r) => !r.stageId || !laterStageIds.has(r.stageId));
+      if (job.stageResults) {
+        job.stageResults = Object.fromEntries(
+          Object.entries(job.stageResults).filter(([key]) => !laterStageIds.has(key)),
+        );
+      }
+    }
+  } else {
+    // 单阶段：清空全部结果
+    job.results = [];
+    job.stageResults = undefined;
   }
 
+  // 2. 清除磁盘上该阶段的采样点与日志归档
+  cleanStageArtifacts(id, abortedStageId, abortedStageName, isPipeline);
+
+  // 3. 重置进度与阶段索引，从被中止阶段的首轮重新开始
+  job.progress = { currentIteration: 0, totalIterations: 0, currentLabel: '' };
+  job.config = { ...job.config, currentStageIndex: isPipeline ? stageIndex : 0 };
   job.status = 'pending';
   job.abortRequested = false;
   job.errorMessage = undefined;
   job.logs.push({
     type: 'info',
-    message: `恢复任务，从第 ${Math.max(1, resumeFrom)} 轮继续执行`,
+    message: abortedStage
+      ? `恢复任务：清除阶段 [${abortedStage.name}] 的已有数据，从该阶段第 1 轮重新执行`
+      : '恢复任务：清除已有数据，从第 1 轮重新执行',
     timestamp: new Date().toISOString(),
   });
   job.updatedAt = new Date().toISOString();

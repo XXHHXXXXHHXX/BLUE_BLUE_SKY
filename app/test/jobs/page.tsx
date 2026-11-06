@@ -73,8 +73,12 @@ export default function JobListPage() {
   };
 
   const handleResume = async (id: string) => {
-    await resumeJob(id);
-    message.success('任务已恢复，将从当前迭代继续执行');
+    try {
+      await resumeJob(id);
+      message.success('任务已恢复，已清除中止阶段的数据并从该阶段第 1 轮重新执行');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '恢复任务失败');
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -219,8 +223,17 @@ export default function JobListPage() {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
-      render: (status) => getStatusTag(status),
+      width: 190,
+      render: (status, record) => (
+        <Space direction="vertical" size={0}>
+          {getStatusTag(status)}
+          {record.status === 'pending' && record.scheduledStartAt && (
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              定时 {new Date(record.scheduledStartAt).toLocaleString()}
+            </Text>
+          )}
+        </Space>
+      ),
     },
     {
       title: '进度',

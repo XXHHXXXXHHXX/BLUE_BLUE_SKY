@@ -191,8 +191,12 @@ export default function JobDetailPage() {
 
   const handleResume = async () => {
     if (!job) return;
-    await resumeJob(job.id);
-    message.success('任务已恢复，将从当前迭代继续执行');
+    try {
+      await resumeJob(job.id);
+      message.success('任务已恢复，已清除中止阶段的数据并从该阶段第 1 轮重新执行');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '恢复任务失败');
+    }
   };
 
   const handleSaveReport = async () => {
@@ -396,6 +400,11 @@ export default function JobDetailPage() {
           <Title level={5} style={{ margin: 0 }}>{job.name}</Title>
           {getStatusTag(job.status)}
           <Tag color="blue">{job.config.host}</Tag>
+          {job.status === 'pending' && job.scheduledStartAt && (
+            <Tag color="orange">
+              定时 {new Date(job.scheduledStartAt).toLocaleString()}
+            </Tag>
+          )}
         </Space>
         <Space>
           <Text type="secondary" style={{ fontSize: 12 }}>

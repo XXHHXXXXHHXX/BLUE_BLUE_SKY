@@ -153,6 +153,8 @@ export interface Job {
   clientId?: string;
   name: string;
   status: 'pending' | 'running' | 'completed' | 'aborted' | 'error';
+  /** 定时启动时间（ISO 字符串）；设置后任务保持 pending，到点自动开始执行 */
+  scheduledStartAt?: string;
   config: JobConfig;
   progress: {
     currentIteration: number;
@@ -179,7 +181,14 @@ interface TestJobState {
   isLoading: boolean;
 
   fetchJobs: (opts?: { includeLogs?: boolean; includeDataPoints?: boolean }) => Promise<void>;
-  startJob: (payload: { name: string; tabId: string; clientId: string; config: JobConfig }) => Promise<Job | null>;
+  startJob: (payload: {
+    name: string;
+    tabId: string;
+    clientId: string;
+    config: JobConfig;
+    /** 定时启动时间（ISO 字符串）；为空表示立即启动 */
+    scheduledStartAt?: string;
+  }) => Promise<Job | null>;
   abortJob: (id: string) => Promise<void>;
   resumeJob: (id: string) => Promise<void>;
   deleteJob: (id: string) => Promise<void>;
@@ -214,12 +223,12 @@ export const useTestJobStore = create<TestJobState>((set, get) => ({
     }
   },
 
-  startJob: async ({ name, tabId, clientId, config }) => {
+  startJob: async ({ name, tabId, clientId, config, scheduledStartAt }) => {
     try {
       const res = await fetch('/api/test/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, tabId, clientId, config }),
+        body: JSON.stringify({ name, tabId, clientId, config, scheduledStartAt }),
       });
       const data = await res.json();
       if (data.success && data.job) {
@@ -228,8 +237,12 @@ export const useTestJobStore = create<TestJobState>((set, get) => ({
         }));
         return data.job as Job;
       }
+      if (data.message) {
+        throw new Error(data.message);
+      }
     } catch (err) {
       console.error('[testJobStore] startJob failed:', err);
+      throw err;
     }
     return null;
   },
@@ -258,9 +271,12 @@ export const useTestJobStore = create<TestJobState>((set, get) => ({
             j.id === id ? (data.job as Job) : j
           ),
         }));
+        return;
       }
+      throw new Error(data.message || '恢复任务失败');
     } catch (err) {
       console.error('[testJobStore] resumeJob failed:', err);
+      throw err;
     }
   },
 
