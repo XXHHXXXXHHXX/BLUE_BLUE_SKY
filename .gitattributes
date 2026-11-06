@@ -1,0 +1,2 @@
+# Shell 脚本必须保持 LF，否则在 Linux/远程执行会报 $'\r': command not found
+*.sh text eol=lf
