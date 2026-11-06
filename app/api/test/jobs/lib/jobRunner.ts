@@ -17,6 +17,30 @@ import {
   type PipelineStage,
 } from './jobStore';
 import { parseScoreFromOutput } from '../../../../../src/utils/scoreParsing';
+import { SerialMonitor } from './serialMonitor';
+import { power0MetricLabel } from '../../../../../src/types/serial';
+import { powerCapMetricLabel, POWERCAP_METRICS } from '../../../../../src/utils/powerCapParser';
+
+/** 串口指标显示名：powerCap 的指标名（power/core/uncore）与电源域指标不重叠 */
+function serialMetricLabel(metric: string): string {
+  return (POWERCAP_METRICS as readonly string[]).includes(metric)
+    ? powerCapMetricLabel(metric)
+    : power0MetricLabel(metric);
+}
+
+/** 单条监控命令的运行状态（SSH 轮询 / 持续模式 / 串口采集） */
+interface MonitorState {
+  dataPoints: Array<{ timestamp: string; value: number; raw: string }>;
+  columnDataPoints?: Array<Array<{ timestamp: string; value: number; raw: string }>>;
+  intervalId: ReturnType<typeof setInterval>;
+  ssh?: NodeSSH;
+  /** 持续模式：后台启动命令的远程 PID（迭代结束后用于终止） */
+  remotePid?: string | null;
+  /** 串口（SOL）采集器；设置时 ssh 为空 */
+  serialMonitor?: SerialMonitor;
+  /** 串口采集的监控命令显示名（用于拼接指标名） */
+  serialCommandName?: string;
+}
 
 /** 生成笛卡尔积迭代组合（支持从高到低和自定义列表） */
 function generateIterations(
@@ -255,24 +279,26 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
   const { host, port, username, password } = job.config;
 
   // 监控状态管理
-  const monitorStates = new Map<
-    string,
-    {
-      dataPoints: Array<{ timestamp: string; value: number; raw: string }>;
-      columnDataPoints?: Array<Array<{ timestamp: string; value: number; raw: string }>>;
-      intervalId: ReturnType<typeof setInterval>;
-      ssh: NodeSSH;
-      /** 持续模式：后台启动命令的远程 PID（迭代结束后用于终止） */
-      remotePid?: string | null;
-    }
-  >();
+  const monitorStates = new Map<string, MonitorState>();
 
   const cleanupMonitors = () => {
     for (const state of monitorStates.values()) {
       try { clearInterval(state.intervalId); } catch { /* ignore */ }
-      try { state.ssh.dispose(); } catch { /* ignore */ }
+      // 串口会话必须优雅关闭（先 deactivate 再释放），只做兜底触发
+      if (state.serialMonitor) {
+        state.serialMonitor.stop().catch(() => { /* ignore */ });
+      }
+      try { state.ssh?.dispose(); } catch { /* ignore */ }
     }
     monitorStates.clear();
+  };
+
+  /** 等待所有串口监控会话优雅关闭后再释放 SSH（中止/汇总路径使用） */
+  const stopSerialMonitors = async () => {
+    const monitors = [...monitorStates.values()]
+      .map((s) => s.serialMonitor)
+      .filter((m): m is SerialMonitor => !!m);
+    await Promise.all(monitors.map((m) => m.stop().catch(() => { /* ignore */ })));
   };
 
   /** 终止持续模式监控的远程后台进程（优先 SIGINT 优雅终止，超时再兜底 SIGKILL） */
@@ -463,13 +489,13 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
 
     const logConfig = stage.logMonitorConfig;
     const isContinuous = (logConfig?.mode || 'interval') === 'continuous';
-    if (!logConfig || !logConfig.enabled || !logMonitorLocalDir) {
-      cleanupLogMonitor();
-      return undefined;
-    }
+    // 串口监控的解析结果也要打包，因此即使未启用日志监控也继续
+    const archiveDir = logConfig?.enabled && logMonitorLocalDir
+      ? logMonitorLocalDir
+      : path.join(getLogBaseDir(stage), `iteration-${iteration}`);
 
     try {
-      if (isContinuous && logMonitorSsh) {
+      if (logConfig?.enabled && logMonitorLocalDir && isContinuous && logMonitorSsh) {
         // ===== 持续模式：先终止后台启动的进程（确保 perf 等落盘），再执行获取命令 =====
         await stopContinuousRemote(logConfig);
         // 稍等片刻让 perf record 等完成落盘
@@ -480,7 +506,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
           try {
             const fetchResult = await withTimeout(logMonitorSsh.execCommand(logConfig.fetchCommand), 60000, '日志监控获取命令');
             const content = (fetchResult.stdout || '') + (fetchResult.stderr ? `\n[stderr]\n${fetchResult.stderr}` : '');
-            fs.writeFileSync(path.join(logMonitorLocalDir, 'continuous-result.log'), content, 'utf-8');
+            fs.writeFileSync(path.join(archiveDir, 'continuous-result.log'), content, 'utf-8');
             addJobLog(jobId, 'info', `日志监控（持续模式）获取结果已保存（${content.length} 字节）`);
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -496,14 +522,16 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       }
 
       // 检查本地是否有日志文件
-      if (!fs.existsSync(logMonitorLocalDir)) {
-        addJobLog(jobId, 'warning', `日志本地目录不存在，跳过打包: ${logMonitorLocalDir}`);
+      if (!fs.existsSync(archiveDir)) {
+        if (logConfig?.enabled) {
+          addJobLog(jobId, 'warning', `日志本地目录不存在，跳过打包: ${archiveDir}`);
+        }
         return undefined;
       }
-      const files = fs.readdirSync(logMonitorLocalDir);
+      const files = fs.readdirSync(archiveDir);
       if (files.length === 0) {
-        addJobLog(jobId, 'warning', `日志本地目录为空，跳过打包: ${logMonitorLocalDir}`);
-        fs.rmdirSync(logMonitorLocalDir);
+        addJobLog(jobId, 'warning', `日志本地目录为空，跳过打包: ${archiveDir}`);
+        fs.rmSync(archiveDir, { recursive: true, force: true });
         return undefined;
       }
 
@@ -514,7 +542,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
 
       const zip = new JSZip();
       for (const file of files) {
-        const filePath = path.join(logMonitorLocalDir, file);
+        const filePath = path.join(archiveDir, file);
         if (fs.statSync(filePath).isFile()) {
           zip.file(file, fs.readFileSync(filePath));
         }
@@ -523,7 +551,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       fs.writeFileSync(localPath, zipBuffer);
 
       // 打包完成后清理本地临时目录
-      fs.rmSync(logMonitorLocalDir, { recursive: true, force: true });
+      fs.rmSync(archiveDir, { recursive: true, force: true });
 
       addJobLog(jobId, 'info', `第 ${iteration} 轮日志已打包: iteration-${iteration}.zip（含 ${files.length} 个文件）`);
       return localPath;
@@ -531,6 +559,8 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       const msg = err instanceof Error ? err.message : String(err);
       addJobLog(jobId, 'warning', `日志打包失败: ${msg}`);
       return undefined;
+    } finally {
+      cleanupLogMonitor();
     }
   };
 
@@ -621,9 +651,11 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       ...(curStage?.monitorCommands ?? []),
       ...(curStage?.stages ?? []).flatMap((st) => st.monitorCommands ?? []),
     ];
+    // 串口会话必须先优雅关闭（发 deactivate）再释放连接
+    stopSerialMonitors().catch(() => { /* ignore */ });
     for (const [cmdId, state] of monitorStates) {
       const cmd = allMonitorCmds.find((c) => c.id === cmdId);
-      if (cmd?.continuous && cmd.startCommand?.trim()) {
+      if (cmd?.continuous && cmd.startCommand?.trim() && state.ssh) {
         stopContinuousMonitorRemote(state.ssh, state.remotePid, cmd.startCommand).catch(() => {});
       }
     }
@@ -881,6 +913,38 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       cleanupMonitors();
 
       for (const cmd of activeMonitors) {
+        // ===== 串口（BMC SOL）监控：独立分支，不走 SSH 轮询逻辑 =====
+        if (cmd.serial) {
+          if (!cmd.bmcConfig) {
+            addJobLog(jobId, 'warning', `监控 [${cmd.name}] 串口模式需要 BMC 会话，已跳过`);
+            continue;
+          }
+          const monitor = new SerialMonitor({
+            jobId,
+            commandId: cmd.id,
+            commandName: cmd.name,
+            config: cmd.serial,
+            bmcConfig: cmd.bmcConfig,
+            logDir: path.join(getLogBaseDir(stage), `iteration-${iteration}`),
+            onLog: (level, message) => addJobLog(jobId, level === 'error' ? 'error' : level, `监控 [${cmd.name}] ${message}`),
+          });
+          const state: MonitorState = {
+            dataPoints: [],
+            intervalId: null as unknown as ReturnType<typeof setInterval>,
+            serialMonitor: monitor,
+            serialCommandName: cmd.name,
+          };
+          try {
+            await monitor.start();
+            monitorStates.set(cmd.id, state);
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            addJobLog(jobId, 'warning', `监控 [${cmd.name}]（串口模式）启动失败: ${errMsg}`);
+            await monitor.stop().catch(() => { /* ignore */ });
+          }
+          continue;
+        }
+
         let monitorSsh: NodeSSH | null = null;
         try {
           monitorSsh = new NodeSSH();
@@ -1083,14 +1147,53 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
         const isContinuous = !!(cmd.continuous && cmd.startCommand && cmd.startCommand.trim());
         const isListMode = cmd.mode === 'list' && cmd.columns && cmd.columns.length > 0;
 
-        if (isContinuous) {
+        // ===== 串口模式：停止采集并按指标生成多条序列 =====
+        if (state.serialMonitor) {
+          await state.serialMonitor.stop().catch(() => { /* ignore */ });
+          const series = state.serialMonitor.results();
+          for (const { metric, points } of series) {
+            let filteredPoints = filterByPosition(points, cmd.skipFirst ?? 0, cmd.takeLast ?? 0, cmd.skipLast ?? 0);
+            filteredPoints = filterByJumps(
+              filteredPoints,
+              cmd.jumpThreshold ?? 0,
+              cmd.jumpThresholdType ?? 'percent',
+              cmd.skipJumps ?? 0
+            );
+            const validValues = filteredPoints
+              .filter((p) => !isNaN(p.value) && !(cmd.excludeZero && p.value === 0))
+              .map((p) => p.value);
+            const averageValue = validValues.length > 0 ? validValues.reduce((a, b) => a + b, 0) / validValues.length : 0;
+            const key = `${cmd.id}__serial__${metric}`;
+            monitorResults[key] = {
+              commandId: key,
+              commandName: `${cmd.name} - ${serialMetricLabel(metric)}`,
+              dataPoints: filteredPoints,
+              averageValue,
+            };
+          }
+          if (series.length === 0) {
+            // custom 命令只记录日志，不产采样点属正常
+            if (cmd.serial?.kind === 'custom') {
+              addJobLog(jobId, 'info', `监控 [${cmd.name}]（串口模式）自定义命令仅记录日志，无采样点`);
+            } else {
+              addJobLog(jobId, 'warning', `监控 [${cmd.name}]（串口模式）本轮未采集到数据`);
+            }
+          } else {
+            const total = series.reduce((a, s) => a + s.points.length, 0);
+            addJobLog(jobId, 'info', `监控 [${cmd.name}]（串口模式）共 ${series.length} 个指标 / ${total} 个采样点`);
+          }
+          continue;
+        }
+
+        if (isContinuous && state.ssh) {
+          const continuousSsh = state.ssh;
           // ===== 持续模式：先终止后台进程（确保 perf 等落盘），再执行结束命令解析采样点 =====
-          await stopContinuousMonitorRemote(state.ssh, state.remotePid, cmd.startCommand || '');
+          await stopContinuousMonitorRemote(continuousSsh, state.remotePid, cmd.startCommand || '');
           // 稍等片刻让 perf record 等完成落盘
           await new Promise((r) => setTimeout(r, 1000));
           if (cmd.fetchCommand?.trim()) {
             try {
-              const fetchResult = await withTimeout(state.ssh.execCommand(cmd.fetchCommand), 60000, `监控 [${cmd.name}] 结束命令`);
+              const fetchResult = await withTimeout(continuousSsh.execCommand(cmd.fetchCommand), 60000, `监控 [${cmd.name}] 结束命令`);
               const { points, columnPoints, skippedLines } = parseContinuousOutput(fetchResult.stdout || '', isListMode ? 'list' : 'single');
               if (isListMode && state.columnDataPoints) {
                 // 多值模式：把解析出的列数据填入 columnDataPoints
@@ -1108,7 +1211,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
           }
         }
 
-        try { state.ssh.dispose(); } catch { /* ignore */ }
+        try { state.ssh?.dispose(); } catch { /* ignore */ }
 
         if (isListMode && state.columnDataPoints) {
           // list 模式：为每个列生成独立的 monitorResult

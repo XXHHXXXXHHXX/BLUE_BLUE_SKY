@@ -2,6 +2,7 @@
  * 后台测试任务 Store - 管理服务器端后台任务的创建、查询和中止
  */
 import { create } from 'zustand';
+import type { SerialMonitorConfig } from '../types/serial';
 
 export interface JobLog {
   type: string;
@@ -88,6 +89,8 @@ export interface JobConfig {
     continuous?: boolean;
     startCommand?: string;
     fetchCommand?: string;
+    /** 串口（BMC SOL）监控配置；设置后该条命令走串口采集 */
+    serial?: SerialMonitorConfig;
   }>;
   // 心跳检测配置
   heartbeatEnabled?: boolean;

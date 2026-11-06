@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import type { SerialMonitorConfig } from '../../../../src/types/serial';
 
 // ========== 数据目录配置 ==========
 const DATA_DIR = path.join(process.cwd(), '.data');
@@ -38,8 +39,9 @@ export interface PipelineStageTemplate {
     continuous?: boolean;
     startCommand?: string;
     fetchCommand?: string;
+    /** 串口（BMC SOL）监控配置 */
+    serial?: SerialMonitorConfig;
   }>;
-  /** 阶段独立环境变量 */
   envVars?: Array<{ key: string; value: string }>;
   /** 用例包要求的必填环境变量及其填写值 */
   requiredEnvVarValues?: Record<string, string>;

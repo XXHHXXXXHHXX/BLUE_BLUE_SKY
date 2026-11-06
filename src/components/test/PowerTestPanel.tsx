@@ -29,6 +29,7 @@ import {
   Dropdown,
   TreeSelect,
   Menu,
+  Spin,
 } from 'antd';
 import {
   PlayCircleOutlined,
@@ -80,6 +81,12 @@ import MonitorConfigPanel from './MonitorConfigPanel';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import ScoreDisplay from './ScoreDisplay';
 import { getClientId } from '../../utils/clientId';
+import { stripMonitorSeriesSuffix } from '../../utils/monitorKeys';
+import {
+  SERIAL_UART_PRESETS,
+  isCommandAllowedOnUart,
+  serialCommandPreset,
+} from '../../types/serial';
 
 const { Dragger } = Upload;
 const { Option } = Select;
@@ -172,6 +179,11 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     power: number;
     iterationLabel: string;
     dataPoints: Array<{ timestamp: string; value: number; raw: string }>;
+    /** 采样点已落盘、内存被清空时，弹窗打开后按需拉取 */
+    loading?: boolean;
+    total?: number;
+    /** 流水线阶段：采样点按 stage 分目录落盘 */
+    stageId?: string;
   } | null>(null);
 
   const chartModal = useMaximizableModal({ minWidth: 1000 });
@@ -185,6 +197,58 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const lastJobIdRef = useRef<string | null>(null);
   // 同步 activeJobId 到 ref，供 visibilitychange 等事件回调读取最新值，避免闭包捕获旧值
   const activeJobIdRef = useRef<string | null>(null);
+
+  // 采样点在每轮结束时已落盘并从内存清空（只留 dataPointsCount），
+  // 详情弹窗打开时按需从分页接口拉取，避免显示空曲线。
+  const monitorDetailLoadedRef = useRef<string | null>(null);
+  const detailOpen = monitorDetailModal?.open ?? false;
+  const detailIteration = monitorDetailModal?.iteration;
+  const detailCommandId = monitorDetailModal?.commandId;
+  const detailStageId = monitorDetailModal?.stageId;
+  const detailPointCount = monitorDetailModal?.dataPoints.length ?? 0;
+  useEffect(() => {
+    if (!detailOpen || detailIteration === undefined || !detailCommandId) return;
+    if (detailPointCount > 0) return;
+    const jobId = activeJobId || lastJobIdRef.current;
+    if (!jobId) return;
+
+    // 同一次打开只拉一次，避免 setState 触发本 effect 重跑后重复请求
+    const requestKey = `${jobId}|${detailStageId || ''}|${detailIteration}|${detailCommandId}`;
+    if (monitorDetailLoadedRef.current === requestKey) return;
+    monitorDetailLoadedRef.current = requestKey;
+
+    // 不依赖本 effect 的 cleanup 取消请求：setState 会让 effect 重跑，
+    // cleanup 若置 cancelled 会丢掉正在返回的响应（弹窗卡在加载中）。
+    const load = async () => {
+      setMonitorDetailModal((prev) => (prev ? { ...prev, loading: true } : prev));
+      try {
+        const params = new URLSearchParams({
+          iteration: String(detailIteration),
+          commandId: detailCommandId,
+          offset: '0',
+          limit: '5000',
+        });
+        if (detailStageId) params.set('stageId', detailStageId);
+        const res = await fetch(`/api/test/jobs/${jobId}/monitor-data?${params.toString()}`);
+        const json = await res.json();
+        const points: Array<{ timestamp: string; value: number; raw: string }> = json.success
+          ? json.data.dataPoints
+          : [];
+        const total = json.success ? Number(json.data.total) || 0 : 0;
+        setMonitorDetailModal((prev) =>
+          prev && prev.iteration === detailIteration && prev.commandId === detailCommandId
+            ? { ...prev, dataPoints: points, total, loading: false }
+            : prev
+        );
+      } catch (err) {
+        console.error('加载采样点失败:', err);
+        monitorDetailLoadedRef.current = null;
+        setMonitorDetailModal((prev) => (prev ? { ...prev, loading: false } : prev));
+      }
+    };
+
+    load();
+  }, [detailOpen, detailIteration, detailCommandId, detailStageId, detailPointCount, activeJobId]);
 
   // 保存报告弹窗打开时拉取目录，并默认选中最近使用的目录
   useEffect(() => {
@@ -668,7 +732,26 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         message.error('请填写所有启用的监控命令名称');
         return;
       }
-      if (monitor.continuous) {
+      if (monitor.serial) {
+        if (monitor.target !== 'bmc') {
+          message.error(`监控命令 [${monitor.name}] 串口模式必须使用 BMC 会话`);
+          return;
+        }
+        if (monitor.serial.uart !== 0) {
+          const kind = monitor.serial.kind || 'power0';
+          if (!isCommandAllowedOnUart(kind, monitor.serial.uart)) {
+            const preset = serialCommandPreset(kind);
+            message.error(
+              `监控命令 [${monitor.name}]「${preset.label}」不支持该 UART，仅支持 ${preset.uarts.map((u) => SERIAL_UART_PRESETS.find((p) => p.id === u)?.label ?? u).join(' / ')}`
+            );
+            return;
+          }
+          if (kind === 'custom' && !monitor.serial.command?.trim()) {
+            message.error(`监控命令 [${monitor.name}] 自定义串口命令不能为空`);
+            return;
+          }
+        }
+      } else if (monitor.continuous) {
         if (!monitor.startCommand?.trim()) {
           message.error(`监控命令 [${monitor.name}] 持续模式已启用，请填写启动命令`);
           return;
@@ -1541,7 +1624,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     });
     // 将结果中的 commandId 分配到对应分组
     allMonitorCommandIds.forEach(id => {
-      const originalId = id.replace(/__col__\d+$/, '');
+      const originalId = stripMonitorSeriesSuffix(id);
       if (!groups[originalId]) {
         groups[originalId] = { originalId, name: originalId, colIds: [] };
       }
@@ -3231,6 +3314,7 @@ echo "{\"score\": \${SCORE}}"
                                       key: colId,
                                       label: colName,
                                       onClick: () => {
+                                        monitorDetailLoadedRef.current = null;
                                         setMonitorDetailModal({
                                           open: true,
                                           commandId: colId,
@@ -3239,6 +3323,8 @@ echo "{\"score\": \${SCORE}}"
                                           power: record.power,
                                           iterationLabel: result.iterationLabel || `功耗=${record.power}`,
                                           dataPoints: mr.dataPoints,
+                                          total: mr.dataPoints.length > 0 ? mr.dataPoints.length : (mr.dataPointsCount ?? 0),
+                                          stageId: result.stageId,
                                         });
                                       },
                                     };
@@ -3254,6 +3340,7 @@ echo "{\"score\": \${SCORE}}"
                                       size="small"
                                       icon={<LineChartOutlined />}
                                       onClick={() => {
+                                        monitorDetailLoadedRef.current = null;
                                         setMonitorDetailModal({
                                           open: true,
                                           commandId: colId,
@@ -3262,6 +3349,8 @@ echo "{\"score\": \${SCORE}}"
                                           power: record.power,
                                           iterationLabel: result.iterationLabel || `功耗=${record.power}`,
                                           dataPoints: mr.dataPoints,
+                                          total: mr.dataPoints.length > 0 ? mr.dataPoints.length : (mr.dataPointsCount ?? 0),
+                                          stageId: result.stageId,
                                         });
                                       }}
                                     >
@@ -3477,30 +3566,36 @@ echo "{\"score\": \${SCORE}}"
         ]}
       >
         {monitorDetailModal && (
-          <>
+          <Spin spinning={!!monitorDetailModal.loading} tip="加载采样点...">
             <div style={{ marginBottom: 16 }}>
               <Tag>迭代: {monitorDetailModal.iteration}</Tag>
               <Tag>参数: {monitorDetailModal.iterationLabel}</Tag>
-              <Tag>采样点数: {monitorDetailModal.dataPoints.length}</Tag>
+              <Tag>采样点数: {monitorDetailModal.total ?? monitorDetailModal.dataPoints.length}</Tag>
             </div>
-            <ReactECharts
-              option={generateIterationDetailChartOption(monitorDetailModal.commandName, monitorDetailModal.dataPoints)}
-              style={{ height: 400 }}
-              onChartReady={bindYAxisWheelZoom}
-            />
-            <Table
-              size="small"
-              pagination={false}
-              columns={[
-                { title: '序号', dataIndex: 'idx', width: 70, render: (v: number) => v + 1 },
-                { title: '时间', dataIndex: 'timestamp', width: 180, render: (v: string) => new Date(v).toLocaleTimeString() },
-                { title: '监控值', dataIndex: 'value', width: 100, render: (v: number | null) => (!isNaN(v ?? 0) ? (v ?? 0).toFixed(4) : '0') },
-                { title: '原始输出', dataIndex: 'raw', ellipsis: true },
-              ]}
-              dataSource={monitorDetailModal.dataPoints.map((p, idx) => ({ ...p, idx, key: idx }))}
-              scroll={{ x: 'max-content', y: detailModal.isMaximized ? 420 : 250 }}
-            />
-          </>
+            {monitorDetailModal.dataPoints.length === 0 ? (
+              !monitorDetailModal.loading && <Empty description="暂无采样点数据" style={{ margin: '24px 0' }} />
+            ) : (
+              <>
+                <ReactECharts
+                  option={generateIterationDetailChartOption(monitorDetailModal.commandName, monitorDetailModal.dataPoints)}
+                  style={{ height: 400 }}
+                  onChartReady={bindYAxisWheelZoom}
+                />
+                <Table
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    { title: '序号', dataIndex: 'idx', width: 70, render: (v: number) => v + 1 },
+                    { title: '时间', dataIndex: 'timestamp', width: 180, render: (v: string) => new Date(v).toLocaleTimeString() },
+                    { title: '监控值', dataIndex: 'value', width: 100, render: (v: number | null) => (!isNaN(v ?? 0) ? (v ?? 0).toFixed(4) : '0') },
+                    { title: '原始输出', dataIndex: 'raw', ellipsis: true },
+                  ]}
+                  dataSource={monitorDetailModal.dataPoints.map((p, idx) => ({ ...p, idx, key: idx }))}
+                  scroll={{ x: 'max-content', y: detailModal.isMaximized ? 420 : 250 }}
+                />
+              </>
+            )}
+          </Spin>
         )}
       </Modal>
 

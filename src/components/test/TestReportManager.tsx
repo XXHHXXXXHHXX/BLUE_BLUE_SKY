@@ -55,6 +55,7 @@ import { getScrollLegend, tooltipBase, formatAxisTooltip } from '../../utils/mon
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import EnvironmentInfoModal from './EnvironmentInfoModal';
 import { collectScoreNames } from '../../utils/scoreParsing';
+import { stripMonitorSeriesSuffix } from '../../utils/monitorKeys';
 import ScoreDisplay from './ScoreDisplay';
 
 interface TestReportManagerProps {
@@ -631,7 +632,7 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
   const reportMonitorGroups = React.useMemo(() => {
     const groups: Record<string, { originalId: string; name: string; colIds: string[] }> = {};
     reportMonitorCommandIds.forEach((id) => {
-      const originalId = id.replace(/__col__\d+$/, '');
+      const originalId = stripMonitorSeriesSuffix(id);
       if (!groups[originalId]) {
         const firstResult = viewingReport?.results.find((r) => r.monitorResults?.[id]);
         const fullName = firstResult?.monitorResults?.[id].commandName || originalId;

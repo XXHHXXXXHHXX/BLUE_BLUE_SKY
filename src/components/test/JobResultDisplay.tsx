@@ -9,6 +9,7 @@ import { getScrollLegend, tooltipBase, formatAxisTooltip } from '../../utils/mon
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import { useTestJobStore, type JobResult, type JobConfig } from '../../stores/testJobStore';
 import { collectScoreNames } from '../../utils/scoreParsing';
+import { stripMonitorSeriesSuffix } from '../../utils/monitorKeys';
 import ScoreDisplay from './ScoreDisplay';
 
 interface JobResultDisplayProps {
@@ -166,7 +167,7 @@ export default function JobResultDisplay({ results, config, jobId, onAverageRang
     return Array.from(ids);
   }, [results]);
 
-  // 按原始监控命令分组（处理 list 模式的 __col__N 后缀）
+  // 按原始监控命令分组（list 模式 __col__N / 串口模式 __serial__metric 都归并到原命令）
   const monitorGroups = useMemo(() => {
     const groups: Record<string, { originalId: string; name: string; colIds: string[] }> = {};
     // 基于当前配置构建分组骨架
@@ -177,9 +178,12 @@ export default function JobResultDisplay({ results, config, jobId, onAverageRang
     });
     // 将结果中的 commandId 分配到对应分组
     allMonitorCommandIds.forEach((id) => {
-      const originalId = id.replace(/__col__\d+$/, '');
+      const originalId = stripMonitorSeriesSuffix(id);
       if (!groups[originalId]) {
-        groups[originalId] = { originalId, name: originalId, colIds: [] };
+        // 配置缺失时（历史任务/报告）从 commandName 还原命令名：`${name} - ${序列名}`
+        const first = results.find((r) => r.monitorResults?.[id]);
+        const fallbackName = first?.monitorResults?.[id].commandName.split(' - ')[0] || originalId;
+        groups[originalId] = { originalId, name: fallbackName, colIds: [] };
       }
       if (!groups[originalId].colIds.includes(id)) {
         groups[originalId].colIds.push(id);

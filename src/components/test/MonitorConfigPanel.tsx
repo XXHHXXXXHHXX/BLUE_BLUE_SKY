@@ -35,6 +35,14 @@ import { useTestStore, type MonitorCommand } from '../../stores/testStore';
 import { useBMCSessionStore } from '../../stores/bmcSessionStore';
 import { useTestIterationConfigStore } from '../../stores/testIterationConfigStore';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
+import {
+  SERIAL_UART_PRESETS,
+  SERIAL_COMMAND_PRESETS,
+  isCommandAllowedOnUart,
+  serialCommandPreset,
+  type SerialCommandKind,
+  type SerialUartId,
+} from '../../types/serial';
 
 const { Option } = Select;
 
@@ -82,7 +90,7 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
 
   const addCommand = () => {
     const newCommand: MonitorCommand = {
-      id: `monitor-${Date.now()}`,
+      id: `monitor-${Math.random().toString(36).slice(2, 10)}`,
       name: '',
       command: '',
       target: 'host',
@@ -101,6 +109,7 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
       continuous: false,
       startCommand: '',
       fetchCommand: '',
+      serial: undefined,
     };
     updateCommands([...commands, newCommand]);
   };
@@ -303,11 +312,32 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                         updateCommand(index, {
                           continuous: e.target.checked,
                           command: e.target.checked ? '' : cmd.command,
+                          serial: e.target.checked ? undefined : cmd.serial,
                         })
                       }
-                      disabled={disabled}
+                      disabled={disabled || !!cmd.serial}
                     >
                       <span style={{ color: '#666', fontSize: 12 }}>持续模式</span>
+                    </Checkbox>
+                  </Tooltip>
+                </Col>
+                <Col flex="none">
+                  <Tooltip title="串口模式：通过 BMC SOL 会话连接芯片串口，按 UART 周期下发命令并采集电源域功耗；AP 串口为只读观察模式">
+                    <Checkbox
+                      checked={!!cmd.serial}
+                      onChange={(e) =>
+                        updateCommand(index, {
+                          serial: e.target.checked
+                            ? { uart: 1, kind: 'power0', command: 'power 0', minIntervalMs: 0 }
+                            : undefined,
+                          continuous: e.target.checked ? false : cmd.continuous,
+                          target: e.target.checked ? 'bmc' : cmd.target,
+                          command: e.target.checked ? '' : cmd.command,
+                        })
+                      }
+                      disabled={disabled || !!cmd.continuous}
+                    >
+                      <span style={{ color: '#666', fontSize: 12 }}>串口模式</span>
                     </Checkbox>
                   </Tooltip>
                 </Col>
@@ -323,7 +353,7 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                         prefix={<span style={{ color: '#999', fontSize: 12 }}>名称</span>}
                       />
                     </Col>
-                    {!cmd.continuous && (
+                    {!cmd.continuous && !cmd.serial && (
                       <Col span={16}>
                         <Input
                           size="small"
@@ -335,25 +365,126 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                         />
                       </Col>
                     )}
-                    <Col span={8}>
-                      <Select
-                        size="small"
-                        style={{ width: '100%' }}
-                        value={cmd.mode || 'single'}
-                        onChange={(value) =>
-                          updateCommand(index, {
-                            mode: value as 'single' | 'list',
-                            columns: value === 'list' ? cmd.columns || [] : undefined,
-                          })
-                        }
-                        disabled={disabled}
-                        placeholder="模式"
-                      >
-                        <Option value="single">单值模式</Option>
-                        <Option value="list">列表模式</Option>
-                      </Select>
-                    </Col>
-                    {(cmd.mode === 'list') && (
+                    {cmd.serial && (
+                      <>
+                        <Col span={8}>
+                          <Select
+                            size="small"
+                            style={{ width: '100%' }}
+                            value={cmd.serial.uart}
+                            onChange={(value) => {
+                              const uart = value as SerialUartId;
+                              const kind: SerialCommandKind = cmd.serial!.kind || 'power0';
+                              // 切换 UART 后若原命令不适用，自动回退到该 UART 支持的第一种命令
+                              if (isCommandAllowedOnUart(kind, uart)) {
+                                updateCommand(index, { serial: { ...cmd.serial!, uart } });
+                                return;
+                              }
+                              const fallback = SERIAL_COMMAND_PRESETS.find(
+                                (p) => p.parsed && isCommandAllowedOnUart(p.kind, uart)
+                              );
+                              updateCommand(index, {
+                                serial: {
+                                  ...cmd.serial!,
+                                  uart,
+                                  kind: fallback?.kind ?? 'custom',
+                                  command: fallback?.command ?? '',
+                                },
+                              });
+                            }}
+                            disabled={disabled}
+                          >
+                            {SERIAL_UART_PRESETS.map((preset) => (
+                              <Option key={preset.id} value={preset.id}>
+                                {preset.label}（{preset.hex}）
+                              </Option>
+                            ))}
+                          </Select>
+                        </Col>
+                        {cmd.serial.uart === 0 ? (
+                          <Col span={16}>
+                            <div style={{ fontSize: 12, color: '#666', paddingTop: 4 }}>
+                              AP 串口为只读观察模式，不下发命令
+                            </div>
+                          </Col>
+                        ) : (
+                          <>
+                            <Col span={7}>
+                              <Select
+                                size="small"
+                                style={{ width: '100%' }}
+                                value={cmd.serial.kind || 'power0'}
+                                onChange={(value) => {
+                                  const kind = value as SerialCommandKind;
+                                  const preset = serialCommandPreset(kind);
+                                  updateCommand(index, {
+                                    serial: {
+                                      ...cmd.serial!,
+                                      kind,
+                                      command: preset.parsed ? preset.command : '',
+                                    },
+                                  });
+                                }}
+                                disabled={disabled}
+                              >
+                                {SERIAL_COMMAND_PRESETS.map((preset) => (
+                                  <Option
+                                    key={preset.kind}
+                                    value={preset.kind}
+                                    disabled={!isCommandAllowedOnUart(preset.kind, cmd.serial!.uart)}
+                                  >
+                                    {preset.label}
+                                  </Option>
+                                ))}
+                              </Select>
+                            </Col>
+                            {cmd.serial.kind === 'custom' || !cmd.serial.kind ? (
+                              <Col span={9}>
+                                <Input
+                                  size="small"
+                                  placeholder="自定义命令（输出原样存盘）"
+                                  value={cmd.serial.command || ''}
+                                  onChange={(e) =>
+                                    updateCommand(index, {
+                                      serial: { ...cmd.serial!, command: e.target.value },
+                                    })
+                                  }
+                                  disabled={disabled}
+                                  prefix={<span style={{ color: '#999', fontSize: 12 }}>命令</span>}
+                                />
+                              </Col>
+                            ) : (
+                              <Col span={9}>
+                                <div style={{ fontSize: 12, color: '#666', paddingTop: 4 }}>
+                                  下发：{serialCommandPreset(cmd.serial.kind).command}
+                                </div>
+                              </Col>
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
+                    {!cmd.serial && (
+                      <Col span={8}>
+                        <Select
+                          size="small"
+                          style={{ width: '100%' }}
+                          value={cmd.mode || 'single'}
+                          onChange={(value) =>
+                            updateCommand(index, {
+                              mode: value as 'single' | 'list',
+                              columns: value === 'list' ? cmd.columns || [] : undefined,
+                            })
+                          }
+                          disabled={disabled}
+                          placeholder="模式"
+                        >
+                          <Option value="single">单值模式</Option>
+                          <Option value="list">列表模式</Option>
+                        </Select>
+                      </Col>
+                    )}
+                    {!cmd.serial && cmd.mode === 'list' && (
                       <Col span={16}>
                         <Input
                           size="small"
@@ -394,36 +525,59 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                         </Col>
                       </>
                     )}
-                    <Col span={8}>
-                      <Select
-                        size="small"
-                        style={{ width: '100%' }}
-                        value={cmd.target}
-                        onChange={(value) =>
-                          updateCommand(index, {
-                            target: value,
-                            sessionId: value === 'host' ? null : cmd.sessionId,
-                          })
-                        }
-                        disabled={disabled}
-                        placeholder="执行目标"
-                      >
-                        <Option value="host">
-                          <Space>
-                            <DesktopOutlined />
-                            远程主机
-                          </Space>
-                        </Option>
-                        <Option value="bmc">
-                          <Space>
-                            <SafetyOutlined />
-                            BMC
-                          </Space>
-                        </Option>
-                      </Select>
-                    </Col>
+                    {!cmd.serial && (
+                      <Col span={8}>
+                        <Select
+                          size="small"
+                          style={{ width: '100%' }}
+                          value={cmd.target}
+                          onChange={(value) =>
+                            updateCommand(index, {
+                              target: value,
+                              sessionId: value === 'host' ? null : cmd.sessionId,
+                            })
+                          }
+                          disabled={disabled}
+                          placeholder="执行目标"
+                        >
+                          <Option value="host">
+                            <Space>
+                              <DesktopOutlined />
+                              远程主机
+                            </Space>
+                          </Option>
+                          <Option value="bmc">
+                            <Space>
+                              <SafetyOutlined />
+                              BMC
+                            </Space>
+                          </Option>
+                        </Select>
+                      </Col>
+                    )}
+                    {cmd.serial && (
+                      <Col span={8}>
+                        <Space size={4}>
+                          <span style={{ color: '#666', fontSize: 12 }}>最小间隔</span>
+                          <InputNumber
+                            size="small"
+                            min={0}
+                            max={60000}
+                            value={cmd.serial.minIntervalMs ?? 0}
+                            onChange={(val) =>
+                              updateCommand(index, {
+                                serial: { ...cmd.serial!, minIntervalMs: val || 0 },
+                              })
+                            }
+                            disabled={disabled}
+                            style={{ width: 74 }}
+                          />
+                          <span style={{ color: '#666', fontSize: 12 }}>ms（0=尽可能快）</span>
+                        </Space>
+                      </Col>
+                    )}
                     {cmd.target === 'bmc' && (
-                      <Col span={10}>
+                      <Col span={cmd.serial ? 14 : 10}>
                         <div style={{ fontSize: 12, color: '#666', paddingTop: 4 }}>
                           {globalBmcSessionId ? (
                             <Tag color="green">
@@ -437,7 +591,7 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                         </div>
                       </Col>
                     )}
-                    {!cmd.continuous && (
+                    {!cmd.continuous && !cmd.serial && (
                       <Col span={cmd.target === 'bmc' ? 6 : 16}>
                         <Space>
                           <span style={{ color: '#666', fontSize: 12 }}>间隔</span>
@@ -452,6 +606,18 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                           />
                           <span style={{ color: '#666', fontSize: 12 }}>秒</span>
                         </Space>
+                      </Col>
+                    )}
+                    {cmd.serial && (
+                      <Col span={24}>
+                        <div style={{ fontSize: 12, color: '#666' }}>
+                          {(cmd.serial.kind || 'power0') === 'custom'
+                            ? '自定义命令：输出原样写入日志（serial-<id>.log），不解析、不产生采样点'
+                            : (cmd.serial.kind || 'power0') === 'powerCap'
+                              ? 'powerCap：每行一次封顶计算结果，采集 power / core / uncore；默认取全部行'
+                              : 'power 0：采集整板合计、每 socket 合计与各电源域功耗（单位 mW）；按首轮输出自动发现全部指标'}
+                          {(cmd.serial.kind || 'power0') !== 'custom' && '，每个指标独立生成采样序列'}
+                        </div>
                       </Col>
                     )}
                     <Col span={cmd.target === 'bmc' ? 14 : 16}>
