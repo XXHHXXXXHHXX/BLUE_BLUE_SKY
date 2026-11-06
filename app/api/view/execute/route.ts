@@ -3,6 +3,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { BMCConfig } from '../../../../src/types/topology';
 import { renderCommand } from '../../../../src/utils/commandParams';
 
+/** 给 Promise 添加超时，避免命令长时间无响应导致请求挂起 */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label}超时（超过 ${Math.round(timeoutMs / 1000)} 秒）`));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 interface ViewExecuteBody {
   /** 已连接 BMC 的配置（来自监控页会话） */
   config: BMCConfig;
@@ -54,7 +73,7 @@ export async function POST(request: NextRequest) {
         readyTimeout: 20000,
       });
 
-      const result = await ssh.execCommand(cmd, { timeout: 30000 });
+      const result = await withTimeout(ssh.execCommand(cmd), 30000, '查看命令执行');
       stdout = result.stdout || '';
       stderr = result.stderr || '';
 
