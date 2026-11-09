@@ -33,6 +33,14 @@ tsconfig.tsbuildinfo
 # Temporary export files
 .data/exports/
 
+# Runtime test data (contains plaintext BMC/host credentials)
+.data/test-jobs.json
+.data/test-drafts.json
+.data/test-packages.json
+.data/test-packages/
+.data/job-data-points/
+.data/logs/
+
 # codegraph index cache
 .codegraph/
 

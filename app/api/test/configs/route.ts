@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import type { SerialMonitorConfig } from '../../../../src/types/serial';
 
 // ========== 数据目录配置 ==========
 const DATA_DIR = path.join(process.cwd(), '.data');
@@ -46,6 +47,8 @@ export interface MonitorCommandData {
   continuous?: boolean;
   startCommand?: string;
   fetchCommand?: string;
+  /** 串口（BMC SOL）监控配置 */
+  serial?: SerialMonitorConfig;
 }
 
 export interface SavedTestConfigData {

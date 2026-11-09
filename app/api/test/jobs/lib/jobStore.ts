@@ -1,6 +1,7 @@
 /** 后台测试任务状态管理 - 内存 + 文件持久化 */
 import fs from 'fs';
 import path from 'path';
+import type { SerialMonitorConfig } from '../../../../../src/types/serial';
 
 const DATA_DIR = path.join(process.cwd(), '.data');
 const JOBS_FILE = path.join(DATA_DIR, 'test-jobs.json');
@@ -92,6 +93,8 @@ export interface JobConfig {
     continuous?: boolean;
     startCommand?: string;
     fetchCommand?: string;
+    /** 串口（BMC SOL）监控配置；设置后该条命令走串口采集 */
+    serial?: SerialMonitorConfig;
   }>;
   // 心跳检测配置
   heartbeatEnabled?: boolean;

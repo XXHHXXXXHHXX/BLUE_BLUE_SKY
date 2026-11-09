@@ -60,3 +60,17 @@ MgmtBoardNode - 修复属性名不匹配导致的崩溃
 4. 构建与类型
 TypeScript 错误 - 移除未使用导入、修复联合类型窄化问题
 
+
+6. 串口（BMC SOL）监控 ⭐
+功能	说明
+串口模式	监控命令新增「串口模式」：通过 BMC SSH 打开 SOL 会话直连芯片串口
+UART 选择	支持 CPU0/CPU1 的 AP(0)、IMU(1)、IPU0/IPU1(4/3, 9/8) 共 6 路
+背靠背采集	不设固定间隔，一次命令返回后立即发下一条；实际节奏由串口往返决定
+电源域解析	power 0 输出解析为整板合计 + 每 socket 合计 + 各域功耗（mW），并校验 socket 合计与整板一致
+功耗封顶解析	powerCap 3 输出按行解析，采集 power / core / uncore（算法给出的频率），默认取全部行
+命令白名单	下拉选择：power 0（仅 IMU）、powerCap 3（仅 IPU）、自定义命令
+自定义命令	不解析，输出按时间戳分段存入 serial-<id>.log，随每轮压缩包打包
+只读观察	AP 串口无 LiteOS 提示符，仅读取不下发命令
+日志与打包	解析结果按列式写入 .data/logs/<jobId>/iteration-<n>/serial-<cmdId>.json，随每轮 zip 打包
+优雅关闭	结束时先 ipmcset deactivate 再销毁通道，中止路径先关串口再释放 SSH
+

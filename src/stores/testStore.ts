@@ -2,6 +2,7 @@
  * 用例测试 Store - 管理多标签页测试流程、SSH连接、Shell输出等
  */
 import { create } from 'zustand';
+import type { SerialMonitorConfig } from '../types/serial';
 
 export interface SSHConfig {
   host: string;
@@ -98,6 +99,8 @@ export interface MonitorCommand {
   startCommand?: string;
   /** 持续模式：迭代结束后执行的结束命令，输出解析为采样点（每行一次采样；单值每行一个数，多值每行逗号分隔多列） */
   fetchCommand?: string;
+  /** 串口（BMC SOL）监控配置；设置后该条监控命令走串口采集，忽略 command/interval */
+  serial?: SerialMonitorConfig;
 }
 
 /** 日志监控配置 */
