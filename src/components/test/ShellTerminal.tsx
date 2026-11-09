@@ -1,19 +1,21 @@
 'use client';
 
 import React, { useRef, useEffect, useMemo } from 'react';
-import { Button, Space, Tooltip } from 'antd';
-import { 
-  DeleteOutlined, 
-  CopyOutlined, 
-  CloseOutlined, 
+import { Button, Space, Tooltip, message } from 'antd';
+import {
+  DeleteOutlined,
+  CopyOutlined,
+  CloseOutlined,
   CodeOutlined,
   ExpandAltOutlined,
   BellOutlined,
   BellFilled,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { useTestStore, type TestTab } from '../../stores/testStore';
+import { copyText, downloadTextFile, buildTimestampedFilename } from '../../utils/clipboard';
 import '@xterm/xterm/css/xterm.css';
 
 interface ShellTerminalProps {
@@ -65,7 +67,22 @@ const ShellTerminal: React.FC<ShellTerminalProps> = ({ tab, isVisible, onToggle,
 
     const fit = new FitAddon();
     term.loadAddon(fit);
-    
+
+    // 只读日志终端：Ctrl+C 复制选中内容（无选中时不拦截），Ctrl+A 全选
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.type !== 'keydown' || !event.ctrlKey) return true;
+      const key = event.key.toLowerCase();
+      if (key === 'c' && term.hasSelection()) {
+        copyText(term.getSelection());
+        return false;
+      }
+      if (key === 'a') {
+        term.selectAll();
+        return false;
+      }
+      return true;
+    });
+
     term.open(terminalRef.current);
     fit.fit();
     
@@ -156,11 +173,38 @@ const ShellTerminal: React.FC<ShellTerminalProps> = ({ tab, isVisible, onToggle,
     prevOutputRef.current = [];
   };
 
-  const handleCopy = () => {
-    const text = shellOutput.join('\n');
-    navigator.clipboard.writeText(text).then(() => {
-      // 可以添加提示
-    });
+  /** 获取要复制的文本：优先终端中选中的内容，否则复制全部输出 */
+  const getCopyText = (): string => {
+    const selection = termInstance.current?.getSelection();
+    if (selection && selection.trim()) return selection;
+    return shellOutput.join('\n');
+  };
+
+  const handleCopy = async () => {
+    const text = getCopyText();
+    if (!text) {
+      message.info('终端暂无内容可复制');
+      return;
+    }
+    const ok = await copyText(text);
+    if (ok) {
+      message.success(termInstance.current?.getSelection()?.trim() ? '已复制选中内容' : '已复制全部终端输出');
+    } else {
+      message.error('复制失败，请手动选中终端内容后使用 Ctrl+C');
+    }
+  };
+
+  const handleExport = () => {
+    if (shellOutput.length === 0) {
+      message.info('终端暂无内容可导出');
+      return;
+    }
+    const header = `=== Shell终端 [${tab.name}] 主机: ${tab.sshConfig.host || '未配置'} ===`;
+    const content = [header, ...shellOutput].join('\n');
+    // 文件名去掉路径分隔符等非法字符
+    const safeName = (tab.name || 'terminal').replace(/[\\/:*?<>|\u0022]/g, '_');
+    downloadTextFile(content, buildTimestampedFilename(`shell-${safeName}`, 'log'));
+    message.success('终端日志已导出');
   };
 
   if (!isVisible) {
@@ -231,12 +275,21 @@ const ShellTerminal: React.FC<ShellTerminalProps> = ({ tab, isVisible, onToggle,
               style={{ color: muteMonitorOutput ? '#faad14' : '#ccc' }}
             />
           </Tooltip>
-          <Tooltip title="复制全部输出">
-            <Button 
-              type="text" 
-              size="small" 
+          <Tooltip title="复制（选中则复制选中内容，否则复制全部输出）">
+            <Button
+              type="text"
+              size="small"
               icon={<CopyOutlined />}
               onClick={handleCopy}
+              style={{ color: '#ccc' }}
+            />
+          </Tooltip>
+          <Tooltip title="导出终端日志">
+            <Button
+              type="text"
+              size="small"
+              icon={<DownloadOutlined />}
+              onClick={handleExport}
               style={{ color: '#ccc' }}
             />
           </Tooltip>
