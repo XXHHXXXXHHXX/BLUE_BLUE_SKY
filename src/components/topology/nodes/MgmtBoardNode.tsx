@@ -7,16 +7,11 @@ import { Tag } from 'antd';
 import CustomFieldsRenderer from './CustomFieldsRenderer';
 import { useNodeFieldConfig } from './useNodeFieldConfig';
 import {
-  formatVoltage,
-  formatCurrent,
-  formatPower,
-  formatTemperature,
-  formatEfficiency,
-  formatRPM,
   getTemperatureColor,
   getEfficiencyColor,
   getNodeDisplayLabel,
   getTemperatureLevel,
+  formatValueWithUnit,
 } from '../../../utils/formatters';
 
 const MgmtBoardNode: React.FC<NodeProps> = (props) => {
@@ -33,7 +28,9 @@ const MgmtBoardNode: React.FC<NodeProps> = (props) => {
   };
   const mgmt = data.mgmtData;
   const displayMetrics = (props.data as Record<string, unknown>)?.displayMetrics as Record<string, number | null> | undefined;
-  const { hasField, getFieldLabel, orderedFixedFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const { hasField, getFieldLabel, orderedFixedFieldKeys, getFieldUnit } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const fmt = (value: number | string | null | undefined, fieldKey: string) =>
+    formatValueWithUnit(value, fieldKey, getFieldUnit(fieldKey));
 
   const renderField = (fieldKey: string) => {
     switch (fieldKey) {
@@ -53,7 +50,7 @@ const MgmtBoardNode: React.FC<NodeProps> = (props) => {
           <div key={fieldKey}>
             {getFieldLabel('temperature')}:{' '}
             <span style={{ color: temperature !== null ? getTemperatureColor(temperature) : '#999' }}>
-              {formatTemperature(temperature)}
+              {fmt(temperature, 'temperature')}
             </span>
           </div>
         ) : null;
@@ -63,20 +60,20 @@ const MgmtBoardNode: React.FC<NodeProps> = (props) => {
           return <div key={fieldKey}>{getFieldLabel(fieldKey)}: NA</div>;
         }
         if (fieldKey.includes('Voltage')) {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatVoltage(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey.includes('Current')) {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatCurrent(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey.includes('Power') || fieldKey === 'power') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatPower(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey === 'temperature') {
           return (
             <div key={fieldKey}>
               {getFieldLabel(fieldKey)}:{' '}
               <span style={{ color: getTemperatureColor(Number(value)) }}>
-                {formatTemperature(Number(value))}
+                {fmt(Number(value), fieldKey)}
               </span>
             </div>
           );
@@ -86,18 +83,18 @@ const MgmtBoardNode: React.FC<NodeProps> = (props) => {
             <div key={fieldKey}>
               {getFieldLabel(fieldKey)}:{' '}
               <span style={{ color: getEfficiencyColor(Number(value)) }}>
-                {formatEfficiency(Number(value))}
+                {fmt(Number(value), fieldKey)}
               </span>
             </div>
           );
         }
         if (fieldKey === 'rpm') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatRPM(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey === 'speedPercent') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {`${Number(value).toFixed(1)}%`}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
-        return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {typeof value === 'number' ? value.toFixed(2) : String(value)}</div>;
+        return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(value, fieldKey)}</div>;
       }
     }
   };

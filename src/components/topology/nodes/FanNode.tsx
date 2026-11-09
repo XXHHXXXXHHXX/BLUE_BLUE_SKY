@@ -6,16 +6,11 @@ import NodeIcon from './NodeIcon';
 import CustomFieldsRenderer from './CustomFieldsRenderer';
 import { useNodeFieldConfig } from './useNodeFieldConfig';
 import {
-  formatPower,
-  formatRPM,
-  formatCurrent,
-  formatVoltage,
-  formatEfficiency,
-  formatTemperature,
   getTemperatureColor,
   getEfficiencyColor,
   getNodeDisplayLabel,
   getTemperatureLevel,
+  formatValueWithUnit,
 } from '../../../utils/formatters';
 
 const FanNode: React.FC<NodeProps> = (props) => {
@@ -37,7 +32,9 @@ const FanNode: React.FC<NodeProps> = (props) => {
 
   const fanData = data.fanData;
   const displayMetrics = (props.data as Record<string, unknown>)?.displayMetrics as Record<string, number | null> | undefined;
-  const { hasField, getFieldLabel, orderedFixedFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const { hasField, getFieldLabel, orderedFixedFieldKeys, getFieldUnit } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const fmt = (value: number | string | null | undefined, fieldKey: string) =>
+    formatValueWithUnit(value, fieldKey, getFieldUnit(fieldKey));
 
   // 从 fanData 获取数据（支持 null 值显示为 NA）
   const power = fanData?.power ?? null;
@@ -57,21 +54,21 @@ const FanNode: React.FC<NodeProps> = (props) => {
   const renderField = (fieldKey: string) => {
     switch (fieldKey) {
       case 'power':
-        return <div key={fieldKey}>{getFieldLabel('power')}: {formatPower(power)}</div>;
+        return <div key={fieldKey}>{getFieldLabel('power')}: {fmt(power, 'power')}</div>;
       case 'fanInputVoltage':
-        return <div key={fieldKey}>{getFieldLabel('fanInputVoltage')}: {formatVoltage(fanInputVoltage)}</div>;
+        return <div key={fieldKey}>{getFieldLabel('fanInputVoltage')}: {fmt(fanInputVoltage, 'fanInputVoltage')}</div>;
       case 'fanInputCurrent':
-        return <div key={fieldKey}>{getFieldLabel('fanInputCurrent')}: {formatCurrent(fanInputCurrent)}</div>;
+        return <div key={fieldKey}>{getFieldLabel('fanInputCurrent')}: {fmt(fanInputCurrent, 'fanInputCurrent')}</div>;
       case 'rpm':
-        return <div key={fieldKey}>{getFieldLabel('rpm')}: {formatRPM(rpm)}</div>;
+        return <div key={fieldKey}>{getFieldLabel('rpm')}: {fmt(rpm, 'rpm')}</div>;
       case 'speedPercent':
-        return <div key={fieldKey}>{getFieldLabel('speedPercent')}: {speedPercent !== null && !Number.isNaN(speedPercent) ? `${speedPercent.toFixed(0)}%` : 'NA'}</div>;
+        return <div key={fieldKey}>{getFieldLabel('speedPercent')}: {fmt(speedPercent, 'speedPercent')}</div>;
       case 'temperature':
         return (
           <div key={fieldKey}>
             {getFieldLabel('temperature')}:{' '}
             <span style={{ color: temperature !== null ? getTemperatureColor(temperature) : '#999' }}>
-              {formatTemperature(temperature)}
+              {fmt(temperature, 'temperature')}
             </span>
           </div>
         );
@@ -81,20 +78,20 @@ const FanNode: React.FC<NodeProps> = (props) => {
           return <div key={fieldKey}>{getFieldLabel(fieldKey)}: NA</div>;
         }
         if (fieldKey.includes('Voltage')) {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatVoltage(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey.includes('Current')) {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatCurrent(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey.includes('Power') || fieldKey === 'power') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatPower(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey === 'temperature') {
           return (
             <div key={fieldKey}>
               {getFieldLabel(fieldKey)}:{' '}
               <span style={{ color: getTemperatureColor(Number(value)) }}>
-                {formatTemperature(Number(value))}
+                {fmt(Number(value), fieldKey)}
               </span>
             </div>
           );
@@ -104,18 +101,18 @@ const FanNode: React.FC<NodeProps> = (props) => {
             <div key={fieldKey}>
               {getFieldLabel(fieldKey)}:{' '}
               <span style={{ color: getEfficiencyColor(Number(value)) }}>
-                {formatEfficiency(Number(value))}
+                {fmt(Number(value), fieldKey)}
               </span>
             </div>
           );
         }
         if (fieldKey === 'rpm') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatRPM(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey === 'speedPercent') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {`${Number(value).toFixed(1)}%`}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
-        return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {typeof value === 'number' ? value.toFixed(2) : String(value)}</div>;
+        return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(value, fieldKey)}</div>;
       }
     }
   };

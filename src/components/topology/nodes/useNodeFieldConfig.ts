@@ -65,12 +65,22 @@ export function useNodeFieldConfig(data: Record<string, unknown>) {
     return !fixed.some((d) => d.fieldKey === fieldKey);
   };
 
+  /**
+   * 获取字段配置的显示单位
+   * undefined = 未配置（使用系统默认单位）；'' = 无单位；其它 = 自定义单位
+   */
+  const getFieldUnit = (fieldKey: string): string | undefined => {
+    const mapping = fieldMappings.find((m) => m.fieldKey === fieldKey);
+    return mapping?.unit;
+  };
+
   return {
     visibleFieldKeys,
     orderedVisibleFieldKeys,
     orderedFixedFieldKeys,
     hasField,
     getFieldLabel,
+    getFieldUnit,
     isCustomField,
     fieldMappings,
     customFieldDefs,

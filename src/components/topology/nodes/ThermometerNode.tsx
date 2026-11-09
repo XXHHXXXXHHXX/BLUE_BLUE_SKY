@@ -6,15 +6,10 @@ import NodeIcon from './NodeIcon';
 import CustomFieldsRenderer from './CustomFieldsRenderer';
 import { useNodeFieldConfig } from './useNodeFieldConfig';
 import {
-  formatVoltage,
-  formatCurrent,
-  formatPower,
-  formatTemperature,
-  formatEfficiency,
-  formatRPM,
   getTemperatureColor,
   getEfficiencyColor,
   getNodeDisplayLabel,
+  formatValueWithUnit,
 } from '../../../utils/formatters';
 
 const ThermometerNode: React.FC<NodeProps> = (props) => {
@@ -32,7 +27,9 @@ const ThermometerNode: React.FC<NodeProps> = (props) => {
 
   const thermometerData = data.thermometerData;
   const displayMetrics = (props.data as Record<string, unknown>)?.displayMetrics as Record<string, number | null> | undefined;
-  const { hasField, getFieldLabel, orderedFixedFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const { hasField, getFieldLabel, orderedFixedFieldKeys, getFieldUnit } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const fmt = (value: number | string | null | undefined, fieldKey: string) =>
+    formatValueWithUnit(value, fieldKey, getFieldUnit(fieldKey));
   const temperature = thermometerData?.temperature ?? null;
   const temperatureStatus = thermometerData?.temperatureStatus ?? null;
 
@@ -57,7 +54,7 @@ const ThermometerNode: React.FC<NodeProps> = (props) => {
           <div key={fieldKey} className="data-row">
             <span className="data-label">{getFieldLabel('temperature')}:</span>
             <span className="data-value" style={{ color: temperature !== null ? getTemperatureColor(temperature) : '#999' }}>
-              {formatTemperature(temperature)}
+              {fmt(temperature, 'temperature')}
             </span>
           </div>
         );
@@ -74,20 +71,20 @@ const ThermometerNode: React.FC<NodeProps> = (props) => {
           return <div key={fieldKey}>{getFieldLabel(fieldKey)}: NA</div>;
         }
         if (fieldKey.includes('Voltage')) {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatVoltage(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey.includes('Current')) {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatCurrent(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey.includes('Power') || fieldKey === 'power') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatPower(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey === 'temperature') {
           return (
             <div key={fieldKey}>
               {getFieldLabel(fieldKey)}:{' '}
               <span style={{ color: getTemperatureColor(Number(value)) }}>
-                {formatTemperature(Number(value))}
+                {fmt(Number(value), fieldKey)}
               </span>
             </div>
           );
@@ -97,18 +94,18 @@ const ThermometerNode: React.FC<NodeProps> = (props) => {
             <div key={fieldKey}>
               {getFieldLabel(fieldKey)}:{' '}
               <span style={{ color: getEfficiencyColor(Number(value)) }}>
-                {formatEfficiency(Number(value))}
+                {fmt(Number(value), fieldKey)}
               </span>
             </div>
           );
         }
         if (fieldKey === 'rpm') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatRPM(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey === 'speedPercent') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {`${Number(value).toFixed(1)}%`}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
-        return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {typeof value === 'number' ? value.toFixed(2) : String(value)}</div>;
+        return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(value, fieldKey)}</div>;
       }
     }
   };

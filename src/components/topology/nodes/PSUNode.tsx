@@ -6,17 +6,12 @@ import NodeIcon from './NodeIcon';
 import CustomFieldsRenderer from './CustomFieldsRenderer';
 import { useNodeFieldConfig } from './useNodeFieldConfig';
 import {
-  formatVoltage,
-  formatCurrent,
-  formatPower,
-  formatEfficiency,
-  formatTemperature,
-  formatRPM,
   getEfficiencyColor,
   getTemperatureColor,
   getNodeDisplayLabel,
   getTemperatureLevel,
   getEfficiencyLevel,
+  formatValueWithUnit,
 } from '../../../utils/formatters';
 
 const PSUNode: React.FC<NodeProps> = (props) => {
@@ -44,7 +39,9 @@ const PSUNode: React.FC<NodeProps> = (props) => {
 
   const sourceData = data.sourceData;
   const displayMetrics = (props.data as Record<string, unknown>)?.displayMetrics as Record<string, number | null> | undefined;
-  const { hasField, getFieldLabel, orderedFixedFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const { hasField, getFieldLabel, orderedFixedFieldKeys, getFieldUnit } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const fmt = (value: number | string | null | undefined, fieldKey: string) =>
+    formatValueWithUnit(value, fieldKey, getFieldUnit(fieldKey));
 
   // 从 sourceData 获取数据（支持 null 值显示为 NA）
   const inputVoltage = sourceData?.inputVoltage ?? null;
@@ -83,23 +80,23 @@ const PSUNode: React.FC<NodeProps> = (props) => {
   const renderField = (fieldKey: string) => {
     switch (fieldKey) {
       case 'inputVoltage':
-        return <div key={fieldKey}>{getFieldLabel('inputVoltage')}: {formatVoltage(inputVoltage)}</div>;
+        return <div key={fieldKey}>{getFieldLabel('inputVoltage')}: {fmt(inputVoltage, 'inputVoltage')}</div>;
       case 'inputCurrent':
-        return <div key={fieldKey}>{getFieldLabel('inputCurrent')}: {formatCurrent(inputCurrent)}</div>;
+        return <div key={fieldKey}>{getFieldLabel('inputCurrent')}: {fmt(inputCurrent, 'inputCurrent')}</div>;
       case 'inputPower':
-        return <div key={fieldKey}>{getFieldLabel('inputPower')}: {formatPower(inputPower)}</div>;
+        return <div key={fieldKey}>{getFieldLabel('inputPower')}: {fmt(inputPower, 'inputPower')}</div>;
       case 'outputVoltage':
-        return <div key={fieldKey}>{getFieldLabel('outputVoltage')}: {formatVoltage(outputVoltage)}</div>;
+        return <div key={fieldKey}>{getFieldLabel('outputVoltage')}: {fmt(outputVoltage, 'outputVoltage')}</div>;
       case 'outputCurrent':
-        return <div key={fieldKey}>{getFieldLabel('outputCurrent')}: {formatCurrent(outputCurrent)}</div>;
+        return <div key={fieldKey}>{getFieldLabel('outputCurrent')}: {fmt(outputCurrent, 'outputCurrent')}</div>;
       case 'outputPower':
-        return <div key={fieldKey}>{getFieldLabel('outputPower')}: {formatPower(outputPower)}</div>;
+        return <div key={fieldKey}>{getFieldLabel('outputPower')}: {fmt(outputPower, 'outputPower')}</div>;
       case 'efficiency':
         return (
           <div key={fieldKey}>
             {getFieldLabel('efficiency')}:{' '}
             <span style={{ color: efficiency !== null ? getEfficiencyColor(efficiency) : '#999' }}>
-              {formatEfficiency(efficiency)}
+              {fmt(efficiency, 'efficiency')}
             </span>
           </div>
         );
@@ -108,7 +105,7 @@ const PSUNode: React.FC<NodeProps> = (props) => {
           <div key={fieldKey}>
             {getFieldLabel('temperature')}:{' '}
             <span style={{ color: temperature !== null ? getTemperatureColor(temperature) : '#999' }}>
-              {formatTemperature(temperature)}
+              {fmt(temperature, 'temperature')}
             </span>
           </div>
         );
@@ -117,7 +114,7 @@ const PSUNode: React.FC<NodeProps> = (props) => {
           <div key={fieldKey}>
             {getFieldLabel('psuIntakeTemp')}:{' '}
             <span style={{ color: psuIntakeTemp !== null ? getTemperatureColor(psuIntakeTemp) : '#999' }}>
-              {formatTemperature(psuIntakeTemp)}
+              {fmt(psuIntakeTemp, 'psuIntakeTemp')}
             </span>
           </div>
         );
@@ -126,7 +123,7 @@ const PSUNode: React.FC<NodeProps> = (props) => {
           <div key={fieldKey}>
             {getFieldLabel('psuMosTemp')}:{' '}
             <span style={{ color: psuMosTemp !== null ? getTemperatureColor(psuMosTemp) : '#999' }}>
-              {formatTemperature(psuMosTemp)}
+              {fmt(psuMosTemp, 'psuMosTemp')}
             </span>
           </div>
         );
@@ -135,7 +132,7 @@ const PSUNode: React.FC<NodeProps> = (props) => {
           <div key={fieldKey}>
             {getFieldLabel('psuRearIntakeTemp')}:{' '}
             <span style={{ color: psuRearIntakeTemp !== null ? getTemperatureColor(psuRearIntakeTemp) : '#999' }}>
-              {formatTemperature(psuRearIntakeTemp)}
+              {fmt(psuRearIntakeTemp, 'psuRearIntakeTemp')}
             </span>
           </div>
         );
@@ -145,20 +142,20 @@ const PSUNode: React.FC<NodeProps> = (props) => {
           return <div key={fieldKey}>{getFieldLabel(fieldKey)}: NA</div>;
         }
         if (fieldKey.includes('Voltage')) {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatVoltage(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey.includes('Current')) {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatCurrent(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey.includes('Power') || fieldKey === 'power') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatPower(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey === 'temperature') {
           return (
             <div key={fieldKey}>
               {getFieldLabel(fieldKey)}:{' '}
               <span style={{ color: getTemperatureColor(Number(value)) }}>
-                {formatTemperature(Number(value))}
+                {fmt(Number(value), fieldKey)}
               </span>
             </div>
           );
@@ -168,18 +165,18 @@ const PSUNode: React.FC<NodeProps> = (props) => {
             <div key={fieldKey}>
               {getFieldLabel(fieldKey)}:{' '}
               <span style={{ color: getEfficiencyColor(Number(value)) }}>
-                {formatEfficiency(Number(value))}
+                {fmt(Number(value), fieldKey)}
               </span>
             </div>
           );
         }
         if (fieldKey === 'rpm') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatRPM(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey === 'speedPercent') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {`${Number(value).toFixed(1)}%`}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
-        return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {typeof value === 'number' ? value.toFixed(2) : String(value)}</div>;
+        return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(value, fieldKey)}</div>;
       }
     }
   };

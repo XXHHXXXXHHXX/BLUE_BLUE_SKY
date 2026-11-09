@@ -23,6 +23,7 @@ import { CPU_POWER_DOMAIN_FIELD_DEFS, CPU_POWER_DOMAINS } from '../../types/powe
 import type { TopologyNode, HardwareNodeType, ApiConfig, FieldMapping, FieldThreshold, ControlConfig, ControlOptionItem, ViewConfig, ViewParamDef } from '../../types/topology';
 import { FIXED_FIELD_DEFS, DEFAULT_FIELD_THRESHOLDS } from '../../types/topology';
 import { extractCommandParams } from '../../utils/commandParams';
+import { getDefaultFieldUnit } from '../../utils/formatters';
 
 const { Text, Title } = Typography;
 
@@ -865,7 +866,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
             </Space>
           </div>
           <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-            为每个字段填写对应的 BMC Sensor 名称，系统将自动匹配数据。支持加减乘除运算，如 CPU0 PWR/POWER2、CPU0 PWR + CPU1 PWR
+            为每个字段填写对应的 BMC Sensor 名称，系统将自动匹配数据。支持加减乘除运算，如 CPU0 PWR/POWER2、CPU0 PWR + CPU1 PWR。单位可选「默认」（按字段名自动推断）、「无单位」或自定义，监控页将按此单位显示
           </Text>
 
           {/* 字段映射列表 */}
@@ -893,7 +894,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                 borderRadius: 6,
                 border: lossRole ? `1px solid ${lossRole.role === 'source' ? '#91caff' : lossRole.role === 'target' ? '#d3adf7' : '#ffe58f'}` : '1px solid #e8e8e8',
               }}>
-                <div style={{ flex: '0 0 120px' }}>
+                <div style={{ flex: '0 0 90px' }}>
                   <Text style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#595959' }}>字段名</Text>
                   <Input
                     size="small"
@@ -914,7 +915,7 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                     </Tag>
                   )}
                 </div>
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: '1 1 110px', minWidth: 100 }}>
                   <Text style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>BMC Sensor 名称</Text>
                   <Input
                     placeholder="如：CPU0 PWR 或 CPU0 PWR/POWER2"
@@ -922,6 +923,35 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                     onChange={(e) => handleUpdateFieldMapping(index, { bmcField: e.target.value })}
                     size="small"
                   />
+                </div>
+                <div style={{ flex: '0 0 150px' }}>
+                  <Text style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>单位</Text>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <Select
+                      size="small"
+                      style={{ flex: 1 }}
+                      value={mapping.unit === undefined ? 'default' : mapping.unit === '' ? 'none' : 'custom'}
+                      onChange={(v) => {
+                        if (v === 'default') handleUpdateFieldMapping(index, { unit: undefined });
+                        else if (v === 'none') handleUpdateFieldMapping(index, { unit: '' });
+                        else handleUpdateFieldMapping(index, { unit: mapping.unit || getDefaultFieldUnit(mapping.fieldKey) || 'V' });
+                      }}
+                      options={[
+                        { value: 'default', label: `默认${getDefaultFieldUnit(mapping.fieldKey) ? `(${getDefaultFieldUnit(mapping.fieldKey)})` : ''}` },
+                        { value: 'none', label: '无单位' },
+                        { value: 'custom', label: '自定义' },
+                      ]}
+                    />
+                    {mapping.unit !== undefined && mapping.unit !== '' && (
+                      <Input
+                        size="small"
+                        style={{ width: 60 }}
+                        placeholder="单位"
+                        value={mapping.unit}
+                        onChange={(e) => handleUpdateFieldMapping(index, { unit: e.target.value })}
+                      />
+                    )}
+                  </div>
                 </div>
                 <Button
                   type="text"
@@ -1068,11 +1098,11 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                     borderRadius: 6,
                     border: '1px solid #e8e8e8',
                   }}>
-                    <div style={{ flex: '0 0 220px' }}>
+                    <div style={{ flex: '0 0 130px' }}>
                       <Text style={{ fontSize: 12, display: 'block', marginBottom: 4, color: '#595959' }}>字段名</Text>
                       <Text strong style={{ fontSize: 12 }}>{getPowerDomainFieldLabel(mapping.fieldKey)}</Text>
                     </div>
-                    <div style={{ flex: 1 }}>
+                    <div style={{ flex: '1 1 110px', minWidth: 100 }}>
                       <Text style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>BMC Sensor 名称</Text>
                       <Input
                         placeholder="如：TA_CORE_DVFS_VOUT"
@@ -1080,6 +1110,35 @@ const NodeEditPanel: React.FC<NodeEditPanelProps> = ({ open, onClose, node }) =>
                         onChange={(e) => handleUpdatePowerDomainFieldMapping(index, { bmcField: e.target.value })}
                         size="small"
                       />
+                    </div>
+                    <div style={{ flex: '0 0 118px' }}>
+                      <Text style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>单位</Text>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <Select
+                          size="small"
+                          style={{ flex: 1 }}
+                          value={mapping.unit === undefined ? 'default' : mapping.unit === '' ? 'none' : 'custom'}
+                          onChange={(v) => {
+                            if (v === 'default') handleUpdatePowerDomainFieldMapping(index, { unit: undefined });
+                            else if (v === 'none') handleUpdatePowerDomainFieldMapping(index, { unit: '' });
+                            else handleUpdatePowerDomainFieldMapping(index, { unit: mapping.unit || getDefaultFieldUnit(mapping.fieldKey) || 'V' });
+                          }}
+                          options={[
+                            { value: 'default', label: `默认${getDefaultFieldUnit(mapping.fieldKey) ? `(${getDefaultFieldUnit(mapping.fieldKey)})` : ''}` },
+                            { value: 'none', label: '无单位' },
+                            { value: 'custom', label: '自定义' },
+                          ]}
+                        />
+                        {mapping.unit !== undefined && mapping.unit !== '' && (
+                          <Input
+                            size="small"
+                            style={{ width: 60 }}
+                            placeholder="单位"
+                            value={mapping.unit}
+                            onChange={(e) => handleUpdatePowerDomainFieldMapping(index, { unit: e.target.value })}
+                          />
+                        )}
+                      </div>
                     </div>
                     <Button
                       type="text"

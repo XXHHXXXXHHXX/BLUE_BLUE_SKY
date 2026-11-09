@@ -9,12 +9,8 @@ import { useHistoryRecordStore, downloadHistoryCSV, downloadHistoryJSON } from '
 import { useNodeFieldConfig } from '../topology/nodes/useNodeFieldConfig';
 import TrendChart from '../charts/TrendChart';
 import {
-  formatVoltage,
-  formatCurrent,
   formatPower,
-  formatEfficiency,
-  formatTemperature,
-  formatRPM,
+  formatValueWithUnit,
   getTemperatureColor,
   getNodeDisplayLabel,
   getLossColor,
@@ -39,8 +35,8 @@ const { Title } = Typography;
 /** 曲线颜色盘 */
 const CHART_COLORS = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc'];
 
-/** 根据字段名推断单位与分配曲线颜色 */
-function getFieldUnitInfo(fieldKey: string, index: number): { unit: string; color: string } {
+/** 根据字段名推断单位与分配曲线颜色（configuredUnit 优先） */
+function getFieldUnitInfo(fieldKey: string, index: number, configuredUnit?: string): { unit: string; color: string } {
   const lower = fieldKey.toLowerCase();
   let unit = '';
   if (lower.includes('temp')) unit = '°C';
@@ -51,6 +47,7 @@ function getFieldUnitInfo(fieldKey: string, index: number): { unit: string; colo
   else if (lower.includes('rpm')) unit = 'RPM';
   else if (lower.includes('speed') || lower.includes('percent')) unit = '%';
   else if (lower.includes('loss')) unit = 'W';
+  if (configuredUnit !== undefined) unit = configuredUnit;
   return { unit, color: CHART_COLORS[index % CHART_COLORS.length] };
 }
 
@@ -111,7 +108,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
 
   // 使用节点字段配置，根据 apiConfig.fieldMappings 动态决定显示哪些字段
   const nodeDataForConfig = (node?.data || {}) as Record<string, unknown>;
-  const { orderedVisibleFieldKeys, getFieldLabel } = useNodeFieldConfig(nodeDataForConfig);
+  const { orderedVisibleFieldKeys, getFieldLabel, getFieldUnit } = useNodeFieldConfig(nodeDataForConfig);
 
   // 历史曲线录像功能（按模块分别保存，互不干扰）
   const activeNodeId = node?.id ?? null;
@@ -177,6 +174,9 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
     const d = node.data as Record<string, unknown>;
     const nodeType = d.nodeType as string;
 
+    const fmt = (value: number | string | null | undefined, fieldKey: string) =>
+      formatValueWithUnit(value, fieldKey, getFieldUnit(fieldKey));
+
     const thresholds = node.data.apiConfig?.fieldThresholds;
     const displayMetrics = d.displayMetrics as Record<string, number | null> | undefined;
 
@@ -198,9 +198,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
             raw = rawValues[key];
           } else {
             raw = displayMetrics?.[key];
-            content = (raw !== null && raw !== undefined && !Number.isNaN(raw))
-              ? typeof raw === 'number' ? raw.toFixed(2) : String(raw)
-              : 'NA';
+            content = fmt(raw, key);
           }
 
           // 应用阈值颜色（仅对纯文本内容生效，不覆盖已有 ReactNode 的自定义颜色）
@@ -223,11 +221,11 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         if (!s) return <div>暂无数据</div>;
 
         const fieldValues: Record<string, React.ReactNode> = {
-          outputVoltage: formatVoltage(s.outputVoltage),
-          current: formatCurrent(s.current),
+          outputVoltage: fmt(s.outputVoltage, 'outputVoltage'),
+          current: fmt(s.current, 'current'),
           outputPower: (
             <span style={{ color: getThresholdColorForField(s.outputPower, 'outputPower', thresholds) }}>
-              {formatPower(s.outputPower)}
+              {fmt(s.outputPower, 'outputPower')}
             </span>
           ),
         };
@@ -249,43 +247,43 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         if (!s) return <div>暂无数据</div>;
 
         const fieldValues: Record<string, React.ReactNode> = {
-          inputVoltage: formatVoltage(s.inputVoltage),
-          inputCurrent: formatCurrent(s.inputCurrent ?? s.current),
+          inputVoltage: fmt(s.inputVoltage, 'inputVoltage'),
+          inputCurrent: fmt(s.inputCurrent ?? s.current, 'inputCurrent'),
           inputPower: (
             <span style={{ color: getThresholdColorForField(s.inputPower, 'inputPower', thresholds) }}>
-              {formatPower(s.inputPower)}
+              {fmt(s.inputPower, 'inputPower')}
             </span>
           ),
-          outputVoltage: formatVoltage(s.outputVoltage),
-          outputCurrent: formatCurrent(s.outputCurrent ?? s.current),
+          outputVoltage: fmt(s.outputVoltage, 'outputVoltage'),
+          outputCurrent: fmt(s.outputCurrent ?? s.current, 'outputCurrent'),
           outputPower: (
             <span style={{ color: getThresholdColorForField(s.outputPower, 'outputPower', thresholds) }}>
-              {formatPower(s.outputPower)}
+              {fmt(s.outputPower, 'outputPower')}
             </span>
           ),
           efficiency: (
             <span style={{ color: getThresholdColorForField(s.efficiency, 'efficiency', thresholds) }}>
-              {formatEfficiency(s.efficiency)}
+              {fmt(s.efficiency, 'efficiency')}
             </span>
           ),
           temperature: (
             <span style={{ color: getThresholdColorForField(s.temperature, 'temperature', thresholds) }}>
-              {formatTemperature(s.temperature)}
+              {fmt(s.temperature, 'temperature')}
             </span>
           ),
           psuIntakeTemp: (
             <span style={{ color: getThresholdColorForField(s.psuIntakeTemp, 'psuIntakeTemp', thresholds) }}>
-              {formatTemperature(s.psuIntakeTemp)}
+              {fmt(s.psuIntakeTemp, 'psuIntakeTemp')}
             </span>
           ),
           psuMosTemp: (
             <span style={{ color: getThresholdColorForField(s.psuMosTemp, 'psuMosTemp', thresholds) }}>
-              {formatTemperature(s.psuMosTemp)}
+              {fmt(s.psuMosTemp, 'psuMosTemp')}
             </span>
           ),
           psuRearIntakeTemp: (
             <span style={{ color: getThresholdColorForField(s.psuRearIntakeTemp, 'psuRearIntakeTemp', thresholds) }}>
-              {formatTemperature(s.psuRearIntakeTemp)}
+              {fmt(s.psuRearIntakeTemp, 'psuRearIntakeTemp')}
             </span>
           ),
         };
@@ -315,11 +313,11 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         if (!s) return <div>暂无数据</div>;
 
         const fieldValues: Record<string, React.ReactNode> = {
-          busbarVoltage: formatVoltage(s.busbarVoltage),
-          busbarCurrent: formatCurrent(s.busbarCurrent),
+          busbarVoltage: fmt(s.busbarVoltage, 'busbarVoltage'),
+          busbarCurrent: fmt(s.busbarCurrent, 'busbarCurrent'),
           busbarPower: (
             <span style={{ color: getThresholdColorForField(s.busbarPower, 'busbarPower', thresholds) }}>
-              {formatPower(s.busbarPower)}
+              {fmt(s.busbarPower, 'busbarPower')}
             </span>
           ),
         };
@@ -341,24 +339,24 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         if (!s) return <div>暂无数据</div>;
 
         const fieldValues: Record<string, React.ReactNode> = {
-          inputVoltage: formatVoltage(s.inputVoltage),
-          inputCurrent: formatCurrent(s.inputCurrent ?? s.current),
-          inputPower: formatPower(s.inputPower),
-          outputVoltage: formatVoltage(s.outputVoltage),
-          outputCurrent: formatCurrent(s.outputCurrent ?? s.current),
+          inputVoltage: fmt(s.inputVoltage, 'inputVoltage'),
+          inputCurrent: fmt(s.inputCurrent ?? s.current, 'inputCurrent'),
+          inputPower: fmt(s.inputPower, 'inputPower'),
+          outputVoltage: fmt(s.outputVoltage, 'outputVoltage'),
+          outputCurrent: fmt(s.outputCurrent ?? s.current, 'outputCurrent'),
           outputPower: (
             <span style={{ color: getThresholdColorForField(s.outputPower, 'outputPower', thresholds) }}>
-              {formatPower(s.outputPower)}
+              {fmt(s.outputPower, 'outputPower')}
             </span>
           ),
           efficiency: (
             <span style={{ color: getThresholdColorForField(s.efficiency, 'efficiency', thresholds) }}>
-              {formatEfficiency(s.efficiency)}
+              {fmt(s.efficiency, 'efficiency')}
             </span>
           ),
           temperature: (
             <span style={{ color: getThresholdColorForField(s.temperature, 'temperature', thresholds) }}>
-              {formatTemperature(s.temperature)}
+              {fmt(s.temperature, 'temperature')}
             </span>
           ),
         };
@@ -385,24 +383,24 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         if (!s) return <div>暂无数据</div>;
 
         const fieldValues: Record<string, React.ReactNode> = {
-          inputVoltage: formatVoltage(s.inputVoltage),
-          inputCurrent: formatCurrent(s.inputCurrent ?? s.current),
-          inputPower: formatPower(s.inputPower),
-          outputVoltage: formatVoltage(s.outputVoltage),
-          outputCurrent: formatCurrent(s.outputCurrent ?? s.current),
+          inputVoltage: fmt(s.inputVoltage, 'inputVoltage'),
+          inputCurrent: fmt(s.inputCurrent ?? s.current, 'inputCurrent'),
+          inputPower: fmt(s.inputPower, 'inputPower'),
+          outputVoltage: fmt(s.outputVoltage, 'outputVoltage'),
+          outputCurrent: fmt(s.outputCurrent ?? s.current, 'outputCurrent'),
           outputPower: (
             <span style={{ color: getThresholdColorForField(s.outputPower, 'outputPower', thresholds) }}>
-              {formatPower(s.outputPower)}
+              {fmt(s.outputPower, 'outputPower')}
             </span>
           ),
           efficiency: (
             <span style={{ color: getThresholdColorForField(s.efficiency, 'efficiency', thresholds) }}>
-              {formatEfficiency(s.efficiency)}
+              {fmt(s.efficiency, 'efficiency')}
             </span>
           ),
           temperature: (
             <span style={{ color: getThresholdColorForField(s.temperature, 'temperature', thresholds) }}>
-              {formatTemperature(s.temperature)}
+              {fmt(s.temperature, 'temperature')}
             </span>
           ),
         };
@@ -431,16 +429,16 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         const fieldValues: Record<string, React.ReactNode> = {
           power: (
             <span style={{ color: getThresholdColorForField(f.power, 'power', thresholds) }}>
-              {formatPower(f.power)}
+              {fmt(f.power, 'power')}
             </span>
           ),
           temperature: (
             <span style={{ color: getThresholdColorForField(f.temperature, 'temperature', thresholds) }}>
-              {formatTemperature(f.temperature)}
+              {fmt(f.temperature, 'temperature')}
             </span>
           ),
-          rpm: formatRPM(f.rpm),
-          speedPercent: `${f.speedPercent ?? 'NA'}%`,
+          rpm: fmt(f.rpm, 'rpm'),
+          speedPercent: fmt(f.speedPercent, 'speedPercent'),
         };
         const rawValues: Record<string, number | null | undefined> = {
           power: f.power,
@@ -465,12 +463,12 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         const fieldValues: Record<string, React.ReactNode> = {
           power: (
             <span style={{ color: getThresholdColorForField(c.power, 'power', thresholds) }}>
-              {formatPower(c.power)}
+              {fmt(c.power, 'power')}
             </span>
           ),
           temperature: (
             <span style={{ color: getThresholdColorForField(c.temperature, 'temperature', thresholds) }}>
-              {formatTemperature(c.temperature)}
+              {fmt(c.temperature, 'temperature')}
             </span>
           ),
         };
@@ -493,12 +491,12 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         const fieldValues: Record<string, React.ReactNode> = {
           power: (
             <span style={{ color: getThresholdColorForField(m.power, 'power', thresholds) }}>
-              {formatPower(m.power)}
+              {fmt(m.power, 'power')}
             </span>
           ),
           temperature: (
             <span style={{ color: getThresholdColorForField(m.temperature, 'temperature', thresholds) }}>
-              {formatTemperature(m.temperature)}
+              {fmt(m.temperature, 'temperature')}
             </span>
           ),
           thermalThrottle: (
@@ -526,12 +524,12 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         const fieldValues: Record<string, React.ReactNode> = {
           power: (
             <span style={{ color: getThresholdColorForField(dk.power, 'power', thresholds) }}>
-              {formatPower(dk.power)}
+              {fmt(dk.power, 'power')}
             </span>
           ),
           temperature: (
             <span style={{ color: getThresholdColorForField(dk.temperature, 'temperature', thresholds) }}>
-              {formatTemperature(dk.temperature)}
+              {fmt(dk.temperature, 'temperature')}
             </span>
           ),
           status: (
@@ -563,12 +561,12 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         const fieldValues: Record<string, React.ReactNode> = {
           power: (
             <span style={{ color: getThresholdColorForField(io.power, 'power', thresholds) }}>
-              {formatPower(io.power)}
+              {fmt(io.power, 'power')}
             </span>
           ),
           temperature: (
             <span style={{ color: getThresholdColorForField(io.temperature, 'temperature', thresholds) }}>
-              {formatTemperature(io.temperature)}
+              {fmt(io.temperature, 'temperature')}
             </span>
           ),
           linkSpeed: io.linkSpeed,
@@ -593,12 +591,12 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
         const fieldValues: Record<string, React.ReactNode> = {
           power: (
             <span style={{ color: getThresholdColorForField(cd.power, 'power', thresholds) }}>
-              {formatPower(cd.power)}
+              {fmt(cd.power, 'power')}
             </span>
           ),
           temperature: (
             <span style={{ color: getThresholdColorForField(cd.temperature, 'temperature', thresholds) }}>
-              {formatTemperature(cd.temperature)}
+              {fmt(cd.temperature, 'temperature')}
             </span>
           ),
           slotId: cd.slotId,
@@ -639,7 +637,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
           <div style={{ textAlign: 'center', padding: 24 }}>
             {hasTemp && (
               <div style={{ fontSize: 48, fontWeight: 'bold', color }}>
-                {tempValue.toFixed(1)}°C
+                {formatValueWithUnit(tempValue, 'temperature', getFieldUnit('temperature'))}
               </div>
             )}
             {hasLocation && (
@@ -710,7 +708,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
     const charts: Array<{ title: string; data: Array<{ time: string; value: number | null }>; unit: string; color: string }> = [];
 
     fieldKeys.forEach((key, index) => {
-      const { unit, color } = getFieldUnitInfo(key, index);
+      const { unit, color } = getFieldUnitInfo(key, index, getFieldUnit(key));
       charts.push({
         title: getFieldLabel(key),
         data: historyData.map((d) => ({ time: d.timeStr, value: (d[key] as number | null | undefined) ?? null })),
@@ -720,7 +718,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({ open, onClose, node: 
     });
 
     return charts;
-  }, [historyData, getFieldLabel]);
+  }, [historyData, getFieldLabel, getFieldUnit]);
 
   return (
     <Drawer

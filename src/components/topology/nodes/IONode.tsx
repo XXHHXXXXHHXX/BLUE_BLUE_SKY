@@ -6,16 +6,11 @@ import NodeIcon from './NodeIcon';
 import CustomFieldsRenderer from './CustomFieldsRenderer';
 import { useNodeFieldConfig } from './useNodeFieldConfig';
 import {
-  formatVoltage,
-  formatCurrent,
-  formatPower,
-  formatTemperature,
-  formatEfficiency,
-  formatRPM,
   getTemperatureColor,
   getEfficiencyColor,
   getNodeDisplayLabel,
   getTemperatureLevel,
+  formatValueWithUnit,
 } from '../../../utils/formatters';
 
 const IONode: React.FC<NodeProps> = (props) => {
@@ -33,43 +28,45 @@ const IONode: React.FC<NodeProps> = (props) => {
   };
   const io = data.ioData;
   const displayMetrics = (props.data as Record<string, unknown>)?.displayMetrics as Record<string, number | null> | undefined;
-  const { hasField, getFieldLabel, orderedFixedFieldKeys } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const { hasField, getFieldLabel, orderedFixedFieldKeys, getFieldUnit } = useNodeFieldConfig(props.data as Record<string, unknown>);
+  const fmt = (value: number | string | null | undefined, fieldKey: string) =>
+    formatValueWithUnit(value, fieldKey, getFieldUnit(fieldKey));
 
   const renderField = (fieldKey: string) => {
     switch (fieldKey) {
       case 'power':
-        return hasField('power') ? <div key={fieldKey}>{getFieldLabel('power')}: {formatPower(power)}</div> : null;
+        return hasField('power') ? <div key={fieldKey}>{getFieldLabel('power')}: {fmt(power, 'power')}</div> : null;
       case 'temperature':
         return hasField('temperature') ? (
           <div key={fieldKey}>
             {getFieldLabel('temperature')}:{' '}
             <span style={{ color: temperature !== null ? getTemperatureColor(temperature) : '#999' }}>
-              {formatTemperature(temperature)}
+              {fmt(temperature, 'temperature')}
             </span>
           </div>
         ) : null;
       case 'linkSpeed':
-        return hasField('linkSpeed') ? <div key={fieldKey}>{getFieldLabel('linkSpeed')}: {linkSpeed ?? 'NA'}</div> : null;
+        return hasField('linkSpeed') ? <div key={fieldKey}>{getFieldLabel('linkSpeed')}: {fmt(linkSpeed, 'linkSpeed')}</div> : null;
       default: {
         const value = displayMetrics?.[fieldKey] ?? null;
         if (value === null || value === undefined || Number.isNaN(value)) {
           return <div key={fieldKey}>{getFieldLabel(fieldKey)}: NA</div>;
         }
         if (fieldKey.includes('Voltage')) {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatVoltage(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey.includes('Current')) {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatCurrent(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey.includes('Power') || fieldKey === 'power') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatPower(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey === 'temperature') {
           return (
             <div key={fieldKey}>
               {getFieldLabel(fieldKey)}:{' '}
               <span style={{ color: getTemperatureColor(Number(value)) }}>
-                {formatTemperature(Number(value))}
+                {fmt(Number(value), fieldKey)}
               </span>
             </div>
           );
@@ -79,18 +76,18 @@ const IONode: React.FC<NodeProps> = (props) => {
             <div key={fieldKey}>
               {getFieldLabel(fieldKey)}:{' '}
               <span style={{ color: getEfficiencyColor(Number(value)) }}>
-                {formatEfficiency(Number(value))}
+                {fmt(Number(value), fieldKey)}
               </span>
             </div>
           );
         }
         if (fieldKey === 'rpm') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {formatRPM(Number(value))}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
         if (fieldKey === 'speedPercent') {
-          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {`${Number(value).toFixed(1)}%`}</div>;
+          return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(Number(value), fieldKey)}</div>;
         }
-        return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {typeof value === 'number' ? value.toFixed(2) : String(value)}</div>;
+        return <div key={fieldKey}>{getFieldLabel(fieldKey)}: {fmt(value, fieldKey)}</div>;
       }
     }
   };

@@ -2,14 +2,8 @@
 
 import React from 'react';
 import { useNodeFieldConfig } from './useNodeFieldConfig';
-import { getThresholdColorForField } from '../../../utils/formatters';
+import { getThresholdColorForField, formatValueWithUnit } from '../../../utils/formatters';
 import { DEFAULT_FIELD_THRESHOLDS } from '../../../types/topology';
-
-/** 格式化自定义字段数值 */
-function formatCustomValue(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return 'NA';
-  return typeof value === 'number' ? value.toFixed(2) : String(value);
-}
 
 /**
  * 渲染自定义字段（不在 FIXED_FIELD_DEFS 中的字段）
@@ -35,7 +29,7 @@ const CustomFieldsRenderer: React.FC<{
         const color = getThresholdColorForField(value, m.fieldKey, thresholds, DEFAULT_FIELD_THRESHOLDS);
         return (
           <div key={m.fieldKey}>
-            {getFieldLabel(m.fieldKey)}: <span style={color ? { color } : undefined}>{formatCustomValue(value)}</span>
+            {getFieldLabel(m.fieldKey)}: <span style={color ? { color } : undefined}>{formatValueWithUnit(value, m.fieldKey, m.unit)}</span>
           </div>
         );
       })}

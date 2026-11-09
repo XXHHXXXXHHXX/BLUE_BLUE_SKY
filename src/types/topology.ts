@@ -38,6 +38,13 @@ export interface FieldMapping {
   fieldKey: string;   // 前端数据字段名，如 'power', 'temperature'
   bmcField: string;   // BMC sensor 名，如 'CPU0 PWR'
   label?: string;     // 用户自定义显示名（覆盖固定字段定义和 customFieldDefs）
+  /**
+   * 显示单位：
+   * - undefined：使用系统默认单位（按字段名推断，如 Voltage → V）
+   * - ''：无单位（只显示数值）
+   * - 其它：自定义单位
+   */
+  unit?: string;
 }
 
 /** 固定字段定义：每种节点类型的字段和显示名是固定的 */

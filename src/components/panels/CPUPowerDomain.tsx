@@ -31,12 +31,19 @@ interface CPUPowerDomainProps {
   powerDomainCommandFields?: { name: string; label: string }[];
 }
 
-const columns: ColumnsType<CPUPowerDomainType> = [
-  { title: '域名称', dataIndex: 'name', key: 'name' },
-  { title: '电压(V)', dataIndex: 'voltage', key: 'voltage', render: (v?: number) => (v !== undefined ? v.toFixed(3) : '--') },
-  { title: '电流(A)', dataIndex: 'current', key: 'current', render: (v?: number) => (v !== undefined ? v.toFixed(2) : '--') },
-  { title: '功耗(W)', dataIndex: 'power', key: 'power', render: (v?: number) => (v !== undefined ? v.toFixed(1) : '--') },
-];
+/** 电源域表格列：标题单位按字段映射配置（undefined=默认单位） */
+function buildColumns(units: { voltage?: string; current?: string; power?: string }): ColumnsType<CPUPowerDomainType> {
+  const title = (label: string, defaultUnit: string, unit?: string) => {
+    const finalUnit = unit === undefined ? defaultUnit : unit;
+    return finalUnit ? `${label}(${finalUnit})` : label;
+  };
+  return [
+    { title: '域名称', dataIndex: 'name', key: 'name' },
+    { title: title('电压', 'V', units.voltage), dataIndex: 'voltage', key: 'voltage', render: (v?: number) => (v !== undefined ? v.toFixed(3) : '--') },
+    { title: title('电流', 'A', units.current), dataIndex: 'current', key: 'current', render: (v?: number) => (v !== undefined ? v.toFixed(2) : '--') },
+    { title: title('功耗', 'W', units.power), dataIndex: 'power', key: 'power', render: (v?: number) => (v !== undefined ? v.toFixed(1) : '--') },
+  ];
+}
 
 interface CommandRow {
   key: string;
@@ -105,6 +112,20 @@ const CPUPowerDomain: React.FC<CPUPowerDomainProps> = ({
     [propCommandFields, apiConfig],
   );
   const canRefresh = commandMode && command !== '' && commandFields.length > 0;
+
+  // 电源域字段映射中配置的单位（undefined=默认单位）
+  const domainUnits = useMemo(() => {
+    const mappings = (apiConfig?.powerDomainFieldMappings || []) as { fieldKey: string; unit?: string }[];
+    const find = (measure: string) =>
+      mappings.find((m) => m.fieldKey.endsWith(`Output${measure}`))?.unit;
+    return {
+      voltage: find('Voltage'),
+      current: find('Current'),
+      power: find('Power'),
+    };
+  }, [apiConfig]);
+
+  const domainColumns = useMemo(() => buildColumns(domainUnits), [domainUnits]);
 
   /** 点击刷新：重新执行电源域获取命令，转圈直到成功或失败 */
   const handleRefresh = useCallback(async () => {
@@ -258,7 +279,7 @@ const CPUPowerDomain: React.FC<CPUPowerDomainProps> = ({
           <PowerDomainPie domains={liveCpuData.powerDomains} />
           <Divider />
           <Table<CPUPowerDomainType>
-            columns={columns}
+            columns={domainColumns}
             dataSource={liveCpuData.powerDomains}
             rowKey="name"
             pagination={false}

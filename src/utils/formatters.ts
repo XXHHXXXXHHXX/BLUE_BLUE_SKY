@@ -36,6 +36,55 @@ export function formatRPM(rpm: number | null | undefined): string {
   return `${rpm} RPM`;
 }
 
+/** 按字段名推断默认单位（无法推断时返回空字符串） */
+export function getDefaultFieldUnit(fieldKey: string): string {
+  const lower = fieldKey.toLowerCase();
+  if (lower.includes('temp')) return '°C';
+  if (lower.includes('voltage')) return 'V';
+  if (lower.includes('current')) return 'A';
+  if (lower.includes('power')) return 'W';
+  if (lower.includes('efficiency')) return '%';
+  if (lower.includes('rpm')) return 'RPM';
+  if (lower.includes('linkspeed')) return '';
+  if (lower.includes('speed') || lower.includes('percent')) return '%';
+  return '';
+}
+
+/**
+ * 按字段映射配置的单位格式化数值
+ * @param unit undefined=默认单位（沿用既有格式化，自动换算 mV/mA/kW 等）；''=无单位；其它=自定义单位
+ */
+export function formatValueWithUnit(
+  value: number | string | null | undefined,
+  fieldKey: string,
+  unit?: string
+): string {
+  if (value === null || value === undefined) return 'NA';
+  if (typeof value === 'number' && Number.isNaN(value)) return 'NA';
+
+  const num = typeof value === 'number' ? value : Number(value);
+  const isNumeric = !Number.isNaN(num);
+
+  // 默认单位：沿用既有格式化（含自动换算）
+  if (unit === undefined) {
+    if (!isNumeric) return String(value);
+    const lower = fieldKey.toLowerCase();
+    if (lower.includes('voltage')) return formatVoltage(num);
+    if (lower.includes('current')) return formatCurrent(num);
+    if (lower.includes('power')) return formatPower(num);
+    if (lower.includes('temp')) return formatTemperature(num);
+    if (lower.includes('efficiency')) return formatEfficiency(num);
+    if (lower.includes('rpm')) return formatRPM(num);
+    if (lower.includes('linkspeed')) return String(value);
+    if (lower.includes('speed') || lower.includes('percent')) return `${num.toFixed(1)}%`;
+    return num.toFixed(2);
+  }
+
+  // 无单位 / 自定义单位：只按配置显示
+  const text = isNumeric ? num.toFixed(2) : String(value);
+  return unit ? `${text}${unit}` : text;
+}
+
 /** 温度颜色映射 */
 export function getTemperatureColor(temp: number): string {
   if (Number.isNaN(temp)) return '#999';

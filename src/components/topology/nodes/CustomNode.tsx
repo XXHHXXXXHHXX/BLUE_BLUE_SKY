@@ -5,29 +5,11 @@ import { type NodeProps } from '@xyflow/react';
 import NodeIcon from './NodeIcon';
 import { useNodeFieldConfig } from './useNodeFieldConfig';
 import {
-  formatPower,
-  formatTemperature,
-  formatVoltage,
-  formatCurrent,
-  formatEfficiency,
-  formatRPM,
   getTemperatureColor,
   getEfficiencyColor,
   getNodeDisplayLabel,
+  formatValueWithUnit,
 } from '../../../utils/formatters';
-
-/** 根据字段 key 格式化数值 */
-function formatFieldValue(fieldKey: string, value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return 'NA';
-  if (fieldKey.includes('Voltage')) return formatVoltage(value);
-  if (fieldKey.includes('Current')) return formatCurrent(value);
-  if (fieldKey.includes('Power') || fieldKey === 'power') return formatPower(value);
-  if (fieldKey === 'temperature') return formatTemperature(value);
-  if (fieldKey === 'efficiency') return formatEfficiency(value);
-  if (fieldKey === 'rpm') return formatRPM(value);
-  if (fieldKey === 'speedPercent') return `${value.toFixed(1)}%`;
-  return typeof value === 'number' ? value.toFixed(2) : String(value);
-}
 
 /** 获取字段值的显示颜色 */
 function getFieldValueColor(fieldKey: string, value: number | null | undefined): string | undefined {
@@ -46,7 +28,7 @@ const CustomNode: React.FC<NodeProps> = (props) => {
     nodeType?: string;
     displayMetrics?: Record<string, number | null>;
     apiConfig?: {
-      fieldMappings?: { fieldKey: string; bmcField: string }[];
+      fieldMappings?: { fieldKey: string; bmcField: string; unit?: string }[];
       customFieldDefs?: { fieldKey: string; label: string }[];
     };
   };
@@ -78,9 +60,9 @@ const CustomNode: React.FC<NodeProps> = (props) => {
                 <div key={mapping.fieldKey}>
                   {label}:{' '}
                   {color ? (
-                    <span style={{ color }}>{formatFieldValue(mapping.fieldKey, value)}</span>
+                    <span style={{ color }}>{formatValueWithUnit(value, mapping.fieldKey, mapping.unit)}</span>
                   ) : (
-                    formatFieldValue(mapping.fieldKey, value)
+                    formatValueWithUnit(value, mapping.fieldKey, mapping.unit)
                   )}
                 </div>
               );

@@ -7,12 +7,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { useHistoryRecordStore, downloadHistoryCSV, downloadHistoryJSON } from '../../stores/historyRecordStore';
 import TrendChart from '../charts/TrendChart';
 import {
-  formatVoltage,
-  formatCurrent,
   formatPower,
-  formatEfficiency,
-  formatTemperature,
-  formatRPM,
+  formatValueWithUnit,
   getTemperatureColor,
   getNodeDisplayLabel,
 } from '../../utils/formatters';
@@ -178,6 +174,9 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
 
     const d = node.data as Record<string, unknown>;
     const nodeType = d.nodeType as string;
+    const mappings = (node.data.apiConfig?.fieldMappings || []) as { fieldKey: string; unit?: string }[];
+    const fmt = (value: number | string | null | undefined, fieldKey: string) =>
+      formatValueWithUnit(value, fieldKey, mappings.find((m) => m.fieldKey === fieldKey)?.unit);
 
     switch (nodeType) {
       case 'ac': {
@@ -185,9 +184,9 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
         if (!s) return <div>暂无数据</div>;
         return (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="AC输出电压查询">{formatVoltage(s.outputVoltage)}</Descriptions.Item>
-            <Descriptions.Item label="AC输出电流查询">{formatCurrent(s.current)}</Descriptions.Item>
-            <Descriptions.Item label="AC输出功率查询">{formatPower(s.outputPower)}</Descriptions.Item>
+            <Descriptions.Item label="AC输出电压查询">{fmt(s.outputVoltage, 'outputVoltage')}</Descriptions.Item>
+            <Descriptions.Item label="AC输出电流查询">{fmt(s.current, 'current')}</Descriptions.Item>
+            <Descriptions.Item label="AC输出功率查询">{fmt(s.outputPower, 'outputPower')}</Descriptions.Item>
           </Descriptions>
         );
       }
@@ -197,21 +196,21 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
         if (!s) return <div>暂无数据</div>;
         return (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="PSU输入电压查询">{formatVoltage(s.inputVoltage)}</Descriptions.Item>
-            <Descriptions.Item label="PSU输入电流查询">{formatCurrent(s.inputCurrent ?? s.current)}</Descriptions.Item>
-            <Descriptions.Item label="PSU输入功率查询">{formatPower(s.inputPower)}</Descriptions.Item>
-            <Descriptions.Item label="PSU输出电压查询">{formatVoltage(s.outputVoltage)}</Descriptions.Item>
-            <Descriptions.Item label="PSU输出电流查询">{formatCurrent(s.outputCurrent ?? s.current)}</Descriptions.Item>
-            <Descriptions.Item label="PSU输出功率查询">{formatPower(s.outputPower)}</Descriptions.Item>
-            <Descriptions.Item label="转换效率">{formatEfficiency(s.efficiency)}</Descriptions.Item>
+            <Descriptions.Item label="PSU输入电压查询">{fmt(s.inputVoltage, 'inputVoltage')}</Descriptions.Item>
+            <Descriptions.Item label="PSU输入电流查询">{fmt(s.inputCurrent ?? s.current, 'inputCurrent')}</Descriptions.Item>
+            <Descriptions.Item label="PSU输入功率查询">{fmt(s.inputPower, 'inputPower')}</Descriptions.Item>
+            <Descriptions.Item label="PSU输出电压查询">{fmt(s.outputVoltage, 'outputVoltage')}</Descriptions.Item>
+            <Descriptions.Item label="PSU输出电流查询">{fmt(s.outputCurrent ?? s.current, 'outputCurrent')}</Descriptions.Item>
+            <Descriptions.Item label="PSU输出功率查询">{fmt(s.outputPower, 'outputPower')}</Descriptions.Item>
+            <Descriptions.Item label="转换效率">{fmt(s.efficiency, 'efficiency')}</Descriptions.Item>
             {s.psuIntakeTemp != null && (
-              <Descriptions.Item label="PSU(入风口)温度">{formatTemperature(s.psuIntakeTemp)}</Descriptions.Item>
+              <Descriptions.Item label="PSU(入风口)温度">{fmt(s.psuIntakeTemp, 'psuIntakeTemp')}</Descriptions.Item>
             )}
             {s.psuMosTemp != null && (
-              <Descriptions.Item label="PSU(主功率MOS)温度">{formatTemperature(s.psuMosTemp)}</Descriptions.Item>
+              <Descriptions.Item label="PSU(主功率MOS)温度">{fmt(s.psuMosTemp, 'psuMosTemp')}</Descriptions.Item>
             )}
             {s.psuRearIntakeTemp != null && (
-              <Descriptions.Item label="后扩PSU位置(PSU入风)温度">{formatTemperature(s.psuRearIntakeTemp)}</Descriptions.Item>
+              <Descriptions.Item label="后扩PSU位置(PSU入风)温度">{fmt(s.psuRearIntakeTemp, 'psuRearIntakeTemp')}</Descriptions.Item>
             )}
           </Descriptions>
         );
@@ -222,9 +221,9 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
         if (!s) return <div>暂无数据</div>;
         return (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="母线电压">{formatVoltage(s.busbarVoltage)}</Descriptions.Item>
-            <Descriptions.Item label="母线电流">{formatCurrent(s.busbarCurrent)}</Descriptions.Item>
-            <Descriptions.Item label="母线功耗">{formatPower(s.busbarPower)}</Descriptions.Item>
+            <Descriptions.Item label="母线电压">{fmt(s.busbarVoltage, 'busbarVoltage')}</Descriptions.Item>
+            <Descriptions.Item label="母线电流">{fmt(s.busbarCurrent, 'busbarCurrent')}</Descriptions.Item>
+            <Descriptions.Item label="母线功耗">{fmt(s.busbarPower, 'busbarPower')}</Descriptions.Item>
           </Descriptions>
         );
       }
@@ -234,15 +233,15 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
         if (!s) return <div>暂无数据</div>;
         return (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="VR输入电压查询">{formatVoltage(s.inputVoltage)}</Descriptions.Item>
-            <Descriptions.Item label="VR输入电流查询">{formatCurrent(s.inputCurrent ?? s.current)}</Descriptions.Item>
-            <Descriptions.Item label="VR输入功率查询">{formatPower(s.inputPower)}</Descriptions.Item>
-            <Descriptions.Item label="VR输出电压查询">{formatVoltage(s.outputVoltage)}</Descriptions.Item>
-            <Descriptions.Item label="VR输出电流查询">{formatCurrent(s.outputCurrent ?? s.current)}</Descriptions.Item>
-            <Descriptions.Item label="VR输出功率查询">{formatPower(s.outputPower)}</Descriptions.Item>
-            <Descriptions.Item label="转换效率">{formatEfficiency(s.efficiency)}</Descriptions.Item>
+            <Descriptions.Item label="VR输入电压查询">{fmt(s.inputVoltage, 'inputVoltage')}</Descriptions.Item>
+            <Descriptions.Item label="VR输入电流查询">{fmt(s.inputCurrent ?? s.current, 'inputCurrent')}</Descriptions.Item>
+            <Descriptions.Item label="VR输入功率查询">{fmt(s.inputPower, 'inputPower')}</Descriptions.Item>
+            <Descriptions.Item label="VR输出电压查询">{fmt(s.outputVoltage, 'outputVoltage')}</Descriptions.Item>
+            <Descriptions.Item label="VR输出电流查询">{fmt(s.outputCurrent ?? s.current, 'outputCurrent')}</Descriptions.Item>
+            <Descriptions.Item label="VR输出功率查询">{fmt(s.outputPower, 'outputPower')}</Descriptions.Item>
+            <Descriptions.Item label="转换效率">{fmt(s.efficiency, 'efficiency')}</Descriptions.Item>
             {s.temperature != null && (
-              <Descriptions.Item label="温度">{formatTemperature(s.temperature)}</Descriptions.Item>
+              <Descriptions.Item label="温度">{fmt(s.temperature, 'temperature')}</Descriptions.Item>
             )}
           </Descriptions>
         );
@@ -253,15 +252,15 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
         if (!s) return <div>暂无数据</div>;
         return (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="psip输入电压查询">{formatVoltage(s.inputVoltage)}</Descriptions.Item>
-            <Descriptions.Item label="psip输入电流查询">{formatCurrent(s.inputCurrent ?? s.current)}</Descriptions.Item>
-            <Descriptions.Item label="psip输入功率查询">{formatPower(s.inputPower)}</Descriptions.Item>
-            <Descriptions.Item label="psip输出电压查询">{formatVoltage(s.outputVoltage)}</Descriptions.Item>
-            <Descriptions.Item label="psip输出电流查询">{formatCurrent(s.outputCurrent ?? s.current)}</Descriptions.Item>
-            <Descriptions.Item label="psip输出功率查询">{formatPower(s.outputPower)}</Descriptions.Item>
-            <Descriptions.Item label="转换效率">{formatEfficiency(s.efficiency)}</Descriptions.Item>
+            <Descriptions.Item label="psip输入电压查询">{fmt(s.inputVoltage, 'inputVoltage')}</Descriptions.Item>
+            <Descriptions.Item label="psip输入电流查询">{fmt(s.inputCurrent ?? s.current, 'inputCurrent')}</Descriptions.Item>
+            <Descriptions.Item label="psip输入功率查询">{fmt(s.inputPower, 'inputPower')}</Descriptions.Item>
+            <Descriptions.Item label="psip输出电压查询">{fmt(s.outputVoltage, 'outputVoltage')}</Descriptions.Item>
+            <Descriptions.Item label="psip输出电流查询">{fmt(s.outputCurrent ?? s.current, 'outputCurrent')}</Descriptions.Item>
+            <Descriptions.Item label="psip输出功率查询">{fmt(s.outputPower, 'outputPower')}</Descriptions.Item>
+            <Descriptions.Item label="转换效率">{fmt(s.efficiency, 'efficiency')}</Descriptions.Item>
             {s.temperature != null && (
-              <Descriptions.Item label="温度">{formatTemperature(s.temperature)}</Descriptions.Item>
+              <Descriptions.Item label="温度">{fmt(s.temperature, 'temperature')}</Descriptions.Item>
             )}
           </Descriptions>
         );
@@ -272,12 +271,12 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
         if (!f) return <div>暂无数据</div>;
         return (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="风扇功耗查询">{formatPower(f.power)}</Descriptions.Item>
+            <Descriptions.Item label="风扇功耗查询">{fmt(f.power, 'power')}</Descriptions.Item>
             {f.temperature != null && (
-              <Descriptions.Item label="风扇温度查询">{formatTemperature(f.temperature)}</Descriptions.Item>
+              <Descriptions.Item label="风扇温度查询">{fmt(f.temperature, 'temperature')}</Descriptions.Item>
             )}
-            <Descriptions.Item label="转速">{formatRPM(f.rpm)}</Descriptions.Item>
-            <Descriptions.Item label="速度百分比">{f.speedPercent}%</Descriptions.Item>
+            <Descriptions.Item label="转速">{fmt(f.rpm, 'rpm')}</Descriptions.Item>
+            <Descriptions.Item label="速度百分比">{fmt(f.speedPercent, 'speedPercent')}</Descriptions.Item>
           </Descriptions>
         );
       }
@@ -287,9 +286,9 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
         if (!c) return <div>暂无数据</div>;
         return (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="CPU输入功耗查询">{formatPower(c.power)}</Descriptions.Item>
+            <Descriptions.Item label="CPU输入功耗查询">{fmt(c.power, 'power')}</Descriptions.Item>
             {c.temperature != null && (
-              <Descriptions.Item label="CPU温度查询">{formatTemperature(c.temperature)}</Descriptions.Item>
+              <Descriptions.Item label="CPU温度查询">{fmt(c.temperature, 'temperature')}</Descriptions.Item>
             )}
           </Descriptions>
         );
@@ -300,9 +299,9 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
         if (!m) return <div>暂无数据</div>;
         return (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="内存功耗查询">{formatPower(m.power)}</Descriptions.Item>
+            <Descriptions.Item label="内存功耗查询">{fmt(m.power, 'power')}</Descriptions.Item>
             {m.temperature != null && (
-              <Descriptions.Item label="内存条温度查询">{formatTemperature(m.temperature)}</Descriptions.Item>
+              <Descriptions.Item label="内存条温度查询">{fmt(m.temperature, 'temperature')}</Descriptions.Item>
             )}
             <Descriptions.Item label="热节流">
               <Tag color={m.thermalThrottle ? 'red' : 'green'}>
@@ -318,9 +317,9 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
         if (!dk) return <div>暂无数据</div>;
         return (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="硬盘功耗查询">{formatPower(dk.power)}</Descriptions.Item>
+            <Descriptions.Item label="硬盘功耗查询">{fmt(dk.power, 'power')}</Descriptions.Item>
             {dk.temperature != null && (
-              <Descriptions.Item label="硬盘温度查询">{formatTemperature(dk.temperature)}</Descriptions.Item>
+              <Descriptions.Item label="硬盘温度查询">{fmt(dk.temperature, 'temperature')}</Descriptions.Item>
             )}
             <Descriptions.Item label="状态">
               <Tag color={dk.status === 'normal' ? 'green' : dk.status === 'warning' ? 'orange' : 'red'}>
@@ -336,9 +335,9 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
         if (!io) return <div>暂无数据</div>;
         return (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="功耗">{formatPower(io.power)}</Descriptions.Item>
+            <Descriptions.Item label="功耗">{fmt(io.power, 'power')}</Descriptions.Item>
             {io.temperature != null && (
-              <Descriptions.Item label="温度">{formatTemperature(io.temperature)}</Descriptions.Item>
+              <Descriptions.Item label="温度">{fmt(io.temperature, 'temperature')}</Descriptions.Item>
             )}
             <Descriptions.Item label="链路速率">{io.linkSpeed}</Descriptions.Item>
           </Descriptions>
@@ -350,9 +349,9 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
         if (!cd) return <div>暂无数据</div>;
         return (
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="标卡功耗查询">{formatPower(cd.power)}</Descriptions.Item>
+            <Descriptions.Item label="标卡功耗查询">{fmt(cd.power, 'power')}</Descriptions.Item>
             {cd.temperature != null && (
-              <Descriptions.Item label="标卡温度查询">{formatTemperature(cd.temperature)}</Descriptions.Item>
+              <Descriptions.Item label="标卡温度查询">{fmt(cd.temperature, 'temperature')}</Descriptions.Item>
             )}
             <Descriptions.Item label="插槽">{cd.slotId}</Descriptions.Item>
           </Descriptions>
@@ -366,7 +365,7 @@ const CloneNodeDetailPanel: React.FC<CloneNodeDetailPanelProps> = ({ open, onClo
         const color = getTemperatureColor(tempValue);
         return (
           <div style={{ textAlign: 'center', padding: 24 }}>
-            <div style={{ fontSize: 48, fontWeight: 'bold', color }}>{tempValue.toFixed(1)}°C</div>
+            <div style={{ fontSize: 48, fontWeight: 'bold', color }}>{fmt(tempValue, 'temperature')}</div>
             <div style={{ marginTop: 8, color: '#888' }}>{sn.location || 'Unknown'}</div>
           </div>
         );
