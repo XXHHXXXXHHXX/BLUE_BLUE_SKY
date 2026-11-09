@@ -174,13 +174,38 @@ export interface Job {
     errorMessage?: string;
   }>;
   customAvgRanges?: Record<string, { avgStart?: number; avgEnd?: number }>;
+  /** 列表摘要（summary 模式返回，不含 results 明细） */
+  resultSummary?: JobResultSummary;
+}
+
+/** 任务结果统计摘要（列表页展示用，避免拉取每轮结果明细） */
+export interface JobResultSummary {
+  totalCount: number;
+  successCount: number;
+  errorCount: number;
+  scoreNames: string[];
+  bestScores: Record<string, number>;
+  bestScore: number;
+}
+
+export interface FetchJobsOptions {
+  includeLogs?: boolean;
+  includeDataPoints?: boolean;
+  /** 摘要模式：只返回统计值，不返回 results 明细（任务列表页使用） */
+  summary?: boolean;
+  /** 服务端分页：返回条数 */
+  limit?: number;
+  /** 服务端分页：起始偏移 */
+  offset?: number;
 }
 
 interface TestJobState {
   jobs: Job[];
+  /** 服务端任务总数（分页时使用） */
+  totalJobs: number;
   isLoading: boolean;
 
-  fetchJobs: (opts?: { includeLogs?: boolean; includeDataPoints?: boolean }) => Promise<void>;
+  fetchJobs: (opts?: FetchJobsOptions) => Promise<void>;
   startJob: (payload: {
     name: string;
     tabId: string;
@@ -201,6 +226,7 @@ interface TestJobState {
 
 export const useTestJobStore = create<TestJobState>((set, get) => ({
   jobs: [],
+  totalJobs: 0,
   isLoading: false,
 
   fetchJobs: async (opts = {}) => {
@@ -209,12 +235,18 @@ export const useTestJobStore = create<TestJobState>((set, get) => ({
       const params = new URLSearchParams();
       if (opts.includeLogs === false) params.set('includeLogs', 'false');
       if (opts.includeDataPoints === false) params.set('includeDataPoints', 'false');
+      if (opts.summary) params.set('summary', 'true');
+      if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+      if (opts.offset !== undefined) params.set('offset', String(opts.offset));
       const query = params.toString();
       const res = await fetch(`/api/test/jobs${query ? `?${query}` : ''}`);
       const data = await res.json();
       console.log('[testJobStore] fetchJobs response:', data.success, 'jobs count:', (data.jobs || []).length);
       if (data.success) {
-        set({ jobs: data.jobs || [] });
+        set({
+          jobs: data.jobs || [],
+          totalJobs: typeof data.total === 'number' ? data.total : (data.jobs || []).length,
+        });
       }
     } catch (err) {
       console.error('[testJobStore] fetchJobs failed:', err);
@@ -363,7 +395,6 @@ export const useTestJobStore = create<TestJobState>((set, get) => ({
   },
 }));
 
-// 客户端初始化时自动加载任务列表
-if (typeof window !== 'undefined') {
-  useTestJobStore.getState().fetchJobs();
-}
+// 注意：不再在模块加载时自动拉取全量任务列表。
+// 历史任务很多时，任何页面只要 import 该 store 就会触发一次全量拉取并常驻内存，
+// 导致浏览器内存暴涨。需要任务数据的页面自行按需调用 fetchJobs（列表页使用 summary + limit）。

@@ -67,8 +67,15 @@ export function cancelScheduledStart(jobId: string): void {
   clearTimer(jobId);
 }
 
+// 恢复只做一次：任务列表接口会被前端高频轮询，重复恢复会导致定时器反复重建
+const RESTORED_KEY = '__blue_sky_job_scheduler_restored__';
+
 /** 服务器重启后重新挂起所有未执行的定时任务（幂等，可重复调用） */
 export function restoreScheduledJobs(): void {
+  const g = globalThis as Record<string, unknown>;
+  if (g[RESTORED_KEY]) return;
+  g[RESTORED_KEY] = true;
+
   const scheduled = getAllJobs().filter(
     (job) => job.status === 'pending' && !!job.scheduledStartAt,
   );

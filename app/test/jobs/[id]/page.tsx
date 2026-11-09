@@ -40,6 +40,9 @@ import JobResultDisplay from '../../../../src/components/test/JobResultDisplay';
 
 const { Title, Text } = Typography;
 
+/** 终端输出缓冲上限（行），防止长时间运行累积撑爆浏览器内存 */
+const MAX_SHELL_OUTPUT_LINES = 2000;
+
 export default function JobDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -54,15 +57,27 @@ export default function JobDetailPage() {
   const [saveReportForm] = Form.useForm();
   const saveModal = useMaximizableModal({ minWidth: 700 });
   const prevStatusRef = useRef<string | null>(null);
-  const processedLogCountRef = useRef<number>(0);
+  // 已处理的最大日志序号（服务端 seq），用于增量拉取，避免每秒传输全量日志
+  const lastLogSeqRef = useRef<number>(-1);
   const [shellOutput, setShellOutput] = useState<string[]>([]);
 
   const refetchJob = async () => {
     try {
-      const res = await fetch(`/api/test/jobs/${jobId}?includeLogs=true&includeDataPoints=false`);
+      // 同样使用增量日志，避免与轮询合并时重复追加
+      const res = await fetch(
+        `/api/test/jobs/${jobId}?includeLogs=true&includeDataPoints=false&logsAfterSeq=${lastLogSeqRef.current}`
+      );
       const data = await res.json();
       if (data.success && data.job) {
-        setJob(data.job);
+        const fetched = data.job as Job;
+        setJob((prev) => {
+          if (!prev) return fetched;
+          return { ...fetched, logs: [...prev.logs, ...(fetched.logs || [])] };
+        });
+        lastLogSeqRef.current = (fetched.logs || []).reduce(
+          (acc, log) => (typeof log.seq === 'number' && log.seq > acc ? log.seq : acc),
+          lastLogSeqRef.current,
+        );
       }
     } catch (err) {
       console.error('Failed to refetch job:', err);
@@ -86,19 +101,27 @@ export default function JobDetailPage() {
 
     const poll = async () => {
       try {
+        // 增量拉取：只取上次之后的新日志（首次 lastLogSeqRef=-1 时取全量，仍受服务端上限约束）
         const res = await fetch(
-          `/api/test/jobs/${jobId}?includeLogs=true&includeDataPoints=false`
+          `/api/test/jobs/${jobId}?includeLogs=true&includeDataPoints=false&logsAfterSeq=${lastLogSeqRef.current}`
         );
         const data = await res.json();
         if (!data.success) return;
 
         const fetchedJob = data.job as Job;
-        setJob(fetchedJob);
+        // 增量模式下 fetchedJob.logs 只包含新增日志，合并进已有 job，避免覆盖导致日志丢失
+        setJob((prev) => {
+          if (!prev) return fetchedJob;
+          return {
+            ...fetchedJob,
+            logs: [...prev.logs, ...(fetchedJob.logs || [])],
+          };
+        });
         setLoading(false);
 
         // 处理新增日志并推送到 shell 输出
         if (fetchedJob.logs && fetchedJob.logs.length > 0) {
-          const newLogs = fetchedJob.logs.slice(processedLogCountRef.current);
+          const newLogs = fetchedJob.logs;
           if (newLogs.length > 0) {
             const shellOutputs: string[] = [];
             for (const log of newLogs) {
@@ -138,9 +161,20 @@ export default function JobDetailPage() {
               }
             }
             if (shellOutputs.length > 0) {
-              setShellOutput(prev => [...prev, ...shellOutputs]);
+              // 限制终端缓冲行数，避免长时间运行把浏览器内存撑爆
+              setShellOutput(prev => {
+                const next = [...prev, ...shellOutputs];
+                return next.length > MAX_SHELL_OUTPUT_LINES
+                  ? next.slice(-MAX_SHELL_OUTPUT_LINES)
+                  : next;
+              });
             }
-            processedLogCountRef.current = fetchedJob.logs.length;
+            // 记录已处理的最大日志序号，下次只拉取新增部分
+            const maxSeq = newLogs.reduce(
+              (acc, log) => (typeof log.seq === 'number' && log.seq > acc ? log.seq : acc),
+              lastLogSeqRef.current,
+            );
+            lastLogSeqRef.current = maxSeq;
           }
         }
 
@@ -177,8 +211,11 @@ export default function JobDetailPage() {
   // 使用 ref 避免在每次 poll 更新 job 时都触发该 effect，减少渲染抖动
   useEffect(() => {
     const storeJob = getJobById(jobId);
+    if (!storeJob) return;
+    // 列表页 store 中的数据是摘要（results 被清空），不能用来覆盖详情页的完整结果
+    if (storeJob.resultSummary) return;
     const currentJob = jobRef.current;
-    if (storeJob && (!currentJob || new Date(storeJob.updatedAt) > new Date(currentJob.updatedAt))) {
+    if (!currentJob || new Date(storeJob.updatedAt) > new Date(currentJob.updatedAt)) {
       setJob(storeJob);
     }
   }, [jobId, getJobById, jobs]);

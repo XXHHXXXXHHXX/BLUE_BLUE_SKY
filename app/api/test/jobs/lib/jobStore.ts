@@ -11,6 +11,8 @@ export interface JobLog {
   type: string;
   message: string;
   timestamp: string;
+  /** 单调递增序号（用于详情页增量拉取日志；旧数据加载时补齐） */
+  seq?: number;
 }
 
 export interface JobResult {
@@ -182,6 +184,15 @@ export interface Job {
   }>;
   /** 自定义平均值计算范围覆盖，key 为 commandId，value 为范围（1-based 索引） */
   customAvgRanges?: Record<string, { avgStart?: number; avgEnd?: number }>;
+  /** 列表摘要（仅 summary 视图返回，不落盘） */
+  resultSummary?: {
+    totalCount: number;
+    successCount: number;
+    errorCount: number;
+    scoreNames: string[];
+    bestScores: Record<string, number>;
+    bestScore: number;
+  };
 }
 
 // 使用 globalThis 保持跨模块热重载的内存共享
@@ -224,6 +235,12 @@ function loadJobs(): void {
             timestamp: new Date().toISOString(),
           });
         }
+        // 兼容旧数据：补齐日志单调序号（详情页增量拉取依赖 seq）
+        let seq = 0;
+        for (const log of job.logs) {
+          if (typeof log.seq !== 'number') log.seq = seq;
+          seq = log.seq + 1;
+        }
         jobs.set(job.id, job);
       }
     } else {
@@ -246,6 +263,17 @@ function loadJobs(): void {
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingSave = false;
+
+/** 结果中是否还有未剔除的采样点（内存里的采样点通常已落盘并清空） */
+function hasInlineDataPoints(results: JobResult[]): boolean {
+  for (const r of results) {
+    if (!r.monitorResults) continue;
+    for (const mr of Object.values(r.monitorResults)) {
+      if (mr.dataPoints && mr.dataPoints.length > 0) return true;
+    }
+  }
+  return false;
+}
 
 function stripResultDataPoints(r: JobResult): JobResult {
   if (!r.monitorResults) return r;
@@ -393,7 +421,13 @@ export function addJobLog(id: string, type: string, message: string): void {
   if (job.logs.length >= MAX_LOGS_PER_JOB) {
     job.logs.shift();
   }
-  job.logs.push({ type, message, timestamp: new Date().toISOString() });
+  const lastSeq = job.logs.length > 0 ? job.logs[job.logs.length - 1].seq : undefined;
+  job.logs.push({
+    type,
+    message,
+    timestamp: new Date().toISOString(),
+    seq: typeof lastSeq === 'number' ? lastSeq + 1 : job.logs.length,
+  });
   job.updatedAt = new Date().toISOString();
   saveJobs();
 }
@@ -701,33 +735,120 @@ export function resumeJob(id: string): Job | undefined {
   return job;
 }
 
+/** 任务结果摘要：列表页只需要统计值，避免把每轮结果明细全部传输/驻留内存 */
+export interface JobResultSummary {
+  totalCount: number;
+  successCount: number;
+  errorCount: number;
+  scoreNames: string[];
+  bestScores: Record<string, number>;
+  bestScore: number;
+}
+
 export interface JobViewOptions {
   includeLogs?: boolean;
   includeDataPoints?: boolean;
+  /** 摘要模式：不返回 results / stageResults 明细，只返回 resultSummary（任务列表专用） */
+  summary?: boolean;
+  /** 增量拉取：只返回 seq 大于该值的日志（避免每秒传输全量日志） */
+  logsAfterSeq?: number;
+  /** 仅返回最近 N 条日志（未指定 logsAfterSeq 时的兜底上限） */
+  logsLimit?: number;
+}
+
+/** 由结果数组计算列表页所需的统计摘要 */
+export function buildResultSummary(results: JobResult[]): JobResultSummary {
+  const successResults = results.filter((r) => r.status === 'success');
+  const scoreNames: string[] = [];
+  const seen = new Set<string>();
+  for (const r of successResults) {
+    for (const name of Object.keys(r.scores || {})) {
+      if (!seen.has(name)) {
+        seen.add(name);
+        scoreNames.push(name);
+      }
+    }
+  }
+  const bestScores: Record<string, number> = {};
+  for (const name of scoreNames) {
+    let best = -Infinity;
+    for (const r of successResults) {
+      const v = r.scores?.[name];
+      if (typeof v === 'number' && v > best) best = v;
+    }
+    if (Number.isFinite(best)) bestScores[name] = best;
+  }
+  const bestScore = successResults.length > 0
+    ? Math.max(...successResults.map((r) => (Number.isFinite(r.score) ? r.score : -Infinity)))
+    : 0;
+
+  return {
+    totalCount: results.length,
+    successCount: successResults.length,
+    errorCount: results.filter((r) => r.status === 'error').length,
+    scoreNames,
+    bestScores,
+    bestScore: Number.isFinite(bestScore) ? bestScore : 0,
+  };
 }
 
 /** 按视图选项返回任务的轻量副本，避免把大日志/采样点一次性序列化到前端 */
 export function toJobView(job: Job, options: JobViewOptions = {}): Job {
-  const { includeLogs = true, includeDataPoints = true } = options;
-  if (includeLogs && includeDataPoints) return job;
+  const {
+    includeLogs = true,
+    includeDataPoints = true,
+    summary = false,
+    logsAfterSeq,
+    logsLimit,
+  } = options;
+  const needsLogWindow = logsAfterSeq !== undefined || logsLimit !== undefined;
+  if (includeLogs && includeDataPoints && !summary && !needsLogWindow) return job;
 
   const clone: Job = { ...job };
 
+  // 日志：支持增量窗口，避免详情页每秒拉取全量（最多 5000 条）日志
   if (!includeLogs) {
     clone.logs = [];
+  } else if (needsLogWindow) {
+    let logs = job.logs;
+    if (logsAfterSeq !== undefined) {
+      logs = logs.filter((l) => (l.seq ?? 0) > logsAfterSeq);
+    }
+    if (logsLimit !== undefined && logs.length > logsLimit) {
+      logs = logs.slice(-logsLimit);
+    }
+    clone.logs = logs;
   }
 
-  if (!includeDataPoints) {
-    if (job.results.length > 0) {
+  // 摘要模式：剔除结果明细（可能是数千轮 × 多个监控命令的元数据）
+  if (summary) {
+    const allResults = job.results.length > 0
+      ? job.results
+      : (job.stageResults
+        ? Object.values(job.stageResults).flatMap((sr) => sr.results)
+        : []);
+    clone.results = [];
+    clone.stageResults = job.stageResults
+      ? Object.fromEntries(
+        Object.entries(job.stageResults).map(([key, sr]) => [key, { ...sr, results: [] }])
+      )
+      : undefined;
+    clone.resultSummary = buildResultSummary(allResults);
+  } else if (!includeDataPoints) {
+    // 内存中的采样点通常已落盘并清空，此时无需逐条复制结果对象（历史任务多时开销很大）
+    if (job.results.length > 0 && hasInlineDataPoints(job.results)) {
       clone.results = job.results.map(stripResultDataPoints);
     }
     if (job.stageResults) {
-      clone.stageResults = Object.fromEntries(
-        Object.entries(job.stageResults).map(([key, sr]) => [
-          key,
-          { ...sr, results: sr.results.map(stripResultDataPoints) },
-        ])
-      );
+      const stageEntries = Object.entries(job.stageResults);
+      if (stageEntries.some(([, sr]) => hasInlineDataPoints(sr.results))) {
+        clone.stageResults = Object.fromEntries(
+          stageEntries.map(([key, sr]) => [
+            key,
+            { ...sr, results: sr.results.map(stripResultDataPoints) },
+          ])
+        );
+      }
     }
   }
 

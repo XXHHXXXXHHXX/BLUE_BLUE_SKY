@@ -15,20 +15,30 @@ import {
 import { runJob } from './lib/jobRunner';
 import { scheduleJobStart, cancelScheduledStart, restoreScheduledJobs } from './lib/jobScheduler';
 
-/** GET /api/test/jobs - 获取任务列表 */
+/** GET /api/test/jobs - 获取任务列表（支持摘要模式与服务端分页） */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const includeLogs = searchParams.get('includeLogs') !== 'false';
   const includeDataPoints = searchParams.get('includeDataPoints') !== 'false';
+  // 摘要模式：不返回每轮结果明细，只返回统计值（任务列表页使用，避免历史任务多时撑爆内存）
+  const summary = searchParams.get('summary') === 'true';
+  const limitParam = Number(searchParams.get('limit'));
+  const offsetParam = Number(searchParams.get('offset'));
 
   // 服务器重启后，前端首次拉取任务列表时重新挂起未执行的定时任务（幂等）
   restoreScheduledJobs();
 
-  const jobs = getAllJobs().map((job) =>
-    toJobView(job, { includeLogs, includeDataPoints })
+  const allJobs = getAllJobs();
+  const total = allJobs.length;
+  const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? Math.floor(offsetParam) : 0;
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.floor(limitParam) : undefined;
+  const pageJobs = limit !== undefined ? allJobs.slice(offset, offset + limit) : allJobs.slice(offset);
+
+  const jobs = pageJobs.map((job) =>
+    toJobView(job, { includeLogs, includeDataPoints, summary })
   );
 
-  return NextResponse.json({ success: true, jobs });
+  return NextResponse.json({ success: true, jobs, total, offset, limit: limit ?? total });
 }
 
 /** POST /api/test/jobs - 创建并启动新任务 */

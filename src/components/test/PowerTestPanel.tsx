@@ -278,6 +278,8 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     }
   }, [isSaveModalOpen, fetchFolders, saveReportForm, getSelectedFolderId]);
   const processedLogCountRef = useRef(0);
+  // 已处理的最大日志序号（服务端 seq），用于增量拉取日志
+  const lastLogSeqRef = useRef(-1);
   const processedResultCountRef = useRef(0);
   const prevJobStatusRef = useRef<string | null>(null);
   const isAbortingRef = useRef(false);
@@ -362,6 +364,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     setActiveJob(null);
     lastJobIdRef.current = null;
     processedLogCountRef.current = 0;
+    lastLogSeqRef.current = -1;
     processedResultCountRef.current = 0;
     prevJobStatusRef.current = null;
     isAbortingRef.current = false;
@@ -380,7 +383,8 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   useEffect(() => {
     const restoreRunningJob = async () => {
       try {
-        const res = await fetch('/api/test/jobs');
+        // 只取摘要 + 第一页，避免历史任务多时把全量结果明细拉进内存
+        const res = await fetch('/api/test/jobs?includeLogs=false&includeDataPoints=false&summary=true&limit=200');
         const data = await res.json();
         if (!data.success) return;
         // 只恢复当前浏览器客户端自己创建的任务，避免多人共用同一后台任务导致混乱
@@ -396,6 +400,11 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           if (activeJobIdRef.current === runningJob.id && tab.isRunningTest) {
             return;
           }
+          // 摘要列表不含结果明细与日志，按需拉取该任务的完整数据用于恢复
+          const detailRes = await fetch(`/api/test/jobs/${runningJob.id}?includeDataPoints=false`);
+          const detailData = await detailRes.json();
+          if (!detailData.success || !detailData.job) return;
+          const fullJob = detailData.job as Job;
           setActiveJobId(runningJob.id);
           setIsRunningTest(tab.id, true);
           setTestStatus(tab.id, 'testing');
@@ -403,7 +412,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           // 先清空本地结果再按服务端结果重建，避免恢复任务清除数据后本地仍残留旧结果造成重复
           clearTestResults(tab.id);
           // 恢复已有结果
-          for (const r of runningJob.results) {
+          for (const r of fullJob.results) {
             addTestResult(tab.id, {
               iteration: r.iteration,
               power: r.power,
@@ -420,9 +429,9 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
               stageName: r.stageName,
             });
           }
-          processedResultCountRef.current = runningJob.results.length;
+          processedResultCountRef.current = fullJob.results.length;
           // 恢复日志输出（简略恢复最近 50 条避免刷屏）
-          const recentLogs = runningJob.logs.slice(-50);
+          const recentLogs = fullJob.logs.slice(-50);
           const restoreOutputs: string[] = [];
           for (const log of recentLogs) {
             const timeStr = new Date(log.timestamp).toLocaleTimeString();
@@ -441,7 +450,11 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           if (restoreOutputs.length > 0) {
             appendShellOutput(tab.id, restoreOutputs);
           }
-          processedLogCountRef.current = runningJob.logs.length;
+          processedLogCountRef.current = fullJob.logs.length;
+          lastLogSeqRef.current = fullJob.logs.reduce(
+            (acc, log) => (typeof log.seq === 'number' && log.seq > acc ? log.seq : acc),
+            -1,
+          );
           prevJobStatusRef.current = runningJob.status;
           const pendingHint = runningJob.status === 'pending' && runningJob.scheduledStartAt
             ? `（定时任务，将于 ${new Date(runningJob.scheduledStartAt).toLocaleString()} 自动开始）`
@@ -499,15 +512,18 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
 
     const poll = async () => {
       try {
-        const res = await fetch(`/api/test/jobs/${activeJobId}`);
+        // 增量拉取日志（只取上次之后的新日志），采样点已在落盘时从内存剔除，无需再传
+        const res = await fetch(
+          `/api/test/jobs/${activeJobId}?includeDataPoints=false&logsAfterSeq=${lastLogSeqRef.current}`
+        );
         const data = await res.json();
         if (!data.success) return;
 
         const job = data.job as Job;
         setActiveJob(job);
 
-        // 处理新增日志（批量添加，减少渲染次数）
-        const newLogs = job.logs.slice(processedLogCountRef.current);
+        // 处理新增日志（job.logs 已是增量部分，批量添加，减少渲染次数）
+        const newLogs = job.logs;
         if (newLogs.length > 0) {
           const shellOutputs: string[] = [];
           for (const log of newLogs) {
@@ -556,7 +572,11 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           if (shellOutputs.length > 0) {
             appendShellOutput(tab.id, shellOutputs);
           }
-          processedLogCountRef.current = job.logs.length;
+          // 记录已处理的最大日志序号，下次只拉取新增部分
+          lastLogSeqRef.current = newLogs.reduce(
+            (acc, log) => (typeof log.seq === 'number' && log.seq > acc ? log.seq : acc),
+            lastLogSeqRef.current,
+          );
         }
 
         // 同步流水线当前阶段和各阶段状态
@@ -1005,6 +1025,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         setActiveJobId(job.id);
         lastJobIdRef.current = job.id;
         processedLogCountRef.current = 0;
+        lastLogSeqRef.current = -1;
         processedResultCountRef.current = 0;
         prevJobStatusRef.current = job.status;
         const scheduleHint = job.scheduledStartAt
@@ -1223,6 +1244,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         setActiveJobId(job.id);
         lastJobIdRef.current = job.id;
         processedLogCountRef.current = 0;
+        lastLogSeqRef.current = -1;
         processedResultCountRef.current = 0;
         prevJobStatusRef.current = job.status;
         const scheduleHint = job.scheduledStartAt

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Card,
@@ -39,31 +39,53 @@ import { collectScoreNames } from '../../../src/utils/scoreParsing';
 
 const { Title, Text } = Typography;
 
+/** 任务列表每页条数（服务端分页，避免历史任务多时一次性拉全量） */
+const PAGE_SIZE = 10;
+
 export default function JobListPage() {
   const router = useRouter();
-  const { jobs, isLoading, fetchJobs, abortJob, resumeJob, deleteJob, batchDeleteJobs, deleteJobsByStatus } = useTestJobStore();
+  const { jobs, totalJobs, isLoading, fetchJobs, abortJob, resumeJob, deleteJob, batchDeleteJobs, deleteJobsByStatus } = useTestJobStore();
   const { addReport, buildFolderTreeOptions, getSelectedFolderId, fetchFolders } = useTestReportStore();
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [saveModalJob, setSaveModalJob] = useState<Job | null>(null);
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveForm] = Form.useForm();
+  const [page, setPage] = useState(1);
 
   const saveModal = useMaximizableModal({ minWidth: 700 });
 
+  // 列表页只需要摘要（不含每轮结果明细）与当前页数据，避免历史任务多时撑爆内存
+  const loadPage = useCallback(
+    (targetPage: number) =>
+      fetchJobs({
+        includeLogs: false,
+        includeDataPoints: false,
+        summary: true,
+        limit: PAGE_SIZE,
+        offset: (targetPage - 1) * PAGE_SIZE,
+      }),
+    [fetchJobs],
+  );
+
   useEffect(() => {
-    // 列表页不需要完整日志和采样点，避免大任务撑爆内存
-    fetchJobs({ includeLogs: false, includeDataPoints: false });
-    // 自动刷新
+    loadPage(page);
+    // 自动刷新（只刷新当前页）
     const interval = setInterval(() => {
-      fetchJobs({ includeLogs: false, includeDataPoints: false });
+      loadPage(page);
     }, 3000);
     return () => clearInterval(interval);
-  }, [fetchJobs]);
+  }, [loadPage, page]);
+
+  // 总数变化导致当前页越界时回到最后一页
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(totalJobs / PAGE_SIZE));
+    if (page > maxPage) setPage(maxPage);
+  }, [totalJobs, page]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchJobs({ includeLogs: false, includeDataPoints: false });
+    await loadPage(page);
     setRefreshing(false);
   };
 
@@ -125,19 +147,31 @@ export default function JobListPage() {
     const values = await saveForm.validateFields();
     setSaveLoading(true);
     try {
-      const stages = saveModalJob.config.stages;
+      // 列表页使用摘要模式（不含每轮结果明细），保存报告前按需拉取该任务的完整结果
+      let fullJob = saveModalJob;
+      if (saveModalJob.resultSummary || fullJob.results.length === 0) {
+        const res = await fetch(
+          `/api/test/jobs/${saveModalJob.id}?includeLogs=false&includeDataPoints=true`
+        );
+        const data = await res.json();
+        if (!data.success || !data.job) {
+          throw new Error(data.message || '获取任务结果失败');
+        }
+        fullJob = data.job as Job;
+      }
+      const stages = fullJob.config.stages;
       const isPipeline = stages && stages.length > 0;
       if (isPipeline) {
         let savedCount = 0;
         for (const stage of stages.slice().sort((a, b) => a.order - b.order)) {
-          const sr = saveModalJob.stageResults?.[stage.id];
+          const sr = fullJob.stageResults?.[stage.id];
           if (!sr || sr.results.length === 0) continue;
           await addReport({
             name: `${values.name} - ${stage.name}`,
             description: values.description,
             folderId: values.folderId,
             config: {
-              host: saveModalJob.config.host,
+              host: fullJob.config.host,
               iterationParams: stage.iterationParams,
               adjustmentCommands: (stage.adjustmentCommands || []).map((cmd) => ({
                 ...cmd,
@@ -145,7 +179,7 @@ export default function JobListPage() {
               })),
             },
             results: sr.results as TestReport['results'],
-            jobId: saveModalJob.id,
+            jobId: fullJob.id,
             stageId: stage.id,
             stageName: stage.name,
           });
@@ -157,7 +191,7 @@ export default function JobListPage() {
           message.warning('没有可保存的阶段报告');
         }
       } else {
-        if (saveModalJob.results.length === 0) {
+        if (fullJob.results.length === 0) {
           message.warning('没有可保存的结果');
           setSaveLoading(false);
           return;
@@ -166,9 +200,9 @@ export default function JobListPage() {
           name: values.name,
           description: values.description,
           folderId: values.folderId,
-          config: saveModalJob.config as TestReport['config'],
-          results: saveModalJob.results as TestReport['results'],
-          jobId: saveModalJob.id,
+          config: fullJob.config as TestReport['config'],
+          results: fullJob.results as TestReport['results'],
+          jobId: fullJob.id,
         });
         message.success('报告已保存');
       }
@@ -261,8 +295,10 @@ export default function JobListPage() {
       key: 'results',
       width: 120,
       render: (_, record) => {
-        const successCount = record.results.filter(r => r.status === 'success').length;
-        const errorCount = record.results.filter(r => r.status === 'error').length;
+        // 摘要模式：使用服务端返回的统计值，避免把每轮结果明细拉到前端
+        const summary = record.resultSummary;
+        const successCount = summary ? summary.successCount : record.results.filter(r => r.status === 'success').length;
+        const errorCount = summary ? summary.errorCount : record.results.filter(r => r.status === 'error').length;
         return (
           <Space>
             <Tag color="success">成功 {successCount}</Tag>
@@ -276,6 +312,25 @@ export default function JobListPage() {
       key: 'scores',
       width: 220,
       render: (_, record) => {
+        const summary = record.resultSummary;
+        if (summary) {
+          if (summary.successCount === 0) return '-';
+          if (summary.scoreNames.length === 0) {
+            return <Text strong style={{ color: '#52c41a' }}>最高 {summary.bestScore}</Text>;
+          }
+          return (
+            <Space size={[4, 4]} wrap>
+              {summary.scoreNames.map((name) => {
+                const best = summary.bestScores[name];
+                return (
+                  <Tag key={name} color="green">
+                    {name}: <strong>{Number.isFinite(best) ? best : '-'}</strong>
+                  </Tag>
+                );
+              })}
+            </Space>
+          );
+        }
         const successResults = record.results.filter((r) => r.status === 'success');
         if (successResults.length === 0) return '-';
         const names = collectScoreNames(successResults);
@@ -349,7 +404,8 @@ export default function JobListPage() {
               </Button>
             </Tooltip>
           )}
-          {(record.status === 'completed' || record.status === 'aborted' || record.status === 'error') && record.results.length > 0 && (
+          {(record.status === 'completed' || record.status === 'aborted' || record.status === 'error') &&
+            (record.resultSummary ? record.resultSummary.totalCount > 0 : record.results.length > 0) && (
             <Tooltip title="保存已跑完的结果为报告">
               <Button
                 size="small"
@@ -436,7 +492,14 @@ export default function JobListPage() {
                 selectedRowKeys,
                 onChange: (keys) => setSelectedRowKeys(keys),
               }}
-              pagination={{ pageSize: 10 }}
+              pagination={{
+                current: page,
+                pageSize: PAGE_SIZE,
+                total: totalJobs || jobs.length,
+                showSizeChanger: false,
+                showTotal: (total) => `共 ${total} 个任务`,
+                onChange: (nextPage) => setPage(nextPage),
+              }}
               scroll={{ x: 1000 }}
               size="small"
             />
