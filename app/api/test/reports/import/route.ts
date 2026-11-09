@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { buildScoreSeries } from '../../../../../src/utils/scoreParsing';
+import { stripMonitorSeriesSuffix } from '../../../../../src/utils/monitorKeys';
 
 const DATA_DIR = path.join(process.cwd(), '.data');
 const REPORTS_FILE = path.join(DATA_DIR, 'test-reports.json');
@@ -169,8 +170,7 @@ function getDataPointsDir(sourcePath: string): string {
 }
 
 function inferCommandName(commandId: string): string {
-  // 去掉 list 模式 __col__N 后缀用于展示
-  return commandId.replace(/__col__\d+$/, '');
+  return stripMonitorSeriesSuffix(commandId);
 }
 
 function scanDataPointsFolder(sourcePath: string): ScanInfo {
