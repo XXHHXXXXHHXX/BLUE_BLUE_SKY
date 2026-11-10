@@ -433,6 +433,9 @@ export async function POST(request: NextRequest) {
             const envExports = [
               `BLUE_SKY_POWER=${shellQuote(power.toString())}`,
               `BLUE_SKY_ITERATION=${shellQuote(iteration.toString())}`,
+              // 目标测试主机信息（run.sh 可直接使用）
+              `BLUE_SKY_HOST=${shellQuote(host)}`,
+              `BLUE_SKY_PORT=${shellQuote(String(port ?? 22))}`,
               ...paramEnvExports,
               ...(envVars || []).map((e) => `${e.key}=${shellQuote(e.value)}`),
             ].map((e) => `export ${e}`).join(' && ');
@@ -444,6 +447,8 @@ export async function POST(request: NextRequest) {
             const execEnv: Record<string, string> = {
               BLUE_SKY_POWER: power.toString(),
               BLUE_SKY_ITERATION: iteration.toString(),
+              BLUE_SKY_HOST: host,
+              BLUE_SKY_PORT: String(port ?? 22),
               ...Object.fromEntries(paramNames.map((name) => [name, String(currentValues[name])])),
               ...Object.fromEntries((envVars || []).map((e) => [e.key, e.value])),
             };

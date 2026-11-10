@@ -83,6 +83,8 @@ async function executePowerTest(
           POWER_TEST_START: config.startPower.toString(),
           POWER_TEST_END: config.endPower.toString(),
           POWER_TEST_STEP: step.toString(),
+          BLUE_SKY_HOST: config.host,
+          BLUE_SKY_PORT: String(config.port || 22),
         } as NodeJS.ProcessEnv,
       },
     });

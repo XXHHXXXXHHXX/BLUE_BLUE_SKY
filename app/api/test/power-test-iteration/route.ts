@@ -57,6 +57,8 @@ async function runIteration(
           ...process.env,
           BLUE_SKY_POWER: config.power.toString(),
           BLUE_SKY_ITERATION: config.iteration.toString(),
+          BLUE_SKY_HOST: config.host,
+          BLUE_SKY_PORT: String(config.port || 22),
         } as NodeJS.ProcessEnv,
       },
     });

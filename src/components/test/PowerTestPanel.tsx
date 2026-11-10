@@ -1873,7 +1873,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       <ul style={{ paddingLeft: 16 }}>
         <li>接收位置参数：按参数顺序传递的参数值</li>
         <li>可通过环境变量读取所有参数值（参数名=值）</li>
-        <li>兼容环境变量：BLUE_SKY_POWER（第一个参数值）、BLUE_SKY_ITERATION（迭代序号）</li>
+        <li>兼容环境变量：BLUE_SKY_POWER（第一个参数值）、BLUE_SKY_ITERATION（迭代序号）、BLUE_SKY_HOST（目标测试主机 IP/域名）、BLUE_SKY_PORT（SSH 端口，默认 22）</li>
         <li>最后输出 JSON 格式结果到 stdout</li>
       </ul>
 
@@ -1892,10 +1892,11 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
 {`#!/bin/bash
 # run.sh - 迭代测试脚本
 # 参数 $1, $2, ...: 按顺序传递的参数值
-# 环境变量: 参数名=值, BLUE_SKY_POWER, BLUE_SKY_ITERATION
+# 环境变量: 参数名=值, BLUE_SKY_POWER, BLUE_SKY_ITERATION, BLUE_SKY_HOST, BLUE_SKY_PORT
 
 echo "开始测试，参数: $1, $2"
 echo "环境变量: 功耗=$功耗, 电压=$电压"
+echo "目标主机: $BLUE_SKY_HOST:$BLUE_SKY_PORT"
 
 # 在这里执行你的测试...
 sleep 1
