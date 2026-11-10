@@ -321,7 +321,10 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
           filterOption={(input, option) => {
             const keyword = input.trim().toLowerCase();
             if (!keyword) return true;
-            const config = typeConfigs.find((c) => c.id === option?.value);
+            // 分组节点自身不参与匹配，由组内子项决定是否展示
+            const opt = option as { value?: string; options?: unknown[] } | undefined;
+            if (opt?.options) return true;
+            const config = typeConfigs.find((c) => c.id === opt?.value);
             return !!config && config.name.toLowerCase().includes(keyword);
           }}
           options={selectOptions}
