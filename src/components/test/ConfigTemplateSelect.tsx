@@ -15,6 +15,7 @@ import {
   Popconfirm,
   Divider,
   Typography,
+  Dropdown,
 } from 'antd';
 import {
   SettingOutlined,
@@ -374,15 +375,26 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
             >
               合并为分组（已选 {selectedIds.length}）
             </Button>
-            <Select
-              size="small"
-              style={{ width: 180 }}
-              placeholder="加入已有分组"
-              value={undefined}
-              onChange={(gid) => handleMoveToGroup(gid)}
-              options={typeGroups.map((g) => ({ value: g.id, label: g.name }))}
+            <Dropdown
               disabled={typeGroups.length === 0 || selectedIds.length === 0}
-            />
+              menu={{
+                items: typeGroups.map((g) => ({
+                  key: g.id,
+                  label: (
+                    <Space>
+                      <FolderOutlined />
+                      <span>{g.name}</span>
+                    </Space>
+                  ),
+                })),
+                onClick: ({ key }) => handleMoveToGroup(key),
+              }}
+              trigger={['click']}
+            >
+              <Button size="small" disabled={typeGroups.length === 0 || selectedIds.length === 0}>
+                加入已有分组
+              </Button>
+            </Dropdown>
             <Button
               size="small"
               icon={<FolderAddOutlined />}
