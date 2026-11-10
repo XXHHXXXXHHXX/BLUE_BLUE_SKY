@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Card, Form, Input, Button, Space, Tag, message, Row, Col, Select } from 'antd';
-import { CheckCircleOutlined, DisconnectOutlined, LoadingOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, DisconnectOutlined, LoadingOutlined, FolderOpenOutlined, DesktopOutlined } from '@ant-design/icons';
 import { useTestStore, type TestTab } from '../../stores/testStore';
 import { useSSHSessionStore } from '../../stores/sshSessionStore';
 import SSHSessionManager from './SSHSessionManager';
@@ -98,7 +98,8 @@ const SSHLoginPanel: React.FC<SSHLoginPanelProps> = ({ tab }) => {
     <Card 
       title={
         <Space>
-          <span>SSH连接配置</span>
+          <DesktopOutlined />
+          <span>目标测试主机连接配置</span>
         </Space>
       }
       size="small"

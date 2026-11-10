@@ -27,13 +27,12 @@ import {
   SafetyOutlined,
   InfoCircleOutlined,
   SaveOutlined,
-  DeleteOutlined,
-  DatabaseOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import { useTestStore, type MonitorCommand } from '../../stores/testStore';
 import { useBMCSessionStore } from '../../stores/bmcSessionStore';
-import { useTestIterationConfigStore } from '../../stores/testIterationConfigStore';
+import { useTestIterationConfigStore, type SavedTestConfig } from '../../stores/testIterationConfigStore';
+import ConfigTemplateSelect from './ConfigTemplateSelect';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import {
   SERIAL_UART_PRESETS,
@@ -64,7 +63,7 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
 }) => {
   const { tabs, setMonitorCommands } = useTestStore();
   const { sessions: bmcSessions } = useBMCSessionStore();
-  const { configs: savedConfigs, fetchConfigs, addConfig, removeConfig } = useTestIterationConfigStore();
+  const { fetchConfigs, addConfig } = useTestIterationConfigStore();
 
   const tab = tabs.find((t) => t.id === tabId);
   const commands = controlledCommands ?? tab?.powerTestConfig.monitorCommands ?? [];
@@ -127,15 +126,10 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
 
   const enabledCount = commands.filter((c) => c.enabled).length;
 
-  // 加载监控配置模板
-  const handleLoadConfig = (configId: string) => {
-    const config = savedConfigs.find((c) => c.id === configId);
-    if (!config) return;
-
+  // 加载监控配置模板（配置对象由选择器直接给出）
+  const handleLoadConfig = (config: SavedTestConfig) => {
     updateCommands(config.monitorCommands || []);
-    setSelectedConfigId(configId);
-    // 使用 antd message 需要通过父组件传入，这里用 console 或静默处理
-    // 由于 MonitorConfigPanel 没有引入 message，我们用简单的反馈
+    setSelectedConfigId(config.id);
   };
 
   // 保存当前监控配置
@@ -156,18 +150,6 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
       await fetchConfigs('monitor');
     } catch {
       // 保存失败
-    }
-  };
-
-  // 删除配置模板
-  const handleDeleteConfig = async (configId: string) => {
-    try {
-      await removeConfig(configId);
-      if (selectedConfigId === configId) {
-        setSelectedConfigId(null);
-      }
-    } catch {
-      // 删除失败
     }
   };
 
@@ -216,36 +198,24 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
         }}
       >
         <Space direction="vertical" style={{ width: '100%' }}>
-          <Select
-            size="small"
-            placeholder="选择已保存的监控配置模板"
-            value={selectedConfigId || undefined}
-            onChange={(value) => {
-              if (value) {
-                handleLoadConfig(value);
+          <ConfigTemplateSelect
+            configType="monitor"
+            value={selectedConfigId}
+            onChange={(config) => {
+              if (config) {
+                handleLoadConfig(config);
               } else {
                 setSelectedConfigId(null);
               }
             }}
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            style={{ width: '100%' }}
-          >
-            {savedConfigs
-              .filter((c) => c.configType === 'monitor')
-              .map((config) => (
-                <Option key={config.id} value={config.id} label={config.name}>
-                  <Space>
-                    <DatabaseOutlined style={{ color: '#1890ff' }} />
-                    <span>{config.name}</span>
-                    <span style={{ color: '#999', fontSize: 12 }}>
-                      {config.monitorCommands?.length || 0} 条命令
-                    </span>
-                  </Space>
-                </Option>
-              ))}
-          </Select>
+            placeholder="选择已保存的监控配置模板"
+            disabled={disabled}
+            renderExtra={(config) => (
+              <span style={{ color: '#999', fontSize: 12 }}>
+                {config.monitorCommands?.length || 0} 条命令
+              </span>
+            )}
+          />
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Button
               type="dashed"
@@ -255,16 +225,6 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
             >
               保存当前配置
             </Button>
-            {selectedConfigId && (
-              <Button
-                danger
-                size="small"
-                icon={<DeleteOutlined />}
-                onClick={() => handleDeleteConfig(selectedConfigId)}
-              >
-                删除配置
-              </Button>
-            )}
           </Space>
         </Space>
       </div>

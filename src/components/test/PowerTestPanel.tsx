@@ -69,6 +69,7 @@ import { useTestStore, type TestTab, type TestResult, type IterationParameter, t
 import { useTestPackageStore, formatFileSize } from '../../stores/testPackageStore';
 import { useTestReportStore, generateChartOption } from '../../stores/testReportStore';
 import { useTestIterationConfigStore } from '../../stores/testIterationConfigStore';
+import ConfigTemplateSelect from './ConfigTemplateSelect';
 import { useBMCSessionStore } from '../../stores/bmcSessionStore';
 import { useTestDraftStore } from '../../stores/testDraftStore';
 import { useTestJobStore, type Job, type PipelineStage as ServerPipelineStage } from '../../stores/testJobStore';
@@ -76,7 +77,6 @@ import { useTestPipelineTemplateStore, type PipelineStageTemplateData } from '..
 import TestPackageLibrary from './TestPackageLibrary';
 import TestReportManager from './TestReportManager';
 import TestDraftManager from './TestDraftManager';
-import BMCConfigPanel from '../monitor/BMCConfigPanel';
 import MonitorConfigPanel from './MonitorConfigPanel';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import ScoreDisplay from './ScoreDisplay';
@@ -148,7 +148,6 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     setHeartbeatConfig,
     setAlertWebhook,
     setLogMonitorConfig,
-    setGlobalBmcSessionId,
     setPipelineMode,
     setPipelineStages,
     addPipelineStage,
@@ -161,7 +160,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const { addReport, buildFolderTreeOptions, getSelectedFolderId, fetchFolders } = useTestReportStore();
   const { addDraft } = useTestDraftStore();
   const { startJob, abortJob } = useTestJobStore();
-  const { configs: savedConfigs, fetchConfigs, addConfig, removeConfig } = useTestIterationConfigStore();
+  const { configs: savedConfigs, fetchConfigs, addConfig } = useTestIterationConfigStore();
   const { templates: pipelineTemplates, isLoading: isLoadingTemplates, fetchTemplates, addTemplate, removeTemplate } = useTestPipelineTemplateStore();
   const { sessions: bmcSessions } = useBMCSessionStore();
 
@@ -176,7 +175,6 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [packageSearchKeyword, setPackageSearchKeyword] = useState('');
   const [selectedLibraryPackageId, setSelectedLibraryPackageId] = useState<string | null>(null);
-  const [isBMCConfigOpen, setIsBMCConfigOpen] = useState(false);
   const [editingStageMonitor, setEditingStageMonitor] = useState<{
     stageId: string;
     stageName: string;
@@ -352,7 +350,6 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     setIsSaveModalOpen(false);
     setPackageSearchKeyword('');
     setSelectedLibraryPackageId(null);
-    setIsBMCConfigOpen(false);
     setEditingStageMonitor(null);
     setIsSaveConfigModalOpen(false);
     setSelectedConfigId(null);
@@ -1489,19 +1486,6 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     }
   };
 
-  // 删除配置
-  const handleDeleteConfig = async (configId: string) => {
-    try {
-      await removeConfig(configId);
-      if (selectedConfigId === configId) {
-        setSelectedConfigId(null);
-      }
-      message.success('配置已删除');
-    } catch {
-      message.error('删除配置失败');
-    }
-  };
-
   // 序列化流水线阶段（去掉 File 等运行时对象，保留可复用配置）
   const serializePipelineStages = (): PipelineStageTemplateData[] => {
     return (tab.pipelineStages || []).map((stage) => ({
@@ -1975,33 +1959,19 @@ echo "{\"score\": \${SCORE}}"
           {/* 配置模板保存/加载 */}
           <Card title="配置模板" size="small" style={{ marginBottom: 16 }}>
             <Space direction="vertical" style={{ width: '100%' }}>
-              <Select
-                size="small"
-                placeholder="选择已保存的配置模板"
-                value={selectedConfigId || undefined}
-                onChange={(value) => {
-                  if (value) {
-                    handleLoadConfig(value);
+              <ConfigTemplateSelect
+                configType="iteration"
+                value={selectedConfigId}
+                onChange={(config) => {
+                  if (config) {
+                    handleLoadConfig(config.id);
                   } else {
                     setSelectedConfigId(null);
                   }
                 }}
-                allowClear
-                showSearch
-                optionFilterProp="label"
-                style={{ width: '100%' }}
-              >
-                {savedConfigs
-                  .filter((config) => config.configType === 'iteration')
-                  .map((config) => (
-                    <Option key={config.id} value={config.id} label={config.name}>
-                      <Space>
-                        <span>{config.name}</span>
-                        <span style={{ color: '#999', fontSize: 12 }}>{config.description}</span>
-                      </Space>
-                    </Option>
-                  ))}
-              </Select>
+                placeholder="选择已保存的配置模板"
+                disabled={tab.isRunningTest}
+              />
               <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                 <Button
                   type="dashed"
@@ -2011,16 +1981,6 @@ echo "{\"score\": \${SCORE}}"
                 >
                   保存当前配置
                 </Button>
-                {selectedConfigId && (
-                  <Button
-                    danger
-                    size="small"
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleDeleteConfig(selectedConfigId)}
-                  >
-                    删除配置
-                  </Button>
-                )}
               </Space>
             </Space>
           </Card>
@@ -2064,51 +2024,6 @@ echo "{\"score\": \${SCORE}}"
             <div style={{ marginBottom: 12 }}>
               <div style={{ color: '#666', fontSize: 12, marginBottom: 8 }}>
                 每个迭代参数对应一条调整命令，测试时按多层 for 循环进行组合迭代
-              </div>
-
-              {/* 统一 BMC 会话选择 */}
-              <div
-                style={{
-                  marginBottom: 12,
-                  padding: 10,
-                  background: '#f6ffed',
-                  border: '1px solid #b7eb8f',
-                  borderRadius: 6,
-                }}
-              >
-                <div style={{ fontWeight: 'bold', fontSize: 12, color: '#52c41a', marginBottom: 6 }}>
-                  <SafetyOutlined style={{ marginRight: 4 }} />
-                  BMC 统一会话
-                </div>
-                <Select
-                  size="small"
-                  style={{ width: '100%' }}
-                  placeholder={bmcSessions.length > 0 ? '选择 BMC 会话（所有 BMC 目标命令将统一使用）' : '暂无 BMC 会话，请先点击下方按钮添加'}
-                  value={tab.powerTestConfig.globalBmcSessionId || undefined}
-                  onChange={(value) => setGlobalBmcSessionId(tab.id, value || null)}
-                  disabled={tab.isRunningTest || bmcSessions.length === 0}
-                  allowClear
-                >
-                  {bmcSessions.map((session) => (
-                    <Option key={session.id} value={session.id}>
-                      <Space>
-                        <span>{session.name}</span>
-                        <span style={{ color: '#999', fontSize: 12 }}>
-                          {session.ip}:{session.port || 22}
-                        </span>
-                      </Space>
-                    </Option>
-                  ))}
-                </Select>
-                <Button
-                  size="small"
-                  type="dashed"
-                  icon={<SafetyOutlined />}
-                  style={{ marginTop: 8, width: '100%' }}
-                  onClick={() => setIsBMCConfigOpen(true)}
-                >
-                  管理 BMC 会话（新增/删除）
-                </Button>
               </div>
 
               {tab.powerTestConfig.iterationParams.map((param, index) => {
@@ -2367,19 +2282,6 @@ echo "{\"score\": \${SCORE}}"
               </div>
             </div>
 
-            <Divider style={{ margin: '12px 0' }} />
-
-            <Form.Item>
-              <Button
-                type="dashed"
-                size="small"
-                block
-                icon={<SafetyOutlined />}
-                onClick={() => setIsBMCConfigOpen(true)}
-              >
-                管理 BMC 会话
-              </Button>
-            </Form.Item>
           </Card>
 
           <MonitorConfigPanel
@@ -2899,31 +2801,20 @@ echo "{\"score\": \${SCORE}}"
                           </Button>
                         </div>
 
-                        <Select
-                          size="small"
-                          placeholder="选择配置模板（可选）"
-                          value={stage.configTemplateId || undefined}
-                          onChange={(value) => {
-                            updatePipelineStage(tab.id, stage.id, { configTemplateId: value || null });
-                          }}
-                          allowClear
-                          showSearch
-                          optionFilterProp="label"
-                          disabled={tab.isRunningTest}
-                          style={{ width: '100%', marginBottom: 8 }}
-                        >
-                          {savedConfigs.filter((c) => c.configType === 'iteration').length === 0 ? (
-                            <Option key="empty" value="empty" disabled label="无可用配置模板">
-                              无可用配置模板
-                            </Option>
-                          ) : (
-                            savedConfigs.filter((c) => c.configType === 'iteration').map((cfg) => (
-                              <Option key={cfg.id} value={cfg.id} label={cfg.name}>
-                                {cfg.name}
-                              </Option>
-                            ))
-                          )}
-                        </Select>
+                        <div style={{ marginBottom: 8 }}>
+                          <ConfigTemplateSelect
+                            configType="iteration"
+                            value={stage.configTemplateId}
+                            onChange={(config) => {
+                              updatePipelineStage(tab.id, stage.id, {
+                                configTemplateId: config ? config.id : null,
+                              });
+                            }}
+                            placeholder="选择配置模板（可选）"
+                            disabled={tab.isRunningTest}
+                            showManage={false}
+                          />
+                        </div>
 
                         <Button
                           block
@@ -3772,10 +3663,6 @@ echo "{\"score\": \${SCORE}}"
         )}
       </Modal>
 
-      <BMCConfigPanel
-        open={isBMCConfigOpen}
-        onClose={() => setIsBMCConfigOpen(false)}
-      />
     </div>
   );
 };

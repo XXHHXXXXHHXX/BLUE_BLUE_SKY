@@ -8,6 +8,7 @@ import TestTabBar from '../../src/components/test/TestTabBar';
 import SSHLoginPanel from '../../src/components/test/SSHLoginPanel';
 import PowerTestPanel from '../../src/components/test/PowerTestPanel';
 import ShellTerminal from '../../src/components/test/ShellTerminal';
+import BMCUnifiedSessionCard from '../../src/components/test/BMCUnifiedSessionCard';
 
 export default function TestPage() {
   const { 
@@ -73,9 +74,14 @@ export default function TestPage() {
         }}>
           {activeTab ? (
             <>
-              {/* SSH连接配置 */}
+              {/* 目标测试主机连接配置 */}
               <SSHLoginPanel tab={activeTab} />
-              
+
+              {/* BMC 连接配置（与测试主机连接相互独立） */}
+              <div style={{ marginTop: 16 }}>
+                <BMCUnifiedSessionCard tab={activeTab} />
+              </div>
+
               {/* 迭代遍历测试面板 */}
               <div style={{ marginTop: 16 }}>
                 <PowerTestPanel tab={activeTab} />
