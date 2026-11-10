@@ -15,7 +15,6 @@ import {
   Popconfirm,
   Divider,
   Typography,
-  Dropdown,
 } from 'antd';
 import {
   SettingOutlined,
@@ -79,6 +78,9 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
   const [newGroupName, setNewGroupName] = useState('');
   const [renaming, setRenaming] = useState<{ kind: 'config' | 'group'; id: string; name: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 受控值 + 递增 key：每次选择后重置，避免 Select 内部残留旧值导致再次选择同一分组不触发 onChange
+  const [targetGroupId, setTargetGroupId] = useState<string | undefined>(undefined);
+  const [groupSelectKey, setGroupSelectKey] = useState(0);
 
   useEffect(() => {
     fetchConfigs(configType);
@@ -343,6 +345,8 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
           setIsManageOpen(false);
           setSelectedIds([]);
           setNewGroupName('');
+          setTargetGroupId(undefined);
+          setGroupSelectKey((k) => k + 1);
         }}
         footer={null}
         width={720}
@@ -375,26 +379,23 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
             >
               合并为分组（已选 {selectedIds.length}）
             </Button>
-            <Dropdown
-              disabled={typeGroups.length === 0 || selectedIds.length === 0}
-              menu={{
-                items: typeGroups.map((g) => ({
-                  key: g.id,
-                  label: (
-                    <Space>
-                      <FolderOutlined />
-                      <span>{g.name}</span>
-                    </Space>
-                  ),
-                })),
-                onClick: ({ key }) => handleMoveToGroup(key),
+            <Select
+              key={groupSelectKey}
+              size="small"
+              style={{ width: 180 }}
+              placeholder="加入已有分组"
+              value={targetGroupId}
+              onChange={(gid) => {
+                // 记录本次选择后立即重置，下次可再次选择同一分组
+                setTargetGroupId(gid);
+                handleMoveToGroup(gid).finally(() => {
+                  setTargetGroupId(undefined);
+                  setGroupSelectKey((k) => k + 1);
+                });
               }}
-              trigger={['click']}
-            >
-              <Button size="small" disabled={typeGroups.length === 0 || selectedIds.length === 0}>
-                加入已有分组
-              </Button>
-            </Dropdown>
+              options={typeGroups.map((g) => ({ value: g.id, label: g.name }))}
+              disabled={typeGroups.length === 0 || selectedIds.length === 0}
+            />
             <Button
               size="small"
               icon={<FolderAddOutlined />}
