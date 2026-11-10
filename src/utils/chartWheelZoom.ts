@@ -4,13 +4,19 @@
  *
  * 返回一个 cleanup 函数，用于在组件卸载或图表实例更换时移除监听器，防止内存泄漏。
  */
+/** 承载滚轮缩放绑定状态的 DOM（挂在元素上以便跨实例复用与清理） */
+interface WheelZoomDom extends HTMLElement {
+  __yAxisWheelZoomBound?: boolean;
+  __yAxisWheelZoomCleanup?: () => void;
+}
+
 export function bindYAxisWheelZoom(chart: any): (() => void) | undefined {
-  const dom = chart.getDom() as HTMLElement;
+  const dom = chart.getDom() as WheelZoomDom;
   if (!dom) return;
 
   // 如果同一 DOM 已绑定过，先清理旧监听器，避免旧 chart 实例被闭包引用而无法释放
-  if ((dom as any).__yAxisWheelZoomCleanup) {
-    (dom as any).__yAxisWheelZoomCleanup();
+  if (dom.__yAxisWheelZoomCleanup) {
+    dom.__yAxisWheelZoomCleanup();
   }
 
   function getDataRange() {
@@ -39,8 +45,8 @@ export function bindYAxisWheelZoom(chart: any): (() => void) | undefined {
 
   const { yMin, yMax } = getDataRange();
   if (yMin === Infinity || yMax === -Infinity) {
-    (dom as any).__yAxisWheelZoomBound = false;
-    (dom as any).__yAxisWheelZoomCleanup = undefined;
+    dom.__yAxisWheelZoomBound = false;
+    dom.__yAxisWheelZoomCleanup = undefined;
     return;
   }
 
@@ -71,12 +77,12 @@ export function bindYAxisWheelZoom(chart: any): (() => void) | undefined {
 
   const cleanup = () => {
     dom.removeEventListener('wheel', handler);
-    (dom as any).__yAxisWheelZoomBound = false;
-    (dom as any).__yAxisWheelZoomCleanup = undefined;
+    dom.__yAxisWheelZoomBound = false;
+    dom.__yAxisWheelZoomCleanup = undefined;
   };
 
-  (dom as any).__yAxisWheelZoomBound = true;
-  (dom as any).__yAxisWheelZoomCleanup = cleanup;
+  dom.__yAxisWheelZoomBound = true;
+  dom.__yAxisWheelZoomCleanup = cleanup;
 
   return cleanup;
 }

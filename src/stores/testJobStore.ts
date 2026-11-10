@@ -8,6 +8,8 @@ export interface JobLog {
   type: string;
   message: string;
   timestamp: string;
+  /** 单调递增序号（服务端生成，用于增量拉取日志） */
+  seq?: number;
 }
 
 export interface JobResult {
