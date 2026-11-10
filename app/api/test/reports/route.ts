@@ -377,10 +377,107 @@ function stripReportForList(report: TestReportData): TestReportData {
   };
 }
 
-/** GET /api/test/reports - 获取报告列表 */
-export async function GET() {
-  const reports = normalizeReportFolders(loadReports()).map(stripReportForList);
-  return NextResponse.json({ success: true, reports });
+/** 收集某目录及其所有子目录 ID */
+function collectFolderIds(folderId: string, folders: ReportFolderData[]): Set<string> {
+  const ids = new Set([folderId]);
+  const visited = new Set<string>();
+  const collect = (parentId: string) => {
+    if (visited.has(parentId)) return;
+    visited.add(parentId);
+    for (const f of folders) {
+      if (f.parentId === parentId) {
+        ids.add(f.id);
+        collect(f.id);
+      }
+    }
+  };
+  collect(folderId);
+  return ids;
+}
+
+/** 计算每个目录下的报告数量（含子目录） */
+function buildFolderCounts(reports: TestReportData[], folders: ReportFolderData[]): Record<string, number> {
+  const direct: Record<string, number> = {};
+  for (const report of reports) {
+    const id = report.folderId || DEFAULT_FOLDER_ID;
+    direct[id] = (direct[id] || 0) + 1;
+  }
+  const counts: Record<string, number> = {};
+  const countFor = (folderId: string, stack: Set<string> = new Set()): number => {
+    if (counts[folderId] !== undefined) return counts[folderId];
+    if (stack.has(folderId)) return 0;
+    stack.add(folderId);
+    let count = direct[folderId] || 0;
+    for (const f of folders) {
+      if (f.parentId === folderId) count += countFor(f.id, stack);
+    }
+    stack.delete(folderId);
+    counts[folderId] = count;
+    return count;
+  };
+  for (const f of folders) countFor(f.id);
+  countFor(DEFAULT_FOLDER_ID);
+  return counts;
+}
+
+/**
+ * GET /api/test/reports - 获取报告列表
+ *
+ * 支持按目录分页：folderId（含子目录）+ keyword + limit/offset。
+ * 同时返回 folderCounts，使目录树计数无需拉取全量报告。
+ */
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const folderId = searchParams.get('folderId');
+  const keyword = (searchParams.get('keyword') || '').trim().toLowerCase();
+  const limitParam = Number(searchParams.get('limit'));
+  const offsetParam = Number(searchParams.get('offset'));
+
+  const allReports = normalizeReportFolders(loadReports());
+  const folders = loadFolders();
+  const folderCounts = buildFolderCounts(allReports, folders);
+
+  // 单条查询：返回该报告的完整数据（用于详情页刷新，避免拉取全量列表）
+  const singleId = searchParams.get('id');
+  if (singleId) {
+    const report = allReports.find((r) => r.id === singleId);
+    if (!report) {
+      return NextResponse.json({ success: false, message: '报告不存在' }, { status: 404 });
+    }
+    return NextResponse.json({
+      success: true,
+      report: stripReportForList(report),
+      folderCounts,
+    });
+  }
+
+  let filtered = allReports;
+  if (folderId) {
+    const ids = collectFolderIds(folderId, folders);
+    filtered = filtered.filter((r) => ids.has(r.folderId || DEFAULT_FOLDER_ID));
+  }
+  if (keyword) {
+    filtered = filtered.filter(
+      (r) =>
+        r.name.toLowerCase().includes(keyword) ||
+        r.description?.toLowerCase().includes(keyword) ||
+        r.config.host?.toLowerCase().includes(keyword),
+    );
+  }
+
+  const total = filtered.length;
+  const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? Math.floor(offsetParam) : 0;
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.floor(limitParam) : undefined;
+  const page = limit !== undefined ? filtered.slice(offset, offset + limit) : filtered.slice(offset);
+
+  return NextResponse.json({
+    success: true,
+    reports: page.map(stripReportForList),
+    total,
+    offset,
+    limit: limit ?? total,
+    folderCounts,
+  });
 }
 
 /** 安全 JSON 序列化，超大对象返回占位符而非抛异常 */

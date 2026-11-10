@@ -64,14 +64,30 @@ export interface FolderTreeNode {
 
 const DEFAULT_FOLDER_ID = 'uncategorized';
 
+export interface FetchReportsOptions {
+  /** 目录 ID（含子目录）；为空表示全部 */
+  folderId?: string | null;
+  /** 搜索关键字 */
+  keyword?: string;
+  /** 返回条数 */
+  limit?: number;
+  /** 起始偏移 */
+  offset?: number;
+}
+
 interface TestReportState {
   reports: TestReport[];
   folders: ReportFolder[];
   isLoading: boolean;
   selectedFolderId: string | null;
+  /** 当前查询条件下的报告总数（分页用） */
+  totalReports: number;
+  /** 每个目录下的报告数量（含子目录），用于目录树计数 */
+  folderCounts: Record<string, number>;
 
   // Actions
-  fetchReports: () => Promise<void>;
+  /** 不传参数时加载全部报告（分析页等场景）；传 folderId/limit 时按目录分页加载 */
+  fetchReports: (opts?: FetchReportsOptions) => Promise<void>;
   addReport: (report: Omit<TestReport, 'id' | 'createdAt'>) => Promise<void>;
   removeReport: (id: string) => Promise<void>;
   updateReport: (id: string, data: { name?: string; description?: string; folderId?: string; environment?: Record<string, string> }) => Promise<void>;
@@ -253,19 +269,34 @@ export const useTestReportStore = create<TestReportState>()(
     folders: [],
     isLoading: false,
     selectedFolderId: null,
+    totalReports: 0,
+    folderCounts: {},
 
-    fetchReports: async () => {
+    fetchReports: async (opts = {}) => {
       set({ isLoading: true });
       try {
+        const params = new URLSearchParams();
+        if (opts.folderId) params.set('folderId', opts.folderId);
+        if (opts.keyword) params.set('keyword', opts.keyword);
+        if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+        if (opts.offset !== undefined) params.set('offset', String(opts.offset));
+        const query = params.toString();
+
         const [reportsRes, foldersRes] = await Promise.all([
-          fetch('/api/test/reports'),
+          fetch(`/api/test/reports${query ? `?${query}` : ''}`),
           fetch('/api/test/report-folders'),
         ]);
         const reportsData = await reportsRes.json();
         const foldersData = await foldersRes.json();
 
         if (reportsData.success && Array.isArray(reportsData.reports)) {
-          set({ reports: reportsData.reports });
+          set({
+            reports: reportsData.reports,
+            totalReports: typeof reportsData.total === 'number'
+              ? reportsData.total
+              : reportsData.reports.length,
+            folderCounts: reportsData.folderCounts || {},
+          });
         }
         if (foldersData.success && Array.isArray(foldersData.folders)) {
           set({ folders: foldersData.folders });
@@ -340,8 +371,8 @@ export const useTestReportStore = create<TestReportState>()(
         throw new Error(data.message || '保存失败');
       }
 
-      // 刷新列表
-      await get().fetchReports();
+      // 不在此处拉取全量列表：报告管理弹窗打开时会按当前目录分页加载，
+      // 避免历史报告很多时每次保存都触发一次全量请求。
     },
 
     removeReport: async (id) => {
@@ -354,8 +385,11 @@ export const useTestReportStore = create<TestReportState>()(
         throw new Error(data.message || '删除失败');
       }
 
-      // 刷新列表
-      await get().fetchReports();
+      // 本地移除，避免重新拉取列表（分页模式下由调用方决定是否刷新当前页）
+      set((state) => ({
+        reports: state.reports.filter((r) => r.id !== id),
+        totalReports: Math.max(0, state.totalReports - 1),
+      }));
     },
 
     updateReport: async (id, data) => {
@@ -370,8 +404,10 @@ export const useTestReportStore = create<TestReportState>()(
         throw new Error(resData.message || '更新失败');
       }
 
-      // 刷新列表
-      await get().fetchReports();
+      // 本地更新，避免重新拉取列表
+      set((state) => ({
+        reports: state.reports.map((r) => (r.id === id ? { ...r, ...data } : r)),
+      }));
     },
 
     updateReportCustomAvgRanges: async (id, ranges) => {
@@ -477,7 +513,8 @@ export const useTestReportStore = create<TestReportState>()(
       if (!data.success) {
         throw new Error(data.message || '删除目录失败');
       }
-      await get().fetchReports();
+      // 只刷新目录树（报告列表由调用方按当前目录分页重新加载）
+      await get().fetchFolders();
       // 若当前选中目录被删除，重置为未分类
       set((state) => ({
         selectedFolderId: state.selectedFolderId === id ? DEFAULT_FOLDER_ID : state.selectedFolderId,

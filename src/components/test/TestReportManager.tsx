@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Modal,
   Button,
@@ -70,10 +70,11 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
     reports,
     folders,
     isLoading,
+    totalReports,
+    folderCounts,
     removeReport,
     updateReport,
     updateReportCustomAvgRanges,
-    searchReports,
     fetchReports,
     createFolder,
     renameFolder,
@@ -81,10 +82,11 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
     getFolderTree,
     getSelectedFolderId,
     setSelectedFolderId,
-    getReportsByFolder,
     buildFolderTreeOptions,
   } = useTestReportStore();
   const [searchKeyword, setSearchKeyword] = useState('');
+  /** 报告列表分页（按当前目录服务端分页） */
+  const [reportPage, setReportPage] = useState(1);
   const [viewingReport, setViewingReport] = useState<TestReport | null>(null);
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   const [monitorDetailModal, setMonitorDetailModal] = useState<{
@@ -180,12 +182,28 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
 
   const selectedFolderId = getSelectedFolderId();
 
-  // 打开弹窗时刷新数据
+  // 每页条数：跟随弹窗放大状态
+  const reportPageSize = reportModal.pageSize;
+
+  // 按当前目录 + 关键字 + 页码加载（服务端分页，避免一次拉取几百个报告）
+  const loadReportPage = useCallback(
+    (targetPage: number) => {
+      fetchReports({
+        folderId: selectedFolderId,
+        keyword: searchKeyword.trim() || undefined,
+        limit: reportPageSize,
+        offset: (targetPage - 1) * reportPageSize,
+      });
+    },
+    [fetchReports, selectedFolderId, searchKeyword, reportPageSize],
+  );
+
+  // 打开弹窗、切换目录、搜索、翻页、改变每页条数时重新加载
   useEffect(() => {
     if (visible) {
-      fetchReports();
+      loadReportPage(reportPage);
     }
-  }, [visible, fetchReports]);
+  }, [visible, loadReportPage, reportPage]);
 
   // 确保默认目录展开（仅在弹窗打开时初始化一次，避免依赖自身 state 导致无限循环）
   useEffect(() => {
@@ -225,43 +243,20 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
     return <span>{parts}</span>;
   };
 
-  const currentReports = useMemo(
-    () => getReportsByFolder(selectedFolderId),
-    [getReportsByFolder, selectedFolderId, reports]
-  );
-  const displayedReports = searchKeyword
-    ? searchReports(selectedFolderId, searchKeyword)
-    : currentReports;
+  // 当前页报告（服务端已按目录/关键字/分页过滤）
+  const displayedReports = reports;
 
   const folderTree = useMemo(() => getFolderTree(), [getFolderTree, folders]);
 
-  // 计算每个目录下的报告数量（包含子目录）
-  const folderReportCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-
-    const countFor = (folderId: string): number => {
-      if (counts[folderId] !== undefined) return counts[folderId];
-      let count = reports.filter((r) => (r.folderId || 'uncategorized') === folderId).length;
-      for (const f of folders) {
-        if (f.parentId === folderId) {
-          count += countFor(f.id);
-        }
-      }
-      counts[folderId] = count;
-      return count;
-    };
-
-    for (const f of folders) {
-      countFor(f.id);
-    }
-    countFor('uncategorized');
-    return counts;
-  }, [folders, reports]);
+  // 每个目录下的报告数量（含子目录）：由服务端返回，无需拉取全量报告
+  const folderReportCounts = folderCounts;
 
   const handleDelete = async (id: string) => {
     try {
       await removeReport(id);
       message.success('报告已删除');
+      // 重新加载当前页，同步总数与目录计数
+      loadReportPage(reportPage);
     } catch {
       message.error('删除失败');
     }
@@ -275,6 +270,7 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
       }
       setSelectedRowKeys([]);
       message.success(`已删除 ${selectedRowKeys.length} 个报告`);
+      loadReportPage(reportPage);
     } catch {
       message.error('删除失败');
     }
@@ -289,6 +285,7 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
       setSelectedRowKeys([]);
       setBatchMoveModal({ open: false, targetFolderId: 'uncategorized' });
       message.success(`已移动 ${selectedRowKeys.length} 个报告`);
+      loadReportPage(reportPage);
     } catch {
       message.error('移动失败');
     }
@@ -446,7 +443,7 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
       }
       message.success('报告导入成功');
       closeImportModal();
-      fetchReports();
+      loadReportPage(reportPage);
     } catch {
       message.error('导入失败');
     } finally {
@@ -518,7 +515,7 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
       message.success('报告合并成功');
       closeMergeModal();
       setSelectedRowKeys([]);
-      fetchReports();
+      loadReportPage(reportPage);
     } catch {
       message.error('合并失败');
     } finally {
@@ -954,6 +951,7 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
     try {
       await deleteFolder(folder.key);
       message.success('目录已删除，报告已移至未分类');
+      loadReportPage(reportPage);
     } catch (err: any) {
       message.error(err.message || '删除目录失败');
     }
@@ -1222,6 +1220,8 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
               onSelect={(keys) => {
                 if (keys.length > 0) {
                   setSelectedFolderId(keys[0] as string);
+                  // 切换目录后回到第一页
+                  setReportPage(1);
                 }
               }}
               showLine
@@ -1241,14 +1241,18 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
               <Space direction="vertical" style={{ width: '100%' }} size="small">
                 <Input
                   prefix={<SearchOutlined />}
-                  placeholder="搜索报告"
+                  placeholder="搜索报告（服务端按当前目录搜索）"
                   value={searchKeyword}
-                  onChange={(e) => setSearchKeyword(e.target.value)}
+                  onChange={(e) => {
+                    setSearchKeyword(e.target.value);
+                    // 搜索条件变化后回到第一页
+                    setReportPage(1);
+                  }}
                   allowClear
                 />
                 {searchKeyword && (
                   <Tag color="blue">
-                    匹配到 {displayedReports.length} 个报告
+                    匹配到 {totalReports} 个报告
                   </Tag>
                 )}
               </Space>
@@ -1291,7 +1295,14 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
                     dataSource={displayedReports}
                     rowKey="id"
                     size="small"
-                    pagination={{ pageSize: reportModal.pageSize }}
+                    pagination={{
+                      current: reportPage,
+                      pageSize: reportPageSize,
+                      total: totalReports,
+                      showSizeChanger: false,
+                      showTotal: (total) => `共 ${total} 个报告`,
+                      onChange: (nextPage) => setReportPage(nextPage),
+                    }}
                     loading={isLoading}
                     scroll={reportModal.tableScroll}
                     rowSelection={{
@@ -1647,11 +1658,13 @@ const TestReportManager: React.FC<TestReportManagerProps> = ({ visible, onClose 
                     }));
                     message.success('已应用此范围计算平均值并保存');
                     if (viewingReport?.id === monitorDetailModal.reportId) {
-                      await fetchReports();
-                      const { reports: freshReports } = useTestReportStore.getState();
-                      const updatedReport = freshReports.find(r => r.id === monitorDetailModal.reportId);
-                      if (updatedReport) {
-                        setViewingReport(updatedReport);
+                      // 只刷新当前报告，避免拉取整页/全量列表
+                      const res = await fetch(
+                        `/api/test/reports?id=${encodeURIComponent(monitorDetailModal.reportId)}`,
+                      );
+                      const data = await res.json();
+                      if (data.success && data.report) {
+                        setViewingReport(data.report as TestReport);
                       }
                     }
                   } else {
