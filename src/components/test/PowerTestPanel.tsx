@@ -58,7 +58,6 @@ import {
   ArrowUpOutlined,
   ArrowDownOutlined,
   ReloadOutlined,
-  DownOutlined,
   ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import type { UploadFile, UploadProps } from 'antd/es/upload';
@@ -71,6 +70,7 @@ import { useTestPackageStore, formatFileSize } from '../../stores/testPackageSto
 import { useTestReportStore, generateChartOption } from '../../stores/testReportStore';
 import { useTestIterationConfigStore } from '../../stores/testIterationConfigStore';
 import ConfigTemplateSelect from './ConfigTemplateSelect';
+import GroupedSelect from './GroupedSelect';
 import { useBMCSessionStore } from '../../stores/bmcSessionStore';
 import { useTestDraftStore } from '../../stores/testDraftStore';
 import { useTestJobStore, type Job, type PipelineStage as ServerPipelineStage } from '../../stores/testJobStore';
@@ -157,12 +157,35 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     setPipelineCurrentStageIndex,
   } = useTestStore();
 
-  const { searchPackages, getPackageById, fetchPackages } = useTestPackageStore();
+  const {
+    getPackageById,
+    fetchPackages,
+    packages: allPackages,
+    groups: packageGroups,
+    renamePackage,
+    addGroup: addPackageGroup,
+    renameGroup: renamePackageGroup,
+    removeGroup: removePackageGroup,
+    assignPackagesToGroup,
+    removePackage,
+  } = useTestPackageStore();
   const { addReport, buildFolderTreeOptions, getSelectedFolderId, fetchFolders } = useTestReportStore();
   const { addDraft } = useTestDraftStore();
   const { startJob, abortJob } = useTestJobStore();
   const { configs: savedConfigs, fetchConfigs, addConfig } = useTestIterationConfigStore();
-  const { templates: pipelineTemplates, isLoading: isLoadingTemplates, fetchTemplates, addTemplate, removeTemplate } = useTestPipelineTemplateStore();
+  const {
+    templates: pipelineTemplates,
+    isLoading: isLoadingTemplates,
+    fetchTemplates,
+    addTemplate,
+    removeTemplate,
+    groups: pipelineTemplateGroups,
+    renameTemplate,
+    addGroup: addPipelineGroup,
+    renameGroup: renamePipelineGroup,
+    removeGroup: removePipelineGroup,
+    assignTemplatesToGroup,
+  } = useTestPipelineTemplateStore();
   const { sessions: bmcSessions } = useBMCSessionStore();
 
   const [fileList, setFileList] = useState<UploadFile[]>([]);
@@ -174,7 +197,6 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const [isChartModalOpen, setIsChartModalOpen] = useState(false);
   const [saveReportForm] = Form.useForm();
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
-  const [packageSearchKeyword, setPackageSearchKeyword] = useState('');
   const [selectedLibraryPackageId, setSelectedLibraryPackageId] = useState<string | null>(null);
   const [editingStageMonitor, setEditingStageMonitor] = useState<{
     stageId: string;
@@ -349,7 +371,6 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     setIsReportManagerOpen(false);
     setIsChartModalOpen(false);
     setIsSaveModalOpen(false);
-    setPackageSearchKeyword('');
     setSelectedLibraryPackageId(null);
     setEditingStageMonitor(null);
     setIsSaveConfigModalOpen(false);
@@ -661,9 +682,44 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeJobId, tab.id]);
 
-  // 搜索用例包
-  const packages = searchPackages(packageSearchKeyword);
-  const searchedPackages = packages;
+  // 用例包列表（搜索由分组选择器内部完成）
+  const packages = allPackages;
+  const searchedPackages = allPackages;
+
+  // 用例包下拉选项（分组选择器使用；搜索在组件内完成，这里传全量）
+  const packageSelectOptions = allPackages.map((pkg) => ({
+    value: pkg.id,
+    name: pkg.name,
+    searchText: `${pkg.name} ${pkg.description} ${pkg.filename}`,
+    groupId: pkg.groupId ?? null,
+    canRename: !pkg.builtin,
+    canDelete: !pkg.builtin,
+    label: (
+      <Space>
+        <span>{pkg.name}</span>
+        {pkg.builtin && <Tag color="blue">内置</Tag>}
+        <Tag style={{ fontSize: 10 }}>{pkg.size}</Tag>
+        <span style={{ color: '#999', fontSize: 12 }}>{pkg.filename}</span>
+      </Space>
+    ),
+  }));
+
+  // 流水线模板下拉选项（分组选择器使用）
+  const pipelineTemplateSelectOptions = pipelineTemplates.map((template) => ({
+    value: template.id,
+    name: template.name,
+    searchText: `${template.name} ${template.description || ''}`,
+    groupId: template.groupId ?? null,
+    label: (
+      <Space>
+        <span>{template.name}</span>
+        <Tag style={{ fontSize: 10 }}>{template.stages.length} 阶段</Tag>
+        {template.description && (
+          <span style={{ color: '#999', fontSize: 12 }}>{template.description}</span>
+        )}
+      </Space>
+    ),
+  }));
 
   // 加载选中的测试包（从用例包库选择：仅记录ID，部署时由服务器端直接加载，不下载到本机）
   const loadPackageFromLibrary = async (packageId: string) => {
@@ -2552,10 +2608,10 @@ echo "{\"score\": \${SCORE}}"
                     <div style={{ fontWeight: 'bold', fontSize: 13 }}>
                       流水线模板
                     </div>
-                    <Select
+                    <GroupedSelect
                       size="small"
                       placeholder="选择已保存的流水线模板"
-                      value={selectedPipelineTemplateId || undefined}
+                      value={selectedPipelineTemplateId}
                       onChange={(value) => {
                         if (value) {
                           handleLoadPipelineTemplate(value);
@@ -2563,25 +2619,25 @@ echo "{\"score\": \${SCORE}}"
                           setSelectedPipelineTemplateId(null);
                         }
                       }}
-                      allowClear
-                      showSearch
-                      optionFilterProp="label"
-                      loading={isLoadingTemplates}
-                      notFoundContent={<Empty description="暂无流水线模板" />}
-                      style={{ width: '100%' }}
-                    >
-                      {pipelineTemplates.map((template) => (
-                        <Option key={template.id} value={template.id} label={template.name}>
-                          <Space>
-                            <span>{template.name}</span>
-                            <Tag style={{ fontSize: 10 }}>{template.stages.length} 阶段</Tag>
-                            {template.description && (
-                              <span style={{ color: '#999', fontSize: 12 }}>{template.description}</span>
-                            )}
-                          </Space>
-                        </Option>
-                      ))}
-                    </Select>
+                      disabled={isLoadingTemplates}
+                      groups={pipelineTemplateGroups}
+                      options={pipelineTemplateSelectOptions}
+                      manageTitle="流水线模板管理"
+                      itemDeleteTitle="确定删除该流水线模板吗？"
+                      renderItemExtra={(id) => {
+                        const tpl = pipelineTemplates.find((t) => t.id === id);
+                        return tpl ? <Tag style={{ fontSize: 10 }}>{tpl.stages.length} 阶段</Tag> : null;
+                      }}
+                      onCreateGroup={addPipelineGroup}
+                      onAssignGroup={assignTemplatesToGroup}
+                      onRenameItem={renameTemplate}
+                      onRenameGroup={renamePipelineGroup}
+                      onDeleteGroup={removePipelineGroup}
+                      onDeleteItem={async (id) => {
+                        await removeTemplate(id);
+                        if (selectedPipelineTemplateId === id) setSelectedPipelineTemplateId(null);
+                      }}
+                    />
                     <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                       <Button
                         type="dashed"
@@ -2593,14 +2649,18 @@ echo "{\"score\": \${SCORE}}"
                         保存当前流水线为模板
                       </Button>
                       {selectedPipelineTemplateId && (
-                        <Button
-                          danger
-                          size="small"
-                          icon={<DeleteOutlined />}
-                          onClick={() => handleDeletePipelineTemplate(selectedPipelineTemplateId)}
+                        <Popconfirm
+                          title="确定删除该流水线模板吗？"
+                          description="删除后不可恢复"
+                          okText="删除"
+                          okButtonProps={{ danger: true }}
+                          cancelText="取消"
+                          onConfirm={() => handleDeletePipelineTemplate(selectedPipelineTemplateId)}
                         >
-                          删除模板
-                        </Button>
+                          <Button danger size="small" icon={<DeleteOutlined />}>
+                            删除模板
+                          </Button>
+                        </Popconfirm>
                       )}
                     </Space>
                   </Space>
@@ -2700,47 +2760,37 @@ echo "{\"score\": \${SCORE}}"
                           <Radio.Button value="library">用例包库</Radio.Button>
                         </Radio.Group>
 
-                        <Dropdown
-                          trigger={['click']}
-                          menu={{
-                            onClick: ({ key }) => {
-                              const pkg = searchedPackages.find((p) => p.id === key);
-                              if (pkg) {
-                                updatePipelineStage(tab.id, stage.id, {
-                                  packageSource: 'library',
-                                  packageLibraryId: key,
-                                  packageFileName: pkg.filename,
-                                });
-                              }
-                            },
-                            items: searchedPackages.length === 0 ? [
-                              { key: 'empty', label: '无可用用例包', disabled: true }
-                            ] : searchedPackages.map((pkg) => ({
-                              key: pkg.id,
-                              label: (
-                                <Space>
-                                  <span>{pkg.name}</span>
-                                  {pkg.id.startsWith('builtin-') && <Tag color="blue">内置</Tag>}
-                                  <Tag style={{ fontSize: 10 }}>{pkg.size}</Tag>
-                                </Space>
-                              ),
-                            })),
-                          }}
-                        >
-                          <Button
-                            block
-                            type={stage.packageLibraryId ? 'primary' : 'default'}
-                            ghost={!!stage.packageLibraryId}
-                            icon={<DatabaseOutlined />}
+                        <div style={{ marginBottom: 8 }}>
+                          <GroupedSelect
+                            placeholder="选择用例包"
+                            value={stage.packageLibraryId ?? null}
+                            onChange={(value) => {
+                              const pkg = allPackages.find((p) => p.id === value);
+                              updatePipelineStage(tab.id, stage.id, {
+                                packageSource: 'library',
+                                packageLibraryId: value ?? undefined,
+                                packageFileName: pkg?.filename ?? '',
+                              });
+                            }}
                             disabled={tab.isRunningTest}
-                            style={{ marginBottom: 8 }}
-                          >
-                            {stage.packageLibraryId
-                              ? `已选用例包: ${searchedPackages.find((p) => p.id === stage.packageLibraryId)?.name || stage.packageLibraryId}`
-                              : '选择用例包'}
-                            <DownOutlined />
-                          </Button>
-                        </Dropdown>
+                            groups={packageGroups}
+                            options={packageSelectOptions}
+                            manageTitle="用例包管理"
+                            itemDeleteTitle="确定删除该用例包吗？"
+                            renderItemExtra={(id) => {
+                              const pkg = allPackages.find((p) => p.id === id);
+                              return pkg ? <Tag style={{ fontSize: 10 }}>{pkg.size}</Tag> : null;
+                            }}
+                            onCreateGroup={addPackageGroup}
+                            onAssignGroup={assignPackagesToGroup}
+                            onRenameItem={renamePackage}
+                            onRenameGroup={renamePackageGroup}
+                            onDeleteGroup={removePackageGroup}
+                            onDeleteItem={async (id) => {
+                              await removePackage(id);
+                            }}
+                          />
+                        </div>
 
                         {(() => {
                           const selectedPkg = searchedPackages.find((p) => p.id === stage.packageLibraryId);
@@ -2925,40 +2975,36 @@ echo "{\"score\": \${SCORE}}"
               </div>
             ) : (
               <>
-                <Input
-                  prefix={<SearchOutlined />}
-                  placeholder="搜索用例包名称、描述或文件名"
-                  value={packageSearchKeyword}
-                  onChange={(e) => setPackageSearchKeyword(e.target.value)}
-                  allowClear
-                  style={{ marginBottom: 12 }}
-                />
-
-                <Select
-                  style={{ width: '100%' }}
-                  placeholder="请从用例包库选择测试包"
-                  value={selectedLibraryPackageId}
-                  onChange={(value) => {
-                    setSelectedLibraryPackageId(value);
-                    if (value) {
-                      loadPackageFromLibrary(value);
-                    }
-                  }}
-                  loading={isLoadingPackage}
-                  disabled={tab.isRunningTest}
-                  notFoundContent={<Empty description="未找到匹配的用例包" />}
-                >
-                  {searchedPackages.map(pkg => (
-                    <Option key={pkg.id} value={pkg.id}>
-                      <Space>
-                        <span>{pkg.name}</span>
-                        {pkg.id.startsWith('builtin-') && <Tag color="blue">内置</Tag>}
-                        <Tag style={{ fontSize: 10 }}>{pkg.size}</Tag>
-                        <span style={{ color: '#999', fontSize: 12 }}>{pkg.filename}</span>
-                      </Space>
-                    </Option>
-                  ))}
-                </Select>
+                <div style={{ marginBottom: 12 }}>
+                  <GroupedSelect
+                    placeholder="请从用例包库选择测试包"
+                    value={selectedLibraryPackageId}
+                    onChange={(value) => {
+                      if (value) {
+                        loadPackageFromLibrary(value);
+                      } else {
+                        setSelectedLibraryPackageId(null);
+                      }
+                    }}
+                    disabled={tab.isRunningTest || isLoadingPackage}
+                    groups={packageGroups}
+                    options={packageSelectOptions}
+                    manageTitle="用例包管理"
+                    itemDeleteTitle="确定删除该用例包吗？"
+                    renderItemExtra={(id) => {
+                      const pkg = allPackages.find((p) => p.id === id);
+                      return pkg ? <Tag style={{ fontSize: 10 }}>{pkg.size}</Tag> : null;
+                    }}
+                    onCreateGroup={addPackageGroup}
+                    onAssignGroup={assignPackagesToGroup}
+                    onRenameItem={renamePackage}
+                    onRenameGroup={renamePackageGroup}
+                    onDeleteGroup={removePackageGroup}
+                    onDeleteItem={async (id) => {
+                      await removePackage(id);
+                    }}
+                  />
+                </div>
 
                 {selectedLibraryPackageId && (
                   <div style={{ marginTop: 12 }}>

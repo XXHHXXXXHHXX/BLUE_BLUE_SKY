@@ -26,21 +26,37 @@ export interface PipelineTemplate {
   createdAt: string;
   updatedAt: string;
   stages: PipelineStageTemplateData[];
+  /** 所属分组 ID；为空表示未分组 */
+  groupId?: string | null;
+}
+
+/** 流水线模板分组 */
+export interface PipelineTemplateGroup {
+  id: string;
+  name: string;
+  createdAt: string;
 }
 
 interface PipelineTemplateState {
   templates: PipelineTemplate[];
+  groups: PipelineTemplateGroup[];
   isLoading: boolean;
 
   fetchTemplates: () => Promise<void>;
   addTemplate: (template: { name: string; description?: string; stages: PipelineStageTemplateData[] }) => Promise<void>;
   removeTemplate: (id: string) => Promise<void>;
   getTemplateById: (id: string) => PipelineTemplate | undefined;
+  renameTemplate: (id: string, name: string) => Promise<void>;
+  addGroup: (name: string) => Promise<PipelineTemplateGroup>;
+  renameGroup: (id: string, name: string) => Promise<void>;
+  removeGroup: (id: string) => Promise<void>;
+  assignTemplatesToGroup: (ids: string[], groupId: string | null) => Promise<void>;
 }
 
 export const useTestPipelineTemplateStore = create<PipelineTemplateState>()(
   (set, get) => ({
     templates: [],
+    groups: [],
     isLoading: false,
 
     fetchTemplates: async () => {
@@ -49,7 +65,10 @@ export const useTestPipelineTemplateStore = create<PipelineTemplateState>()(
         const response = await fetch('/api/test/pipeline-templates');
         const data = await response.json();
         if (data.success && Array.isArray(data.templates)) {
-          set({ templates: data.templates });
+          set({
+            templates: data.templates,
+            groups: Array.isArray(data.groups) ? data.groups : [],
+          });
         }
       } catch (error) {
         console.error('Failed to fetch pipeline templates:', error);
@@ -90,6 +109,60 @@ export const useTestPipelineTemplateStore = create<PipelineTemplateState>()(
 
     getTemplateById: (id) => {
       return get().templates.find((t) => t.id === id);
+    },
+
+    renameTemplate: async (id, name) => {
+      const response = await fetch('/api/test/pipeline-templates', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, name }),
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.message || '重命名失败');
+      await get().fetchTemplates();
+    },
+
+    addGroup: async (name) => {
+      const response = await fetch('/api/test/pipeline-templates', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'createGroup', name }),
+      });
+      const data = await response.json();
+      if (!data.success || !data.group) throw new Error(data.message || '创建分组失败');
+      await get().fetchTemplates();
+      return data.group as PipelineTemplateGroup;
+    },
+
+    renameGroup: async (id, name) => {
+      const response = await fetch('/api/test/pipeline-templates', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId: id, groupName: name }),
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.message || '重命名分组失败');
+      await get().fetchTemplates();
+    },
+
+    removeGroup: async (id) => {
+      const response = await fetch(`/api/test/pipeline-templates?groupId=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.message || '删除分组失败');
+      await get().fetchTemplates();
+    },
+
+    assignTemplatesToGroup: async (ids, groupId) => {
+      const response = await fetch('/api/test/pipeline-templates', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, groupId }),
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.message || '分组失败');
+      await get().fetchTemplates();
     },
   })
 );

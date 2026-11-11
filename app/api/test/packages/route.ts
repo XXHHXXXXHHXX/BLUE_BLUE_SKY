@@ -8,6 +8,7 @@ import JSZip from 'jszip';
 const DATA_DIR = path.join(process.cwd(), '.data');
 const PACKAGES_DIR = path.join(DATA_DIR, 'test-packages');
 const PACKAGES_INDEX_FILE = path.join(DATA_DIR, 'test-packages.json');
+const PACKAGE_GROUPS_FILE = path.join(DATA_DIR, 'test-package-groups.json');
 
 // 确保目录存在
 function ensureDirs() {
@@ -57,8 +58,49 @@ interface TestPackageMeta {
   updatedAt: string;
   /** 上传时强制指定的必填环境变量名列表 */
   requiredEnvVars?: string[];
+  /** 所属分组 ID；为空表示未分组 */
+  groupId?: string | null;
   // 旧数据兼容字段
   testSuite?: string;
+}
+
+/** 用例包分组 */
+interface TestPackageGroup {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+/** 分组数据：分组列表 + 包到分组的归属（内置包也可分组，故单独存归属） */
+interface PackageGroupData {
+  groups: TestPackageGroup[];
+  assignments: Record<string, string | null>;
+}
+
+// 读取分组数据
+function loadGroupData(): PackageGroupData {
+  try {
+    if (fs.existsSync(PACKAGE_GROUPS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(PACKAGE_GROUPS_FILE, 'utf-8'));
+      if (Array.isArray(parsed)) {
+        // 兼容早期仅存分组数组的格式
+        return { groups: parsed, assignments: {} };
+      }
+      return {
+        groups: Array.isArray(parsed.groups) ? parsed.groups : [],
+        assignments: parsed.assignments || {},
+      };
+    }
+  } catch {
+    console.error('Failed to load test-package-groups');
+  }
+  return { groups: [], assignments: {} };
+}
+
+// 保存分组数据
+function saveGroupData(data: PackageGroupData) {
+  ensureDirs();
+  fs.writeFileSync(PACKAGE_GROUPS_FILE, JSON.stringify(data, null, 2));
 }
 
 // Demo测试包的内容
@@ -259,6 +301,7 @@ export async function GET(request: NextRequest) {
 
   // 返回测试包列表（内置 + 服务器存储）
   const index = loadIndex();
+  const groupData = loadGroupData();
   const packages = [
     {
       id: 'demo-power-test',
@@ -281,9 +324,89 @@ export async function GET(request: NextRequest) {
       builtin: true,
     },
     ...index.map((p) => ({ ...p, builtin: false })),
-  ];
+  ].map((p) => ({ ...p, groupId: groupData.assignments[p.id] ?? null }));
 
-  return NextResponse.json({ success: true, packages });
+  return NextResponse.json({ success: true, packages, groups: groupData.groups });
+}
+
+/** PATCH /api/test/packages - 分组管理：创建分组 / 批量分组 / 重命名 / 重命名分组 */
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { action, name, ids, groupId, groupName } = body as {
+      action?: string;
+      name?: string;
+      ids?: string[];
+      groupId?: string | null;
+      groupName?: string;
+    };
+
+    const data = loadGroupData();
+
+    // 创建分组
+    if (action === 'createGroup') {
+      if (!name || !name.trim()) {
+        return NextResponse.json({ success: false, message: '分组名称不能为空' }, { status: 400 });
+      }
+      const group: TestPackageGroup = {
+        id: `pkg-group-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        name: name.trim(),
+        createdAt: new Date().toISOString(),
+      };
+      data.groups.push(group);
+      saveGroupData(data);
+      return NextResponse.json({ success: true, group });
+    }
+
+    // 重命名分组
+    if (groupId && groupName !== undefined) {
+      const group = data.groups.find((g) => g.id === groupId);
+      if (!group) {
+        return NextResponse.json({ success: false, message: '分组不存在' }, { status: 404 });
+      }
+      if (!groupName.trim()) {
+        return NextResponse.json({ success: false, message: '分组名称不能为空' }, { status: 400 });
+      }
+      group.name = groupName.trim();
+      saveGroupData(data);
+      return NextResponse.json({ success: true, group });
+    }
+
+    // 批量设置所属分组（groupId 为 null 表示移出分组）
+    if (Array.isArray(ids)) {
+      for (const id of ids) {
+        data.assignments[id] = groupId ?? null;
+      }
+      saveGroupData(data);
+      return NextResponse.json({ success: true, updated: ids.length });
+    }
+
+    // 重命名用例包
+    if (name !== undefined && groupId === undefined) {
+      const id = (body as { id?: string }).id;
+      if (!id) {
+        return NextResponse.json({ success: false, message: '缺少包ID' }, { status: 400 });
+      }
+      if (!name.trim()) {
+        return NextResponse.json({ success: false, message: '名称不能为空' }, { status: 400 });
+      }
+      const index = loadIndex();
+      const pkg = index.find((p) => p.id === id);
+      if (!pkg) {
+        return NextResponse.json({ success: false, message: '内置用例包不支持改名' }, { status: 400 });
+      }
+      pkg.name = name.trim();
+      pkg.updatedAt = new Date().toISOString();
+      saveIndex(index);
+      return NextResponse.json({ success: true, package: pkg });
+    }
+
+    return NextResponse.json({ success: false, message: '缺少必要参数' }, { status: 400 });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : '更新失败';
+    console.error('[Packages API] Patch error:', msg);
+    return NextResponse.json({ success: false, message: msg }, { status: 500 });
+  }
 }
 
 /** POST /api/test/packages - 上传测试包 */
@@ -347,10 +470,30 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** DELETE /api/test/packages - 删除测试包 */
+/** DELETE /api/test/packages - 删除测试包；带 groupId 时删除分组（组内包变为未分组） */
 export async function DELETE(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
+  const groupId = searchParams.get('groupId');
+
+  // 删除分组：组内包解绑，包本身保留
+  if (groupId) {
+    const data = loadGroupData();
+    const idx = data.groups.findIndex((g) => g.id === groupId);
+    if (idx === -1) {
+      return NextResponse.json({ success: false, message: '分组不存在' }, { status: 404 });
+    }
+    data.groups.splice(idx, 1);
+    let unbound = 0;
+    for (const [pkgId, gid] of Object.entries(data.assignments)) {
+      if (gid === groupId) {
+        data.assignments[pkgId] = null;
+        unbound++;
+      }
+    }
+    saveGroupData(data);
+    return NextResponse.json({ success: true, message: '已删除分组', unbound });
+  }
 
   if (!id) {
     return NextResponse.json({ success: false, message: '缺少包ID' }, { status: 400 });
@@ -376,6 +519,13 @@ export async function DELETE(request: NextRequest) {
   // 更新索引
   index.splice(pkgIndex, 1);
   saveIndex(index);
+
+  // 清理分组归属
+  const groupData = loadGroupData();
+  if (id in groupData.assignments) {
+    delete groupData.assignments[id];
+    saveGroupData(groupData);
+  }
 
   return NextResponse.json({ success: true, message: '已删除' });
 }

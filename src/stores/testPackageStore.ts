@@ -14,10 +14,20 @@ export interface TestPackage {
   builtin?: boolean;
   /** 上传时强制指定的必填环境变量名列表 */
   requiredEnvVars?: string[];
+  /** 所属分组 ID；为空表示未分组 */
+  groupId?: string | null;
+}
+
+/** 用例包分组 */
+export interface TestPackageGroup {
+  id: string;
+  name: string;
+  createdAt: string;
 }
 
 interface TestPackageState {
   packages: TestPackage[];
+  groups: TestPackageGroup[];
   isLoading: boolean;
 
   // Actions
@@ -28,11 +38,17 @@ interface TestPackageState {
   getPackageFile: (id: string) => Promise<File | undefined>;
   downloadPackage: (id: string) => Promise<void>;
   searchPackages: (keyword: string) => TestPackage[];
+  renamePackage: (id: string, name: string) => Promise<void>;
+  addGroup: (name: string) => Promise<TestPackageGroup>;
+  renameGroup: (id: string, name: string) => Promise<void>;
+  removeGroup: (id: string) => Promise<void>;
+  assignPackagesToGroup: (ids: string[], groupId: string | null) => Promise<void>;
 }
 
 export const useTestPackageStore = create<TestPackageState>()(
   (set, get) => ({
     packages: [],
+    groups: [],
     isLoading: false,
 
     fetchPackages: async () => {
@@ -41,7 +57,10 @@ export const useTestPackageStore = create<TestPackageState>()(
         const response = await fetch('/api/test/packages');
         const data = await response.json();
         if (data.success && Array.isArray(data.packages)) {
-          set({ packages: data.packages });
+          set({
+            packages: data.packages,
+            groups: Array.isArray(data.groups) ? data.groups : [],
+          });
         }
       } catch (error) {
         console.error('Failed to fetch packages:', error);
@@ -135,6 +154,60 @@ export const useTestPackageStore = create<TestPackageState>()(
         pkg.description.toLowerCase().includes(lowerKeyword) ||
         pkg.filename.toLowerCase().includes(lowerKeyword)
       );
+    },
+
+    renamePackage: async (id, name) => {
+      const response = await fetch('/api/test/packages', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, name }),
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.message || '重命名失败');
+      await get().fetchPackages();
+    },
+
+    addGroup: async (name) => {
+      const response = await fetch('/api/test/packages', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'createGroup', name }),
+      });
+      const data = await response.json();
+      if (!data.success || !data.group) throw new Error(data.message || '创建分组失败');
+      await get().fetchPackages();
+      return data.group as TestPackageGroup;
+    },
+
+    renameGroup: async (id, name) => {
+      const response = await fetch('/api/test/packages', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId: id, groupName: name }),
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.message || '重命名分组失败');
+      await get().fetchPackages();
+    },
+
+    removeGroup: async (id) => {
+      const response = await fetch(`/api/test/packages?groupId=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.message || '删除分组失败');
+      await get().fetchPackages();
+    },
+
+    assignPackagesToGroup: async (ids, groupId) => {
+      const response = await fetch('/api/test/packages', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, groupId }),
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.message || '分组失败');
+      await get().fetchPackages();
     },
   })
 );
