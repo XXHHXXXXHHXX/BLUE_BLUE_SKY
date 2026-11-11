@@ -88,6 +88,26 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+
+/**
+ * 构造持续模式的后台启动命令。
+ *
+ * 用户填写的启动命令可能包含单引号、分号、管道、循环等 shell 语法，
+ * 直接拼进 `bash -c '...'` 会破坏外层引号（如 awk '...' 提前闭合引号，
+ * 导致 `substr(c,2)` 的括号被外层 shell 当成语法错误）。
+ * 这里统一用 shellQuote 转义整段命令；仅当命令是简单命令（不含 shell
+ * 控制符）时才用 exec 让进程替换 bash，使记录的 PID 就是目标进程。
+ */
+function buildContinuousStartCommand(pidFile: string, startCommand: string): string {
+  const trimmed = startCommand.trim();
+  const isSimpleCommand = !/[;|&()<>\n]/.test(trimmed);
+  // inner 整体再被 shellQuote 包裹，内部路径不能重复加引号
+  const inner = isSimpleCommand
+    ? `echo $$ > ${pidFile}; exec ${trimmed}`
+    : `echo $$ > ${pidFile}; ${trimmed}`;
+  return `nohup bash -c ${shellQuote(inner)} > /dev/null 2>&1 &`;
+}
+
 /** 给 Promise 添加超时，超时后 reject，避免 SSH 连接/命令无限挂起 */
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -442,8 +462,8 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       try {
         // PID 文件写到远程固定位置（/tmp），因为 logMonitorLocalDir 是服务器本地路径
         const remotePidFile = `/tmp/blue_sky_logmon_${jobId}_${iteration}.pid`;
-        // 远程记录 PID，便于迭代结束后终止进程。用 exec 让启动命令进程替换 bash，使 $$ 即目标进程 PID
-        const startCmd = `nohup bash -c 'echo $$ > ${remotePidFile}; exec ${logConfig.startCommand}' > /dev/null 2>&1 &`;
+        // 远程记录 PID，便于迭代结束后终止进程（启动命令可能含引号/分号/管道，需整体转义）
+        const startCmd = buildContinuousStartCommand(remotePidFile, logConfig.startCommand);
         const startResult = await withTimeout(logMonitorSsh!.execCommand(startCmd), 30000, '日志监控启动命令');
         if (startResult.stderr && startResult.code !== 0) {
           throw new Error(startResult.stderr);
@@ -994,8 +1014,8 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
             // ===== 持续模式：后台启动开始命令（nohup 使其脱离会话持续运行） =====
             try {
               const remotePidFile = `/tmp/blue_sky_monitor_${jobId}_${cmd.id}.pid`;
-              // 用 exec 让启动命令进程替换 bash，使 $$ 即目标进程 PID
-              const startCmd = `nohup bash -c 'echo $$ > ${remotePidFile}; exec ${cmd.startCommand}' > /dev/null 2>&1 &`;
+              // 启动命令可能含引号/分号/管道，需整体转义后再交给 bash -c
+              const startCmd = buildContinuousStartCommand(remotePidFile, cmd.startCommand);
               const startResult = await withTimeout(monitorSsh!.execCommand(startCmd), 30000, `监控 [${cmd.name}] 启动命令`);
               if (startResult.stderr && startResult.code !== 0) {
                 throw new Error(startResult.stderr);
