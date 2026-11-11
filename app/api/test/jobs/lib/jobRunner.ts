@@ -457,13 +457,14 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       return;
     }
 
-    if (isContinuous) {
+    const startCommand = isContinuous ? logConfig.startCommand : undefined;
+    if (isContinuous && startCommand && startCommand.trim()) {
       // ===== 持续模式：后台启动开始命令（nohup 使其脱离会话持续运行） =====
       try {
         // PID 文件写到远程固定位置（/tmp），因为 logMonitorLocalDir 是服务器本地路径
         const remotePidFile = `/tmp/blue_sky_logmon_${jobId}_${iteration}.pid`;
         // 远程记录 PID，便于迭代结束后终止进程（启动命令可能含引号/分号/管道，需整体转义）
-        const startCmd = buildContinuousStartCommand(remotePidFile, logConfig.startCommand);
+        const startCmd = buildContinuousStartCommand(remotePidFile, startCommand);
         const startResult = await withTimeout(logMonitorSsh!.execCommand(startCmd), 30000, '日志监控启动命令');
         if (startResult.stderr && startResult.code !== 0) {
           throw new Error(startResult.stderr);
@@ -991,7 +992,8 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
           }
 
           const isListMode = cmd.mode === 'list' && cmd.columns && cmd.columns.length > 0;
-          const isContinuous = !!(cmd.continuous && cmd.startCommand && cmd.startCommand.trim());
+          const continuousStartCommand = cmd.continuous ? cmd.startCommand?.trim() : '';
+          const isContinuous = !!continuousStartCommand;
 
           const state: {
             dataPoints: Array<{ timestamp: string; value: number; raw: string }>;
@@ -1010,12 +1012,12 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
             state.columnDataPoints = cmd.columns!.map(() => []);
           }
 
-          if (isContinuous) {
+          if (isContinuous && continuousStartCommand) {
             // ===== 持续模式：后台启动开始命令（nohup 使其脱离会话持续运行） =====
             try {
               const remotePidFile = `/tmp/blue_sky_monitor_${jobId}_${cmd.id}.pid`;
               // 启动命令可能含引号/分号/管道，需整体转义后再交给 bash -c
-              const startCmd = buildContinuousStartCommand(remotePidFile, cmd.startCommand);
+              const startCmd = buildContinuousStartCommand(remotePidFile, continuousStartCommand);
               const startResult = await withTimeout(monitorSsh!.execCommand(startCmd), 30000, `监控 [${cmd.name}] 启动命令`);
               if (startResult.stderr && startResult.code !== 0) {
                 throw new Error(startResult.stderr);
