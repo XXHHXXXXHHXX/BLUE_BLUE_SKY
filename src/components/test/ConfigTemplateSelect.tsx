@@ -83,8 +83,9 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
   // 受控值 + 递增 key：每次选择后重置，避免 Select 内部残留旧值导致再次选择同一分组不触发 onChange
   const [targetGroupId, setTargetGroupId] = useState<string | undefined>(undefined);
   const [groupSelectKey, setGroupSelectKey] = useState(0);
-  // 下拉中已折叠的分组（点击分组名切换）；搜索时自动忽略折叠状态
-  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+  // 下拉中已展开的分组（默认全部折叠，仅「未分组」默认展开）；搜索时自动忽略折叠状态
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  const [ungroupedCollapsed, setUngroupedCollapsed] = useState(false);
   const [searchValue, setSearchValue] = useState('');
 
   useEffect(() => {
@@ -101,7 +102,7 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
   );
 
   // 下拉选项：分组在前（组内模板），未分组的模板单独一组
-  // 点击分组名可折叠/展开组内模板；搜索时忽略折叠状态，始终展开命中的分组
+  // 默认仅「未分组」展开，其余分组折叠；点击分组名切换；搜索时忽略折叠状态
   const selectOptions = useMemo(() => {
     const options: Array<{
       label: React.ReactNode;
@@ -110,18 +111,32 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
     }> = [];
 
     const keyword = searchValue.trim().toLowerCase();
-    const isCollapsed = (key: string) => !keyword && collapsedGroups.includes(key);
+    // 未分组默认展开，其余分组默认折叠
+    const isCollapsed = (key: string) =>
+      !keyword &&
+      (key === '__ungrouped__'
+        ? ungroupedCollapsed
+        : !expandedGroups.includes(key));
 
     const buildGroupLabel = (key: string, name: string, count: number) => (
       <span
         data-group-key={key}
         onClick={(e) => {
           e.stopPropagation();
-          setCollapsedGroups((prev) =>
-            prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
-          );
+          if (key === '__ungrouped__') {
+            setUngroupedCollapsed((prev) => !prev);
+          } else {
+            setExpandedGroups((prev) =>
+              prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+            );
+          }
         }}
-        style={{ color: '#1677ff', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+        style={{
+          color: '#1677ff',
+          fontWeight: 600,
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
       >
         <Space size={4}>
           {isCollapsed(key) ? <RightOutlined /> : <DownOutlined />}
@@ -188,7 +203,7 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
     }
 
     return options;
-  }, [typeConfigs, typeGroups, renderExtra, collapsedGroups, searchValue]);
+  }, [typeConfigs, typeGroups, renderExtra, expandedGroups, ungroupedCollapsed, searchValue]);
 
   const handleSelect = (id: string | undefined) => {
     if (!id) {
@@ -350,7 +365,12 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
           searchValue={searchValue}
           onSearch={setSearchValue}
           onOpenChange={(open) => {
-            if (!open) setSearchValue('');
+            if (!open) {
+              // 关闭后重置，下次打开分组恢复默认折叠状态（未分组仍默认展开）
+              setSearchValue('');
+              setExpandedGroups([]);
+              setUngroupedCollapsed(false);
+            }
           }}
           filterOption={false}
           options={selectOptions}

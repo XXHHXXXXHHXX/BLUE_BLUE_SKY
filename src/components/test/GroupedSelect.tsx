@@ -109,8 +109,9 @@ const GroupedSelect: React.FC<GroupedSelectProps> = ({
   // 受控值 + 递增 key：每次操作后重置，避免 Select 内部残留旧值
   const [targetGroupId, setTargetGroupId] = useState<string | undefined>(undefined);
   const [groupSelectKey, setGroupSelectKey] = useState(0);
-  // 已折叠的分组；搜索时忽略
-  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+  // 已展开的分组（默认全部折叠，仅「未分组」默认展开）；搜索时忽略
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  const [ungroupedCollapsed, setUngroupedCollapsed] = useState(false);
   const [searchValue, setSearchValue] = useState('');
 
   const selectOptions = useMemo(() => {
@@ -121,16 +122,25 @@ const GroupedSelect: React.FC<GroupedSelectProps> = ({
     }> = [];
 
     const keyword = searchValue.trim().toLowerCase();
-    const isCollapsed = (key: string) => !keyword && collapsedGroups.includes(key);
+    // 未分组默认展开，其余分组默认折叠
+    const isCollapsed = (key: string) =>
+      !keyword &&
+      (key === '__ungrouped__'
+        ? ungroupedCollapsed
+        : !expandedGroups.includes(key));
 
     const buildGroupLabel = (key: string, name: string, count: number) => (
       <span
         data-group-key={key}
         onClick={(e) => {
           e.stopPropagation();
-          setCollapsedGroups((prev) =>
-            prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
-          );
+          if (key === '__ungrouped__') {
+            setUngroupedCollapsed((prev) => !prev);
+          } else {
+            setExpandedGroups((prev) =>
+              prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+            );
+          }
         }}
         style={{ color: '#1677ff', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
       >
@@ -186,7 +196,7 @@ const GroupedSelect: React.FC<GroupedSelectProps> = ({
     }
 
     return result;
-  }, [options, groups, collapsedGroups, searchValue]);
+  }, [options, groups, expandedGroups, ungroupedCollapsed, searchValue]);
 
   const handleSelect = (id: string | undefined) => {
     if (!id) {
@@ -351,7 +361,12 @@ const GroupedSelect: React.FC<GroupedSelectProps> = ({
           searchValue={searchValue}
           onSearch={setSearchValue}
           onOpenChange={(open) => {
-            if (!open) setSearchValue('');
+            if (!open) {
+              // 关闭后重置，下次打开分组恢复默认折叠状态（未分组仍默认展开）
+              setSearchValue('');
+              setExpandedGroups([]);
+              setUngroupedCollapsed(false);
+            }
           }}
           filterOption={false}
           options={selectOptions}
