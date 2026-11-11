@@ -23,6 +23,8 @@ import {
   FolderAddOutlined,
   FolderOutlined,
   MergeCellsOutlined,
+  DownOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import {
   useTestIterationConfigStore,
@@ -81,6 +83,9 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
   // 受控值 + 递增 key：每次选择后重置，避免 Select 内部残留旧值导致再次选择同一分组不触发 onChange
   const [targetGroupId, setTargetGroupId] = useState<string | undefined>(undefined);
   const [groupSelectKey, setGroupSelectKey] = useState(0);
+  // 下拉中已折叠的分组（点击分组名切换）；搜索时自动忽略折叠状态
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+  const [searchValue, setSearchValue] = useState('');
 
   useEffect(() => {
     fetchConfigs(configType);
@@ -96,70 +101,94 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
   );
 
   // 下拉选项：分组在前（组内模板），未分组的模板单独一组
+  // 点击分组名可折叠/展开组内模板；搜索时忽略折叠状态，始终展开命中的分组
   const selectOptions = useMemo(() => {
     const options: Array<{
       label: React.ReactNode;
       title: string;
-      options: Array<{ label: React.ReactNode; value: string }>;
+      options: Array<{ label: React.ReactNode; value: string; disabled?: boolean }>;
     }> = [];
 
+    const keyword = searchValue.trim().toLowerCase();
+    const isCollapsed = (key: string) => !keyword && collapsedGroups.includes(key);
+
+    const buildGroupLabel = (key: string, name: string, count: number) => (
+      <span
+        data-group-key={key}
+        onClick={(e) => {
+          e.stopPropagation();
+          setCollapsedGroups((prev) =>
+            prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+          );
+        }}
+        style={{ color: '#1677ff', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
+      >
+        <Space size={4}>
+          {isCollapsed(key) ? <RightOutlined /> : <DownOutlined />}
+          <FolderOutlined />
+          <span>{name}</span>
+          <Text style={{ color: '#1677ff', fontSize: 11, fontWeight: 400 }}>({count})</Text>
+        </Space>
+      </span>
+    );
+
+    // 折叠时保留一个不可选占位项，确保分组标题仍然渲染
+    const collapsedPlaceholder = (key: string) => [
+      {
+        value: `__collapsed__${key}`,
+        label: <span style={{ color: '#bbb' }}>（已折叠，点击分组名展开）</span>,
+        disabled: true,
+      },
+    ];
+
+    const buildConfigLabel = (config: SavedTestConfig) => (
+      <Space>
+        <span>{config.name}</span>
+        {renderExtra?.(config)}
+        {config.description && (
+          <span style={{ color: '#999', fontSize: 12 }}>{config.description}</span>
+        )}
+      </Space>
+    );
+
+    // 搜索匹配：配置名 / 配置描述命中；或分组名命中（整组保留）
+    const matchConfig = (config: SavedTestConfig) =>
+      !keyword ||
+      config.name.toLowerCase().includes(keyword) ||
+      !!config.description?.toLowerCase().includes(keyword);
+
     for (const group of typeGroups) {
-      const items = typeConfigs.filter((c) => c.groupId === group.id);
+      const all = typeConfigs.filter((c) => c.groupId === group.id);
+      if (all.length === 0) continue;
+      const groupMatched = !!keyword && group.name.toLowerCase().includes(keyword);
+      const items = groupMatched ? all : all.filter(matchConfig);
       if (items.length === 0) continue;
       options.push({
-        label: (
-          <Space>
-            <FolderOutlined />
-            <span>{group.name}</span>
-            <Text type="secondary" style={{ fontSize: 11 }}>({items.length})</Text>
-          </Space>
-        ),
+        label: buildGroupLabel(group.id, group.name, items.length),
         title: group.name,
-        options: items.map((config) => ({
-          value: config.id,
-          label: (
-            <Space>
-              <span>{config.name}</span>
-              {renderExtra?.(config)}
-              {config.description && (
-                <span style={{ color: '#999', fontSize: 12 }}>{config.description}</span>
-              )}
-            </Space>
-          ),
-        })),
+        options: isCollapsed(group.id)
+          ? collapsedPlaceholder(group.id)
+          : items.map((config) => ({ value: config.id, label: buildConfigLabel(config) })),
       });
     }
 
-    const ungrouped = typeConfigs.filter(
+    const allUngrouped = typeConfigs.filter(
       (c) => !c.groupId || !typeGroups.some((g) => g.id === c.groupId),
     );
+    const ungroupedMatched = !!keyword && '未分组'.includes(keyword);
+    const ungrouped = ungroupedMatched ? allUngrouped : allUngrouped.filter(matchConfig);
     if (ungrouped.length > 0) {
       options.push({
-        label: (
-          <Space>
-            <FolderOutlined />
-            <span>未分组</span>
-            <Text type="secondary" style={{ fontSize: 11 }}>({ungrouped.length})</Text>
-          </Space>
-        ),
+        label: buildGroupLabel('__ungrouped__', '未分组', ungrouped.length),
         title: '未分组',
-        options: ungrouped.map((config) => ({
-          value: config.id,
-          label: (
-            <Space>
-              <span>{config.name}</span>
-              {renderExtra?.(config)}
-              {config.description && (
-                <span style={{ color: '#999', fontSize: 12 }}>{config.description}</span>
-              )}
-            </Space>
-          ),
-        })),
+        options: isCollapsed('__ungrouped__')
+          ? collapsedPlaceholder('__ungrouped__')
+          : ungrouped.map((config) => ({ value: config.id, label: buildConfigLabel(config) })),
       });
     }
 
     return options;
-  }, [typeConfigs, typeGroups, renderExtra]);
+  }, [typeConfigs, typeGroups, renderExtra, collapsedGroups, searchValue]);
 
   const handleSelect = (id: string | undefined) => {
     if (!id) {
@@ -318,15 +347,12 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
           onChange={handleSelect}
           allowClear
           showSearch
-          filterOption={(input, option) => {
-            const keyword = input.trim().toLowerCase();
-            if (!keyword) return true;
-            // 分组节点自身不参与匹配，由组内子项决定是否展示
-            const opt = option as { value?: string; options?: unknown[] } | undefined;
-            if (opt?.options) return true;
-            const config = typeConfigs.find((c) => c.id === opt?.value);
-            return !!config && config.name.toLowerCase().includes(keyword);
+          searchValue={searchValue}
+          onSearch={setSearchValue}
+          onOpenChange={(open) => {
+            if (!open) setSearchValue('');
           }}
+          filterOption={false}
           options={selectOptions}
           disabled={disabled}
         />

@@ -30,6 +30,7 @@ import {
   TreeSelect,
   Menu,
   Spin,
+  Popconfirm,
 } from 'antd';
 import {
   PlayCircleOutlined,
@@ -1563,6 +1564,25 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     }
   };
 
+  // 恢复默认流水线阶段（重置为单个空白阶段，清空模板选择）
+  const handleRestoreDefaultPipelineStages = () => {
+    const defaultStage: PipelineStage = {
+      id: `stage-${Date.now()}`,
+      name: '阶段 1',
+      order: 0,
+      packageSource: 'library',
+      packageFileName: '',
+      configTemplateId: null,
+      envVars: [],
+      monitorCommands: [],
+      requiredEnvVarValues: {},
+    };
+    setPipelineStages(tab.id, [defaultStage]);
+    setSelectedPipelineTemplateId(null);
+    setPipelineCurrentStageIndex(tab.id, 0);
+    message.success('流水线阶段已恢复默认');
+  };
+
   const totalIterations = calculateTotalIterations(tab.powerTestConfig.iterationParams);
 
   // 流水线模式下进度按当前阶段的迭代总数计算；优先从运行中的任务读取阶段配置
@@ -2586,8 +2606,32 @@ echo "{\"score\": \${SCORE}}"
                   </Space>
                 </Card>
 
-                <div style={{ marginBottom: 8, fontWeight: 'bold' }}>
-                  流水线阶段（共 {(tab.pipelineStages || []).length} 个）
+                <div
+                  style={{
+                    marginBottom: 8,
+                    fontWeight: 'bold',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <span>流水线阶段（共 {(tab.pipelineStages || []).length} 个）</span>
+                  <Popconfirm
+                    title="恢复默认流水线阶段？"
+                    description="将清空当前所有阶段及其配置，重置为单个空白阶段"
+                    okText="恢复默认"
+                    cancelText="取消"
+                    onConfirm={handleRestoreDefaultPipelineStages}
+                    disabled={tab.isRunningTest}
+                  >
+                    <Button
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      disabled={tab.isRunningTest}
+                    >
+                      恢复默认
+                    </Button>
+                  </Popconfirm>
                 </div>
                 <Space direction="vertical" style={{ width: '100%' }}>
                   {(tab.pipelineStages || []).map((stage, index) => (
