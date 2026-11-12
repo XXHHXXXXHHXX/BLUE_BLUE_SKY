@@ -1149,7 +1149,37 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           message.error(`阶段 [${stage.name}] 的监控命令存在空名称`);
           return;
         }
-        if (!monitor.command.trim()) {
+        // 串口模式：校验 BMC 会话与串口命令（与单阶段校验保持一致）
+        if (monitor.serial) {
+          if (monitor.target !== 'bmc') {
+            message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] 串口模式必须使用 BMC 会话`);
+            return;
+          }
+          if (monitor.serial.uart !== 0) {
+            const kind = monitor.serial.kind || 'power0';
+            if (!isCommandAllowedOnUart(kind, monitor.serial.uart)) {
+              const preset = serialCommandPreset(kind);
+              message.error(
+                `阶段 [${stage.name}] 的监控命令 [${monitor.name}]「${preset.label}」不支持该 UART，仅支持 ${preset.uarts.map((u) => SERIAL_UART_PRESETS.find((p) => p.id === u)?.label ?? u).join(' / ')}`
+              );
+              return;
+            }
+            if (kind === 'custom' && !monitor.serial.command?.trim()) {
+              message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] 自定义串口命令不能为空`);
+              return;
+            }
+          }
+        } else if (monitor.continuous) {
+          // 持续模式：校验启动命令与结束命令
+          if (!monitor.startCommand?.trim()) {
+            message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] 持续模式已启用，请填写启动命令`);
+            return;
+          }
+          if (!monitor.fetchCommand?.trim()) {
+            message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] 持续模式已启用，请填写结束命令`);
+            return;
+          }
+        } else if (!monitor.command.trim()) {
           message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name || '未命名'}] 未填写命令`);
           return;
         }
