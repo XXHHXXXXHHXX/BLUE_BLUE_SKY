@@ -1,67 +1,13 @@
 /** 报告目录 API - 支持层级分类管理 */
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
-
-const DATA_DIR = path.join(process.cwd(), '.data');
-const FOLDERS_FILE = path.join(DATA_DIR, 'test-report-folders.json');
-const REPORTS_FILE = path.join(DATA_DIR, 'test-reports.json');
-const DEFAULT_FOLDER_ID = 'uncategorized';
-
-interface ReportFolderData {
-  id: string;
-  name: string;
-  parentId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  // 旧数据兼容字段
-  testSuite?: string;
-}
-
-interface TestReportData {
-  id: string;
-  folderId?: string;
-  // 旧数据兼容字段
-  testSuite?: string;
-}
-
-function ensureDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-function loadFolders(): ReportFolderData[] {
-  try {
-    if (fs.existsSync(FOLDERS_FILE)) {
-      return JSON.parse(fs.readFileSync(FOLDERS_FILE, 'utf-8'));
-    }
-  } catch {
-    console.error('[Report Folders API] Failed to load folders');
-  }
-  return [];
-}
-
-function saveFolders(folders: ReportFolderData[]) {
-  ensureDir();
-  fs.writeFileSync(FOLDERS_FILE, JSON.stringify(folders, null, 2));
-}
-
-function loadReports(): TestReportData[] {
-  try {
-    if (fs.existsSync(REPORTS_FILE)) {
-      return JSON.parse(fs.readFileSync(REPORTS_FILE, 'utf-8'));
-    }
-  } catch {
-    console.error('[Report Folders API] Failed to load reports');
-  }
-  return [];
-}
-
-function saveReports(reports: TestReportData[]) {
-  ensureDir();
-  fs.writeFileSync(REPORTS_FILE, JSON.stringify(reports, null, 2));
-}
+import {
+  DEFAULT_FOLDER_ID,
+  getReportStore,
+  putReport,
+  loadFolders,
+  saveFolders,
+  type ReportFolderData,
+} from '../../../../src/server/storage/reportStore';
 
 function isDefaultFolder(id: string) {
   return id === DEFAULT_FOLDER_ID;
@@ -108,21 +54,7 @@ function migrateData() {
     saveFolders(folders);
   }
 
-  const reports = loadReports();
-  let reportsChanged = false;
-  for (const report of reports) {
-    if ('testSuite' in report) {
-      delete (report as any).testSuite;
-      reportsChanged = true;
-    }
-    if (report.folderId && report.folderId.startsWith('uncategorized-') && report.folderId !== DEFAULT_FOLDER_ID) {
-      report.folderId = DEFAULT_FOLDER_ID;
-      reportsChanged = true;
-    }
-  }
-  if (reportsChanged) {
-    saveReports(reports);
-  }
+  // 报告侧的 folderId / testSuite 归一化由记录存储引擎在加载时完成
 }
 
 function ensureDefaultFolder() {
@@ -259,8 +191,6 @@ export async function DELETE(request: NextRequest) {
 
     ensureDefaultFolder();
     let folders = loadFolders();
-    const reports = loadReports();
-
     const folder = folders.find((f) => f.id === id);
     if (!folder) {
       return NextResponse.json({ success: false, message: '目录不存在' }, { status: 404 });
@@ -285,16 +215,14 @@ export async function DELETE(request: NextRequest) {
     };
     collect(id);
 
-    // 把受影响报告移到未分类
+    // 把受影响报告移到未分类：按索引过滤，只读取并改写受影响的记录
+    const store = getReportStore();
+    const affected = store.query({ filter: { folderId: idsToDelete } });
     let movedCount = 0;
-    for (const report of reports) {
-      if (report.folderId && idsToDelete.has(report.folderId)) {
-        report.folderId = DEFAULT_FOLDER_ID;
-        movedCount++;
-      }
-    }
-    if (movedCount > 0) {
-      saveReports(reports);
+    for (const report of affected.items) {
+      report.folderId = DEFAULT_FOLDER_ID;
+      putReport(report);
+      movedCount++;
     }
 
     // 删除目录及子目录

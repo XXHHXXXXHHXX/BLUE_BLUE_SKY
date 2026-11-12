@@ -1,161 +1,27 @@
-/** 测试报告 API - 服务器端存储 */
+/** 测试报告 API - 服务器端存储（记录存储引擎 + 聚合快照兼容） */
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getJob } from '../jobs/lib/jobStore';
 import { buildScoreSeries } from '../../../../src/utils/scoreParsing';
+import {
+  DEFAULT_FOLDER_ID,
+  REPORTS_DATA_DIR,
+  JOB_DATA_POINTS_DIR,
+  getReportStore,
+  putReport,
+  getReportById,
+  removeReport,
+  loadFolders,
+  saveFolders,
+  collectFolderIds,
+  buildFolderCounts,
+  stripReportForList,
+  type TestReportData,
+} from '../../../../src/server/storage/reportStore';
 
 // ========== 数据目录配置 ==========
 const DATA_DIR = path.join(process.cwd(), '.data');
-const REPORTS_FILE = path.join(DATA_DIR, 'test-reports.json');
-const FOLDERS_FILE = path.join(DATA_DIR, 'test-report-folders.json');
-const REPORTS_DATA_DIR = path.join(DATA_DIR, 'reports');
-const JOB_DATA_POINTS_DIR = path.join(DATA_DIR, 'job-data-points');
-const DEFAULT_FOLDER_ID = 'uncategorized';
-
-interface TestReportData {
-  id: string;
-  name: string;
-  description?: string;
-  /** 所属目录 ID */
-  folderId?: string;
-  createdAt: string;
-  config: {
-    host: string;
-    iterationParams?: Array<{ id: string; name: string; mode: 'range' | 'custom'; start: number; end: number; step: number; values: string[] }>;
-    adjustmentCommands?: Array<{ id: string; name: string; target: string; sessionId: string | null; command: string; parameterName: string }>;
-    // 兼容旧数据
-    startPower?: number;
-    endPower?: number;
-    step?: number;
-  };
-  results: Array<{
-    iteration: number;
-    power: number;
-    score: number;
-    /** 命名多分数：分数名 → 数值 */
-    scores?: Record<string, number>;
-    status: string;
-    message?: string;
-    timestamp: string;
-    iterationValues?: Record<string, string>;
-    iterationLabel?: string;
-    monitorResults?: Record<string, {
-      commandId: string;
-      commandName: string;
-      dataPoints: Array<{ timestamp: string; value: number; raw: string }>;
-      dataPointsCount?: number;
-      averageValue: number;
-    }>;
-    logArchivePath?: string;
-  }>;
-  chartData?: {
-    powerData: number[];
-    scoreData: number[];
-    /** 命名多分数序列：分数名 → 每轮数值 */
-    scoreSeries?: Record<string, Array<number | null>>;
-  };
-  monitorResults?: Record<string, {
-    commandId: string;
-    commandName: string;
-    dataPoints: Array<{ timestamp: string; value: number; raw: string }>;
-    averageValue: number;
-  }>;
-  /** 环境信息键值对 */
-  environment?: Record<string, string>;
-  jobId?: string;
-  stageId?: string;
-  stageName?: string;
-  /** 自定义平均值计算范围覆盖，key 为 commandId，value 为范围（1-based 索引） */
-  customAvgRanges?: Record<string, { avgStart?: number; avgEnd?: number }>;
-  // 旧数据兼容字段，读取后会被删除
-  testSuite?: string;
-}
-
-interface ReportFolderData {
-  id: string;
-  name: string;
-  parentId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  // 旧数据兼容字段
-  testSuite?: string;
-}
-
-// 确保目录存在
-function ensureDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-// 读取报告列表
-function loadReports(): TestReportData[] {
-  try {
-    if (fs.existsSync(REPORTS_FILE)) {
-      return JSON.parse(fs.readFileSync(REPORTS_FILE, 'utf-8'));
-    }
-  } catch {
-    console.error('Failed to load test-reports');
-  }
-  return [];
-}
-
-/** 保存前剔除所有原始采样点，避免旧报告数据撑爆 JSON */
-function stripReportDataPointsForSave(report: TestReportData): TestReportData {
-  type MonitorResultEntry = {
-    commandId: string;
-    commandName: string;
-    dataPoints: Array<{ timestamp: string; value: number; raw: string }>;
-    dataPointsCount?: number;
-    averageValue: number;
-  };
-  type StrippedMonitorResultEntry = Omit<MonitorResultEntry, 'dataPoints'> & {
-    dataPoints: never[];
-    dataPointsCount: number;
-  };
-
-  const stripMr = (mr: MonitorResultEntry): StrippedMonitorResultEntry => ({
-    ...mr,
-    dataPoints: [],
-    dataPointsCount: mr.dataPointsCount ?? mr.dataPoints.length,
-  });
-
-  const stripMonitorResults = (monitorResults?: Record<string, MonitorResultEntry>) => {
-    if (!monitorResults) return undefined;
-    const result: Record<string, StrippedMonitorResultEntry> = {};
-    for (const [key, mr] of Object.entries(monitorResults)) {
-      result[key] = stripMr(mr);
-    }
-    return result;
-  };
-
-  return {
-    ...report,
-    monitorResults: stripMonitorResults(report.monitorResults) as TestReportData['monitorResults'],
-    results: report.results.map((r) => ({
-      ...r,
-      monitorResults: stripMonitorResults(r.monitorResults) as typeof r.monitorResults,
-    })),
-  };
-}
-
-// 保存报告列表
-function saveReports(reports: TestReportData[]) {
-  ensureDir();
-  const cleaned = reports.map(stripReportDataPointsForSave);
-  try {
-    fs.writeFileSync(REPORTS_FILE, JSON.stringify(cleaned, null, 2));
-  } catch (err) {
-    console.error('[Reports API] Failed to save reports with pretty print, trying compact:', err);
-    try {
-      fs.writeFileSync(REPORTS_FILE, JSON.stringify(cleaned));
-    } catch (err2) {
-      console.error('[Reports API] Failed to save reports:', err2);
-      throw err2;
-    }
-  }
-}
 
 function calculateAverageFromPoints(
   points: Array<{ timestamp: string; value: number; raw: string }>,
@@ -197,8 +63,7 @@ function updateReportCustomAvgRanges(
   reportId: string,
   ranges: Record<string, { avgStart?: number; avgEnd?: number }>
 ): { success: boolean; message: string } {
-  const reports = loadReports();
-  const report = reports.find((r) => r.id === reportId);
+  const report = getReportById(reportId);
   if (!report) {
     return { success: false, message: '报告不存在' };
   }
@@ -222,27 +87,11 @@ function updateReportCustomAvgRanges(
     }
   }
 
-  saveReports(reports);
+  putReport(report);
   return { success: true, message: `已更新 ${Object.keys(ranges).length} 个监控命令的平均值计算范围` };
 }
 
 // 目录相关辅助
-function loadFolders(): ReportFolderData[] {
-  try {
-    if (fs.existsSync(FOLDERS_FILE)) {
-      return JSON.parse(fs.readFileSync(FOLDERS_FILE, 'utf-8'));
-    }
-  } catch {
-    console.error('[Reports API] Failed to load folders');
-  }
-  return [];
-}
-
-function saveFolders(folders: ReportFolderData[]) {
-  ensureDir();
-  fs.writeFileSync(FOLDERS_FILE, JSON.stringify(folders, null, 2));
-}
-
 function ensureDefaultFolder() {
   const folders = loadFolders();
   if (!folders.some((f) => f.id === DEFAULT_FOLDER_ID)) {
@@ -258,13 +107,7 @@ function ensureDefaultFolder() {
   }
 }
 
-/** 将旧测试套后缀的默认目录 ID 统一迁移为 uncategorized */
-function normalizeFolderId(folderId?: string | null): string | undefined {
-  if (!folderId) return undefined;
-  return folderId.startsWith('uncategorized-') ? DEFAULT_FOLDER_ID : folderId;
-}
-
-/** 迁移旧数据：删除 testSuite 字段，统一默认目录 ID */
+/** 迁移旧目录数据：统一默认目录 ID、删除 testSuite 字段（报告侧由存储层归一化） */
 function migrateData() {
   let folders = loadFolders();
   let foldersChanged = false;
@@ -290,7 +133,7 @@ function migrateData() {
 
   for (const folder of folders) {
     if ('testSuite' in folder) {
-      delete (folder as any).testSuite;
+      delete (folder as { testSuite?: string }).testSuite;
       foldersChanged = true;
     }
   }
@@ -305,119 +148,12 @@ function migrateData() {
     });
     saveFolders(folders);
   }
-
-  const reports = loadReports();
-  let reportsChanged = false;
-  for (const report of reports) {
-    if ('testSuite' in report) {
-      delete (report as any).testSuite;
-      reportsChanged = true;
-    }
-    const normalized = normalizeFolderId(report.folderId);
-    if (normalized !== report.folderId) {
-      report.folderId = normalized;
-      reportsChanged = true;
-    }
-  }
-  if (reportsChanged) {
-    saveReports(reports);
-  }
 }
 
-/** 为旧报告补齐 folderId 并确保默认目录存在 */
-function normalizeReportFolders(reports: TestReportData[]): TestReportData[] {
+/** 确保目录数据已完成迁移 */
+function normalizeReportFolders(): void {
   migrateData();
   ensureDefaultFolder();
-  for (const report of reports) {
-    if (!report.folderId) {
-      report.folderId = DEFAULT_FOLDER_ID;
-    }
-  }
-  return reports;
-}
-
-/** 列表返回时剔除原始采样点，避免旧报告/异常数据把大数组载入前端导致 OOM */
-function stripReportForList(report: TestReportData): TestReportData {
-  const stripMonitorResults = (
-    monitorResults?: Record<string, {
-      commandId: string;
-      commandName: string;
-      dataPoints: Array<{ timestamp: string; value: number; raw: string }>;
-      dataPointsCount?: number;
-      averageValue: number;
-    }>
-  ) => {
-    if (!monitorResults) return undefined;
-    const result: Record<string, {
-      commandId: string;
-      commandName: string;
-      dataPoints: Array<{ timestamp: string; value: number; raw: string }>;
-      dataPointsCount?: number;
-      averageValue: number;
-    }> = {};
-    for (const [key, mr] of Object.entries(monitorResults)) {
-      result[key] = {
-        commandId: mr.commandId,
-        commandName: mr.commandName,
-        averageValue: mr.averageValue,
-        dataPoints: [],
-        dataPointsCount: mr.dataPointsCount ?? mr.dataPoints.length,
-      };
-    }
-    return result;
-  };
-
-  return {
-    ...report,
-    monitorResults: stripMonitorResults(report.monitorResults),
-    results: report.results.map((r) => ({
-      ...r,
-      monitorResults: stripMonitorResults(r.monitorResults),
-    })),
-  };
-}
-
-/** 收集某目录及其所有子目录 ID */
-function collectFolderIds(folderId: string, folders: ReportFolderData[]): Set<string> {
-  const ids = new Set([folderId]);
-  const visited = new Set<string>();
-  const collect = (parentId: string) => {
-    if (visited.has(parentId)) return;
-    visited.add(parentId);
-    for (const f of folders) {
-      if (f.parentId === parentId) {
-        ids.add(f.id);
-        collect(f.id);
-      }
-    }
-  };
-  collect(folderId);
-  return ids;
-}
-
-/** 计算每个目录下的报告数量（含子目录） */
-function buildFolderCounts(reports: TestReportData[], folders: ReportFolderData[]): Record<string, number> {
-  const direct: Record<string, number> = {};
-  for (const report of reports) {
-    const id = report.folderId || DEFAULT_FOLDER_ID;
-    direct[id] = (direct[id] || 0) + 1;
-  }
-  const counts: Record<string, number> = {};
-  const countFor = (folderId: string, stack: Set<string> = new Set()): number => {
-    if (counts[folderId] !== undefined) return counts[folderId];
-    if (stack.has(folderId)) return 0;
-    stack.add(folderId);
-    let count = direct[folderId] || 0;
-    for (const f of folders) {
-      if (f.parentId === folderId) count += countFor(f.id, stack);
-    }
-    stack.delete(folderId);
-    counts[folderId] = count;
-    return count;
-  };
-  for (const f of folders) countFor(f.id);
-  countFor(DEFAULT_FOLDER_ID);
-  return counts;
 }
 
 /**
@@ -433,14 +169,15 @@ export async function GET(request: NextRequest) {
   const limitParam = Number(searchParams.get('limit'));
   const offsetParam = Number(searchParams.get('offset'));
 
-  const allReports = normalizeReportFolders(loadReports());
+  normalizeReportFolders();
+  const store = getReportStore();
   const folders = loadFolders();
-  const folderCounts = buildFolderCounts(allReports, folders);
+  const folderCounts = buildFolderCounts(store, folders);
 
-  // 单条查询：返回该报告的完整数据（用于详情页刷新，避免拉取全量列表）
+  // 单条查询：直接按 ID 读取单条记录文件（用于详情页刷新，避免拉取全量列表）
   const singleId = searchParams.get('id');
   if (singleId) {
-    const report = allReports.find((r) => r.id === singleId);
+    const report = getReportById(singleId);
     if (!report) {
       return NextResponse.json({ success: false, message: '报告不存在' }, { status: 404 });
     }
@@ -451,31 +188,24 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  let filtered = allReports;
+  // 目录过滤：含子目录，用索引里的 folderId 集合做过滤
+  let filter: Record<string, Set<string>> | undefined;
   if (folderId) {
-    const ids = collectFolderIds(folderId, folders);
-    filtered = filtered.filter((r) => ids.has(r.folderId || DEFAULT_FOLDER_ID));
-  }
-  if (keyword) {
-    filtered = filtered.filter(
-      (r) =>
-        r.name.toLowerCase().includes(keyword) ||
-        r.description?.toLowerCase().includes(keyword) ||
-        r.config.host?.toLowerCase().includes(keyword),
-    );
+    filter = { folderId: collectFolderIds(folderId, folders) };
   }
 
-  const total = filtered.length;
   const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? Math.floor(offsetParam) : 0;
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.floor(limitParam) : undefined;
-  const page = limit !== undefined ? filtered.slice(offset, offset + limit) : filtered.slice(offset);
+
+  // 索引过滤 + 搜索 + 排序 + 分页，只读取当前页的记录文件
+  const result = store.query({ filter, keyword, offset, limit });
 
   return NextResponse.json({
     success: true,
-    reports: page.map(stripReportForList),
-    total,
-    offset,
-    limit: limit ?? total,
+    reports: result.items.map(stripReportForList),
+    total: result.total,
+    offset: result.offset,
+    limit: result.limit,
     folderCounts,
   });
 }
@@ -527,7 +257,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: 'results 必须是数组' }, { status: 400 });
     }
 
-    const reports = normalizeReportFolders(loadReports());
+    normalizeReportFolders();
     const targetFolderId = folderId || DEFAULT_FOLDER_ID;
 
     const reportId = `report-${Date.now()}`;
@@ -661,9 +391,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    reports.unshift(newReport);
-    saveReports(reports);
-    console.log('[Reports API] Report saved successfully:', reportId, 'total reports:', reports.length);
+    putReport(newReport);
+    console.log('[Reports API] Report saved successfully:', reportId, 'total reports:', getReportStore().count());
 
     return NextResponse.json({ success: true, report: newReport });
   } catch (error) {
@@ -683,14 +412,9 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ success: false, message: '缺少报告ID' }, { status: 400 });
   }
 
-  const reports = loadReports();
-  const idx = reports.findIndex((r) => r.id === id);
-  if (idx === -1) {
+  if (!removeReport(id)) {
     return NextResponse.json({ success: false, message: '报告不存在' }, { status: 404 });
   }
-
-  reports.splice(idx, 1);
-  saveReports(reports);
 
   // 清理报告关联的日志文件
   try {
@@ -720,13 +444,12 @@ export async function PATCH(request: NextRequest) {
       if (!result.success) {
         return NextResponse.json({ success: false, message: result.message }, { status: 404 });
       }
-      const reports = normalizeReportFolders(loadReports());
-      const report = reports.find((r) => r.id === id);
+      const report = getReportById(id);
       return NextResponse.json({ success: true, message: result.message, report, customAvgRanges: report?.customAvgRanges });
     }
 
-    const reports = normalizeReportFolders(loadReports());
-    const report = reports.find((r) => r.id === id);
+    normalizeReportFolders();
+    const report = getReportById(id);
     if (!report) {
       return NextResponse.json({ success: false, message: '报告不存在' }, { status: 404 });
     }
@@ -735,7 +458,7 @@ export async function PATCH(request: NextRequest) {
     if (description !== undefined) report.description = description;
     if (folderId !== undefined) report.folderId = folderId;
     if (environment !== undefined) report.environment = environment;
-    saveReports(reports);
+    putReport(report);
 
     return NextResponse.json({ success: true, report });
   } catch (error) {

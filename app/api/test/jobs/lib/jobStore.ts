@@ -1,6 +1,7 @@
-/** 后台测试任务状态管理 - 内存 + 文件持久化 */
+/** 后台测试任务状态管理 - 内存 + 单条记录持久化（快照兼容旧版本） */
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import type { SerialMonitorConfig } from '../../../../../src/types/serial';
 
 const DATA_DIR = path.join(process.cwd(), '.data');
@@ -203,6 +204,43 @@ const jobs = globalJobs || new Map<string, Job>();
 
 const MAX_LOGS_PER_JOB = 5000;
 
+const JOB_RECORDS_DIR = path.join(DATA_DIR, 'records', 'jobs');
+
+/** 递归读取 records/jobs 下的所有任务记录文件 */
+function readJobRecordFiles(): Job[] {
+  const result: Job[] = [];
+  if (!fs.existsSync(JOB_RECORDS_DIR)) return result;
+  const walk = (dir: string) => {
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      const full = path.join(dir, name);
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(full);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!name.endsWith('.json')) continue;
+      try {
+        result.push(JSON.parse(fs.readFileSync(full, 'utf-8')) as Job);
+      } catch {
+        // 跳过损坏记录
+      }
+    }
+  };
+  walk(JOB_RECORDS_DIR);
+  return result;
+}
+
 function loadJobs(): void {
   // 如果 globalThis 中已有数据，说明是模块热重载，不需要重新加载文件
   if (globalJobs && jobs.size > 0) {
@@ -210,41 +248,65 @@ function loadJobs(): void {
     return;
   }
   try {
-    if (fs.existsSync(JOBS_FILE)) {
+    // 优先使用单条记录（更新更及时）；不存在时回退到聚合快照（旧版本数据）
+    const recordJobs = readJobRecordFiles();
+    let data: Job[] | null = null;
+    let source = '';
+    if (recordJobs.length > 0) {
+      data = recordJobs;
+      source = 'records';
+    } else if (fs.existsSync(JOBS_FILE)) {
       const raw = fs.readFileSync(JOBS_FILE, 'utf-8');
       if (!raw.trim()) {
         console.log('[JobStore] loadJobs: empty file at', JOBS_FILE);
         return;
       }
-      const data = JSON.parse(raw) as Job[];
-      console.log('[JobStore] loadJobs: loaded', data.length, 'jobs from', JOBS_FILE);
-      for (const job of data) {
-        // 定时任务：仍处于 pending 且计划时间未到，保留 pending 由调度器重新挂起；
-        // 计划时间已过的定时任务同样保留 pending，由调度器立即启动
-        const isScheduled = job.status === 'pending' && !!job.scheduledStartAt;
-        // 恢复时，正在运行或等待中的任务标记为中断（因为服务器可能已重启）
-        if (!isScheduled && (job.status === 'running' || job.status === 'pending')) {
-          job.status = 'aborted';
-          job.errorMessage = '服务器重启，任务已中止';
-          if (job.logs.length >= MAX_LOGS_PER_JOB) {
-            job.logs.shift();
-          }
-          job.logs.push({
-            type: 'info',
-            message: '服务器重启，任务已中止',
-            timestamp: new Date().toISOString(),
-          });
-        }
-        // 兼容旧数据：补齐日志单调序号（详情页增量拉取依赖 seq）
-        let seq = 0;
-        for (const log of job.logs) {
-          if (typeof log.seq !== 'number') log.seq = seq;
-          seq = log.seq + 1;
-        }
-        jobs.set(job.id, job);
-      }
-    } else {
+      data = JSON.parse(raw) as Job[];
+      source = 'snapshot';
+    }
+
+    if (!data) {
       console.log('[JobStore] loadJobs: no file at', JOBS_FILE);
+      return;
+    }
+
+    console.log('[JobStore] loadJobs: loaded', data.length, 'jobs from', source);
+    for (const job of data) {
+      // 定时任务：仍处于 pending 且计划时间未到，保留 pending 由调度器重新挂起；
+      // 计划时间已过的定时任务同样保留 pending，由调度器立即启动
+      const isScheduled = job.status === 'pending' && !!job.scheduledStartAt;
+      // 恢复时，正在运行或等待中的任务标记为中断（因为服务器可能已重启）
+      if (!isScheduled && (job.status === 'running' || job.status === 'pending')) {
+        job.status = 'aborted';
+        job.errorMessage = '服务器重启，任务已中止';
+        if (job.logs.length >= MAX_LOGS_PER_JOB) {
+          job.logs.shift();
+        }
+        job.logs.push({
+          type: 'info',
+          message: '服务器重启，任务已中止',
+          timestamp: new Date().toISOString(),
+        });
+      }
+      // 兼容旧数据：补齐日志单调序号（详情页增量拉取依赖 seq）
+      let seq = 0;
+      for (const log of job.logs) {
+        if (typeof log.seq !== 'number') log.seq = seq;
+        seq = log.seq + 1;
+      }
+      jobs.set(job.id, job);
+    }
+
+    // 从旧快照迁移：把任务拆分为单条记录，后续只增量写入
+    if (source === 'snapshot') {
+      for (const job of jobs.values()) {
+        try {
+          writeJobRecord(job);
+        } catch (err) {
+          console.error('[JobStore] Failed to migrate job record:', job.id, err);
+        }
+      }
+      console.log('[JobStore] Migrated', jobs.size, 'jobs to record files');
     }
   } catch (err) {
     console.error('[JobStore] Failed to load jobs:', err);
@@ -299,21 +361,23 @@ function stripResultDataPoints(r: JobResult): JobResult {
 /** 落盘时剔除 monitorResults.dataPoints 大数组和 shell 终端 stdout/stderr 日志，
  *  避免 JSON 序列化导致栈溢出/文件过大。
  *  内存中仍保留完整 dataPoints 和日志，供运行中查询；持久化只保留统计与关键日志。 */
-function getJobsForSave(): Job[] {
-  const PERSIST_LOG_TYPES = new Set([
-    'info',
-    'start',
-    'complete',
-    'iteration_start',
-    'iteration_end',
-    'iteration_error',
-    'error',
-    'warning',
-    'monitor_sample',
-    'stdout_summary',
-    'stderr_summary',
-  ]);
-  return Array.from(jobs.values()).map((job) => {
+const PERSIST_LOG_TYPES = new Set([
+  'info',
+  'start',
+  'complete',
+  'iteration_start',
+  'iteration_end',
+  'iteration_error',
+  'error',
+  'warning',
+  'monitor_sample',
+  'stdout_summary',
+  'stderr_summary',
+]);
+
+/** 生成可落盘的任务副本（剔除大数组与非关键日志） */
+function getJobsForSaveOf(list: Job[]): Job[] {
+  return list.map((job) => {
     const strippedStageResults = job.stageResults
       ? Object.fromEntries(
           Object.entries(job.stageResults).map(([key, sr]) => [
@@ -331,6 +395,65 @@ function getJobsForSave(): Job[] {
   });
 }
 
+function getJobsForSave(): Job[] {
+  return getJobsForSaveOf(Array.from(jobs.values()));
+}
+
+/** 待写入单条记录文件的任务 ID（只写脏任务，避免每次全量重写） */
+const dirtyJobIds = new Set<string>();
+/** 快照重建防抖计时器（快照仍写 test-jobs.json，供旧版本读取） */
+let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+const SNAPSHOT_DEBOUNCE_MS = 10000;
+
+/** 单条任务记录的落盘路径（与记录存储引擎的目录约定一致） */
+function jobRecordPath(id: string): string {
+  const hash = crypto.createHash('sha1').update(id).digest('hex').slice(0, 16);
+  return path.join(DATA_DIR, 'records', 'jobs', hash.slice(0, 2), `${hash}.json`);
+}
+
+/** 落盘单条任务（剔除大数组，与快照口径一致） */
+function writeJobRecord(job: Job): void {
+  const [persisted] = getJobsForSaveOf([job]);
+  const filePath = jobRecordPath(job.id);
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const tempFile = `${filePath}.tmp`;
+  fs.writeFileSync(tempFile, JSON.stringify(persisted));
+  fs.renameSync(tempFile, filePath);
+}
+
+function removeJobRecord(id: string): void {
+  try {
+    const filePath = jobRecordPath(id);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch {
+    // ignore
+  }
+}
+
+/** 重建聚合快照（test-jobs.json），兼容旧版本读取 */
+function writeJobsSnapshot(): void {
+  snapshotTimer = null;
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const tempFile = `${JOBS_FILE}.tmp`;
+    fs.writeFileSync(tempFile, JSON.stringify(getJobsForSave(), null, 2));
+    fs.renameSync(tempFile, JOBS_FILE);
+    console.log('[JobStore] Saved snapshot:', jobs.size, 'jobs to', JOBS_FILE);
+  } catch (err) {
+    console.error('[JobStore] Failed to save jobs snapshot:', err);
+  }
+}
+
+function scheduleSnapshot(): void {
+  if (snapshotTimer) return;
+  snapshotTimer = setTimeout(writeJobsSnapshot, SNAPSHOT_DEBOUNCE_MS);
+  if (typeof snapshotTimer.unref === 'function') snapshotTimer.unref();
+}
+
+/** 只写脏任务的单条记录文件，快照按较长间隔重建 */
 function flushSaveJobs(): void {
   saveTimer = null;
   if (!pendingSave) return;
@@ -339,22 +462,33 @@ function flushSaveJobs(): void {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    const tempFile = `${JOBS_FILE}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(getJobsForSave(), null, 2));
-    fs.renameSync(tempFile, JOBS_FILE);
-    console.log('[JobStore] Saved jobs:', jobs.size, 'to', JOBS_FILE);
+    for (const id of dirtyJobIds) {
+      const job = jobs.get(id);
+      if (!job) {
+        removeJobRecord(id);
+        continue;
+      }
+      try {
+        writeJobRecord(job);
+      } catch (err) {
+        console.error('[JobStore] Failed to write job record:', id, err);
+      }
+    }
+    dirtyJobIds.clear();
+    scheduleSnapshot();
   } catch (err) {
     console.error('[JobStore] Failed to save jobs:', err);
   }
 }
 
-function saveJobs(): void {
+function saveJobs(id?: string): void {
+  if (id) dirtyJobIds.add(id);
   pendingSave = true;
   if (saveTimer) return; // 已在等待中，合并为一次保存
-  saveTimer = setTimeout(flushSaveJobs, 3000); // 3 秒后落盘，合并高频日志/采样变更
+  saveTimer = setTimeout(flushSaveJobs, 1000); // 1 秒后落盘，合并高频日志/采样变更
 }
 
-/** 强制立即保存，不等待 3 秒防抖 */
+/** 强制立即保存：写入脏任务记录并重建快照 */
 export function forceSaveJobs(): void {
   if (saveTimer) {
     clearTimeout(saveTimer);
@@ -366,10 +500,25 @@ export function forceSaveJobs(): void {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    const tempFile = `${JOBS_FILE}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(getJobsForSave(), null, 2));
-    fs.renameSync(tempFile, JOBS_FILE);
-    console.log('[JobStore] Force saved jobs:', jobs.size, 'to', JOBS_FILE);
+    for (const id of dirtyJobIds) {
+      const job = jobs.get(id);
+      if (!job) {
+        removeJobRecord(id);
+        continue;
+      }
+      try {
+        writeJobRecord(job);
+      } catch (err) {
+        console.error('[JobStore] Failed to write job record:', id, err);
+      }
+    }
+    dirtyJobIds.clear();
+    if (snapshotTimer) {
+      clearTimeout(snapshotTimer);
+      snapshotTimer = null;
+    }
+    writeJobsSnapshot();
+    console.log('[JobStore] Force saved jobs:', jobs.size);
   } catch (err) {
     console.error('[JobStore] Force save failed:', err);
   }
@@ -403,7 +552,7 @@ export function createJob(config: JobConfig, name: string, tabId?: string, clien
   };
   jobs.set(job.id, job);
   console.log('[JobStore] createJob:', job.id, 'total jobs:', jobs.size);
-  saveJobs();
+  saveJobs(job.id);
   return job;
 }
 
@@ -411,7 +560,7 @@ export function updateJob(id: string, updates: Partial<Omit<Job, 'id'>>): Job | 
   const job = jobs.get(id);
   if (!job) return undefined;
   Object.assign(job, updates, { updatedAt: new Date().toISOString() });
-  saveJobs();
+  saveJobs(id);
   return job;
 }
 
@@ -429,7 +578,7 @@ export function addJobLog(id: string, type: string, message: string): void {
     seq: typeof lastSeq === 'number' ? lastSeq + 1 : job.logs.length,
   });
   job.updatedAt = new Date().toISOString();
-  saveJobs();
+  saveJobs(id);
 }
 
 export function appendJobResult(id: string, result: JobResult): void {
@@ -443,7 +592,7 @@ export function appendJobResult(id: string, result: JobResult): void {
     clearIterationMonitorDataPointsFromMemory(id, result.iteration);
   }
 
-  saveJobs();
+  saveJobs(id);
 }
 
 // ========== 监控采样点分页查询 ==========
@@ -599,7 +748,7 @@ export function requestAbortJob(id: string): boolean {
   if (!job || (job.status !== 'running' && job.status !== 'pending')) return false;
   job.abortRequested = true;
   job.updatedAt = new Date().toISOString();
-  saveJobs();
+  saveJobs(id);
 
   // 立即触发运行器清理（停止监控、断开 SSH、远程 kill）
   const runner = activeJobRunners.get(id);
@@ -625,7 +774,7 @@ export function requestAbortJob(id: string): boolean {
         message: '中止超时（20秒），已强制中止',
         timestamp: new Date().toISOString(),
       });
-      saveJobs();
+      saveJobs(id);
       activeJobRunners.delete(id);
     }
   }, 20000);
@@ -731,7 +880,7 @@ export function resumeJob(id: string): Job | undefined {
     timestamp: new Date().toISOString(),
   });
   job.updatedAt = new Date().toISOString();
-  saveJobs();
+  saveJobs(job.id);
   return job;
 }
 
@@ -875,7 +1024,7 @@ function cleanJobRelatedFiles(id: string): void {
 export function deleteJob(id: string): boolean {
   const deleted = jobs.delete(id);
   if (deleted) {
-    saveJobs();
+    saveJobs(id);
     cleanJobRelatedFiles(id);
   }
   return deleted;
@@ -894,7 +1043,7 @@ export function batchDeleteJobs(ids: string[]): { deleted: string[]; failed: str
     }
   }
   if (deleted.length > 0) {
-    saveJobs();
+    for (const id of deleted) saveJobs(id);
   }
   return { deleted, failed };
 }
@@ -911,7 +1060,7 @@ export function deleteJobsByStatus(statuses: Array<'pending' | 'running' | 'comp
     cleanJobRelatedFiles(id);
   }
   if (toDelete.length > 0) {
-    saveJobs();
+    for (const id of toDelete) saveJobs(id);
   }
   return { deleted: toDelete };
 }
@@ -980,7 +1129,7 @@ export function updateJobCustomAvgRanges(
     }
   }
 
-  saveJobs();
+  saveJobs(jobId);
   return { success: true, message: `已更新 ${Object.keys(ranges).length} 个监控命令的平均值计算范围` };
 }
 

@@ -5,11 +5,15 @@ import path from 'path';
 import { buildScoreSeries } from '../../../../../src/utils/scoreParsing';
 import { stripMonitorSeriesSuffix } from '../../../../../src/utils/monitorKeys';
 
+import {
+  DEFAULT_FOLDER_ID,
+  REPORTS_DATA_DIR,
+  putReport,
+  loadFolders,
+  saveFolders,
+} from '../../../../../src/server/storage/reportStore';
+
 const DATA_DIR = path.join(process.cwd(), '.data');
-const REPORTS_FILE = path.join(DATA_DIR, 'test-reports.json');
-const FOLDERS_FILE = path.join(DATA_DIR, 'test-report-folders.json');
-const REPORTS_DATA_DIR = path.join(DATA_DIR, 'reports');
-const DEFAULT_FOLDER_ID = 'uncategorized';
 
 interface DataPoint {
   timestamp: string;
@@ -53,16 +57,6 @@ function ensureDir() {
   }
 }
 
-function loadReports(): any[] {
-  try {
-    if (fs.existsSync(REPORTS_FILE)) {
-      return JSON.parse(fs.readFileSync(REPORTS_FILE, 'utf-8'));
-    }
-  } catch {
-    console.error('[Report Import] Failed to load reports');
-  }
-  return [];
-}
 
 /** 保存前剔除所有原始采样点，防止旧报告撑爆 JSON */
 function stripReportDataPointsForSave(report: any) {
@@ -87,32 +81,7 @@ function stripReportDataPointsForSave(report: any) {
   };
 }
 
-function saveReports(reports: any[]) {
-  ensureDir();
-  const cleaned = reports.map(stripReportDataPointsForSave);
-  try {
-    fs.writeFileSync(REPORTS_FILE, JSON.stringify(cleaned, null, 2));
-  } catch (err) {
-    console.error('[Report Import] Failed to save reports with pretty print, trying compact:', err);
-    try {
-      fs.writeFileSync(REPORTS_FILE, JSON.stringify(cleaned));
-    } catch (err2) {
-      console.error('[Report Import] Failed to save reports:', err2);
-      throw err2;
-    }
-  }
-}
 
-function loadFolders(): any[] {
-  try {
-    if (fs.existsSync(FOLDERS_FILE)) {
-      return JSON.parse(fs.readFileSync(FOLDERS_FILE, 'utf-8'));
-    }
-  } catch {
-    console.error('[Report Import] Failed to load folders');
-  }
-  return [];
-}
 
 function ensureDefaultFolder() {
   const folders = loadFolders();
@@ -125,10 +94,7 @@ function ensureDefaultFolder() {
       createdAt: now,
       updatedAt: now,
     });
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    fs.writeFileSync(FOLDERS_FILE, JSON.stringify(folders, null, 2));
+    saveFolders(folders);
   }
 }
 
@@ -301,7 +267,6 @@ export async function POST(request: NextRequest) {
       }
 
       ensureDefaultFolder();
-      const reports = loadReports();
       const reportId = `report-${Date.now()}`;
       const targetDataPointsDir = path.join(REPORTS_DATA_DIR, reportId, 'dataPoints');
 
@@ -376,8 +341,7 @@ export async function POST(request: NextRequest) {
         stageName: reportData.stageName,
       };
 
-      reports.unshift(newReport);
-      saveReports(reports);
+      putReport(newReport);
 
       return NextResponse.json({ success: true, report: newReport });
     }

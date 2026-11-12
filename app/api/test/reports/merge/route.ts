@@ -4,10 +4,14 @@ import fs from 'fs';
 import path from 'path';
 import { buildScoreSeries } from '../../../../../src/utils/scoreParsing';
 
+import {
+  DEFAULT_FOLDER_ID,
+  REPORTS_DATA_DIR,
+  getReportById,
+  putReport,
+} from '../../../../../src/server/storage/reportStore';
+
 const DATA_DIR = path.join(process.cwd(), '.data');
-const REPORTS_FILE = path.join(DATA_DIR, 'test-reports.json');
-const REPORTS_DATA_DIR = path.join(DATA_DIR, 'reports');
-const DEFAULT_FOLDER_ID = 'uncategorized';
 
 interface MonitorResult {
   commandId: string;
@@ -55,28 +59,7 @@ interface TestReportData {
   stageName?: string;
 }
 
-function loadReports(): TestReportData[] {
-  try {
-    if (fs.existsSync(REPORTS_FILE)) {
-      return JSON.parse(fs.readFileSync(REPORTS_FILE, 'utf-8'));
-    }
-  } catch {
-    console.error('[Report Merge] Failed to load reports');
-  }
-  return [];
-}
 
-function saveReports(reports: TestReportData[]) {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  try {
-    fs.writeFileSync(REPORTS_FILE, JSON.stringify(reports, null, 2));
-  } catch (err) {
-    console.error('[Report Merge] Failed to save reports:', err);
-    throw err;
-  }
-}
 
 function getCommandIds(report: TestReportData): string[] {
   const ids = new Set<string>();
@@ -127,9 +110,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: '不能合并同一个报告' }, { status: 400 });
     }
 
-    const reports = loadReports();
-    const report1 = reports.find((r) => r.id === report1Id);
-    const report2 = reports.find((r) => r.id === report2Id);
+    const report1 = getReportById(report1Id);
+    const report2 = getReportById(report2Id);
 
     if (!report1) {
       return NextResponse.json({ success: false, message: '第一个报告不存在' }, { status: 404 });
@@ -192,8 +174,7 @@ export async function POST(request: NextRequest) {
       stageName: report1.stageName,
     };
 
-    reports.unshift(mergedReport);
-    saveReports(reports);
+    putReport(mergedReport);
 
     console.log('[Report Merge] Merged successfully:', {
       newReportId,

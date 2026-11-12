@@ -19,9 +19,13 @@ import {
 } from '@/src/utils/aiTools';
 import { generateExcelReport, generatePPTReport } from '@/src/utils/aiReportGenerator';
 
+import {
+  loadReports,
+  getReportById,
+  loadFolders,
+} from '@/src/server/storage/reportStore';
+
 const DATA_DIR = path.join(process.cwd(), '.data');
-const REPORTS_FILE = path.join(DATA_DIR, 'test-reports.json');
-const FOLDERS_FILE = path.join(DATA_DIR, 'test-report-folders.json');
 const PYTHON_SCRIPT = path.join(process.cwd(), 'src', 'utils', 'analysis_engine.py');
 const PYTHON_CMD = process.platform === 'win32' ? 'python' : 'python3';
 
@@ -77,27 +81,7 @@ interface ReportFolderData {
   updatedAt: string;
 }
 
-function loadReports(): TestReportData[] {
-  try {
-    if (fs.existsSync(REPORTS_FILE)) {
-      return JSON.parse(fs.readFileSync(REPORTS_FILE, 'utf-8'));
-    }
-  } catch {
-    console.error('[AI Analyze] Failed to load test-reports');
-  }
-  return [];
-}
 
-function loadFolders(): ReportFolderData[] {
-  try {
-    if (fs.existsSync(FOLDERS_FILE)) {
-      return JSON.parse(fs.readFileSync(FOLDERS_FILE, 'utf-8'));
-    }
-  } catch {
-    console.error('[AI Analyze] Failed to load folders');
-  }
-  return [];
-}
 
 function buildFolderTree(folders: ReportFolderData[], parentId: string | null = null): Array<{ id: string; name: string; children: ReturnType<typeof buildFolderTree> }> {
   return folders
@@ -156,8 +140,7 @@ function summarizeReport(report: TestReportData) {
 }
 
 function getReportDetail(reportId: string): Record<string, unknown> | null {
-  const reports = loadReports();
-  const report = reports.find((r) => r.id === reportId);
+  const report = getReportById(reportId);
   if (!report) return null;
 
   // 对采样点做聚合，避免 token 过长
@@ -189,8 +172,7 @@ async function runSmartAnalysis(
   direction: 'max' | 'min',
   rank: number
 ): Promise<Record<string, unknown>> {
-  const reports = loadReports();
-  const report = reports.find((r) => r.id === reportId);
+  const report = getReportById(reportId);
   if (!report) {
     return { error: '报告不存在' };
   }
