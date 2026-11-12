@@ -1063,6 +1063,8 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           port: tab.sshConfig.port,
           username: tab.sshConfig.username,
           password: tab.sshConfig.password,
+          // 记录本次部署目录，恢复任务时可直接复用，不依赖 /tmp 下最新目录
+          remotePath: deployResult.remotePath,
           iterationParams,
           adjustmentCommands: resolvedAdjustmentCommands as any,
           envVars,

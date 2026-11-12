@@ -8,7 +8,7 @@ interface RouteParams {
 }
 
 /** POST /api/test/jobs/[id]/resume - 恢复已中止的任务
- *  从被中止的阶段第 1 轮重新执行（该阶段旧数据已在 resumeJob 中清除），后续阶段继续执行到结束 */
+ *  保留已完成的阶段与轮次数据，从中止阶段的「最后一个已完成轮次 + 1」继续执行 */
 export async function POST(_request: Request, { params }: RouteParams) {
   const { id } = await params;
 
@@ -29,8 +29,8 @@ export async function POST(_request: Request, { params }: RouteParams) {
     );
   }
 
-  // 在后台启动任务，不阻塞 HTTP 响应
-  runJob(id).catch((err) => {
+  // 在后台启动任务，不阻塞 HTTP 响应；从中止处继续而非重跑
+  runJob(id, { resumeFromIteration: job.resumeFromIteration }).catch((err) => {
     console.error(`[Jobs API] Resume job ${id} crashed:`, err);
   });
 

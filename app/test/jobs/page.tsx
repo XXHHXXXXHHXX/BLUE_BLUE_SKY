@@ -97,7 +97,7 @@ export default function JobListPage() {
   const handleResume = async (id: string) => {
     try {
       await resumeJob(id);
-      message.success('任务已恢复，已清除中止阶段的数据并从该阶段第 1 轮重新执行');
+      message.success('任务已恢复，将保留已完成的数据并从中止处继续执行');
     } catch (err) {
       message.error(err instanceof Error ? err.message : '恢复任务失败');
     }

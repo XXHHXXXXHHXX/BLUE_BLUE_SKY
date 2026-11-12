@@ -281,6 +281,8 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
   }
 
   updateJob(jobId, { status: 'running' });
+  // 恢复起点只用一次，避免下次恢复沿用旧的轮次
+  updateJob(jobId, { resumeFromIteration: undefined });
   addJobLog(jobId, 'info', '任务开始执行');
 
   // 确定流水线阶段
@@ -763,9 +765,11 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
   // 执行单个 Stage
   const runStage = async (
     stage: PipelineStage,
-    resumeFromIter?: number
+    resumeFromIter?: number,
+    existingResults?: JobResult[]
   ): Promise<{ success: boolean; results: JobResult[]; errorMessage?: string }> => {
-    const stageResults: JobResult[] = [];
+    // 恢复时保留该阶段已完成的轮次，新结果追加在其后
+    const stageResults: JobResult[] = existingResults ? [...existingResults] : [];
 
     const {
       iterationParams,
@@ -807,14 +811,28 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
     cleanupHeartbeat();
     await startHeartbeat(stage);
 
-    // 查找测试目录：优先使用 Stage 配置的远程路径，否则查找最新部署目录
-    let remotePath = stage.remotePath;
+    // 查找测试目录：优先 Stage 配置的远程路径；恢复任务时复用上次实际运行的脚本目录
+    // （避免依赖 /tmp 下最新部署目录，重启或清理后仍能继续）；最后才查找最新部署目录
+    // 单阶段任务的 remotePath 为空，用上次实际运行的脚本目录兜底
+    const fallbackScriptDir = !isPipelineMode ? (getJob(jobId)?.config.activeScriptDir || '') : '';
+    let remotePath = stage.remotePath || fallbackScriptDir;
+    if (remotePath) {
+      const existsResult = await withTimeout(
+        ssh.execCommand(`test -d ${shellQuote(remotePath)} && echo "exists" || echo "missing"`),
+        15000,
+        '检查测试包目录'
+      );
+      if (existsResult.stdout.trim() !== 'exists') {
+        addJobLog(jobId, 'warning', `测试包目录已不存在: ${remotePath}，尝试查找最新部署目录`);
+        remotePath = '';
+      }
+    }
     if (!remotePath) {
       addJobLog(jobId, 'info', '查找测试包...');
       const findDirResult = await withTimeout(ssh.execCommand(`ls -td /tmp/blue_sky_power_test_* | head -1`), 30000, '查找测试包');
 
       if (findDirResult.code !== 0 || !findDirResult.stdout.trim()) {
-        addJobLog(jobId, 'error', '未找到已部署的测试包，请先部署');
+        addJobLog(jobId, 'error', '未找到已部署的测试包，请先重新部署后再恢复任务');
         return { success: false, results: stageResults, errorMessage: '未找到已部署的测试包' };
       }
 
@@ -1426,7 +1444,14 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       });
 
       const resumeFromIter = stageIndex === startStageIndex ? resumeFromIteration : undefined;
-      const stageOutcome = await runStage(stage, resumeFromIter);
+      // 恢复时把该阶段已完成的结果传进去，避免覆盖丢失
+      // 单阶段任务的结果可能带 stageId='default'，也可能没有 stageId，都归属当前阶段
+      const existingStageResults = resumeFromIter
+        ? (prevStageResults[stage.id]?.results
+          || job.results.filter((r) =>
+            isPipelineMode ? r.stageId === stage.id : (!r.stageId || r.stageId === stage.id)))
+        : undefined;
+      const stageOutcome = await runStage(stage, resumeFromIter, existingStageResults);
 
       // 若已中止，不覆盖阶段状态，由外层统一处理
       if (isAborted()) {
