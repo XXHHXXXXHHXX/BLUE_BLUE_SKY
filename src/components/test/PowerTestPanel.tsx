@@ -1063,8 +1063,11 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           port: tab.sshConfig.port,
           username: tab.sshConfig.username,
           password: tab.sshConfig.password,
-          // 记录本次部署目录，恢复任务时可直接复用，不依赖 /tmp 下最新目录
+          // 记录本次部署目录与用例包来源：恢复任务时若 /tmp 已被清理，可自动重新部署
           remotePath: deployResult.remotePath,
+          packageLibraryId: deployResult.packageLibraryId || selectedLibraryPackageId || undefined,
+          packageArchivePath: deployResult.packageArchivePath || undefined,
+          packageFileName: deployResult.packageFileName || undefined,
           iterationParams,
           adjustmentCommands: resolvedAdjustmentCommands as any,
           envVars,
@@ -1294,6 +1297,10 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           name: stage.name,
           order: i,
           remotePath: deployResult.remotePath,
+          // 该阶段用例包来源：恢复时若远程目录已丢失，据此重新部署
+          packageLibraryId: deployResult.packageLibraryId || stage.packageLibraryId || undefined,
+          packageArchivePath: deployResult.packageArchivePath || undefined,
+          packageFileName: deployResult.packageFileName || undefined,
           iterationParams: baseConfig.iterationParams,
           adjustmentCommands: resolvedAdjustmentCommands as any,
           monitorCommands: resolvedMonitorCommands as any,

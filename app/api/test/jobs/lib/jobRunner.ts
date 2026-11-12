@@ -17,6 +17,8 @@ import {
   type PipelineStage,
 } from './jobStore';
 import { parseScoreFromOutput } from '../../../../../src/utils/scoreParsing';
+import { resolvePackage } from '../../lib/packageStore';
+import { deployTestPackage } from '../../lib/deployPackage';
 import { SerialMonitor } from './serialMonitor';
 import { power0MetricLabel } from '../../../../../src/types/serial';
 import { powerCapMetricLabel, POWERCAP_METRICS } from '../../../../../src/utils/powerCapParser';
@@ -812,9 +814,10 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
     await startHeartbeat(stage);
 
     // 查找测试目录：优先 Stage 配置的远程路径；恢复任务时复用上次实际运行的脚本目录
-    // （避免依赖 /tmp 下最新部署目录，重启或清理后仍能继续）；最后才查找最新部署目录
+    // 远程目录位于 /tmp，服务器重启后会被清空 —— 此时按记录的用例包来源自动重新部署
     // 单阶段任务的 remotePath 为空，用上次实际运行的脚本目录兜底
-    const fallbackScriptDir = !isPipelineMode ? (getJob(jobId)?.config.activeScriptDir || '') : '';
+    const jobConfig = getJob(jobId)?.config;
+    const fallbackScriptDir = !isPipelineMode ? (jobConfig?.activeScriptDir || '') : '';
     let remotePath = stage.remotePath || fallbackScriptDir;
     if (remotePath) {
       const existsResult = await withTimeout(
@@ -823,20 +826,74 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
         '检查测试包目录'
       );
       if (existsResult.stdout.trim() !== 'exists') {
-        addJobLog(jobId, 'warning', `测试包目录已不存在: ${remotePath}，尝试查找最新部署目录`);
+        addJobLog(jobId, 'warning', `测试包目录已不存在: ${remotePath}（可能服务器重启清理了 /tmp）`);
         remotePath = '';
       }
     }
-    if (!remotePath) {
-      addJobLog(jobId, 'info', '查找测试包...');
-      const findDirResult = await withTimeout(ssh.execCommand(`ls -td /tmp/blue_sky_power_test_* | head -1`), 30000, '查找测试包');
 
-      if (findDirResult.code !== 0 || !findDirResult.stdout.trim()) {
-        addJobLog(jobId, 'error', '未找到已部署的测试包，请先重新部署后再恢复任务');
-        return { success: false, results: stageResults, errorMessage: '未找到已部署的测试包' };
+    if (!remotePath) {
+      // 按记录的用例包来源重新部署
+      const packageLibraryId = stage.packageLibraryId || jobConfig?.packageLibraryId;
+      const packageArchivePath = stage.packageArchivePath || jobConfig?.packageArchivePath;
+      const packageFileName = stage.packageFileName || jobConfig?.packageFileName || '';
+
+      let redeployBuffer: Buffer | null = null;
+      let redeployFileName = packageFileName;
+
+      if (packageLibraryId) {
+        addJobLog(jobId, 'info', `重新部署用例包（用例包库 ${packageLibraryId}）...`);
+        const resolved = await resolvePackage(packageLibraryId);
+        if (resolved) {
+          redeployBuffer = resolved.buffer;
+          redeployFileName = resolved.filename;
+        }
+      } else if (packageArchivePath) {
+        addJobLog(jobId, 'info', `重新部署用例包（服务端归档 ${packageArchivePath}）...`);
+        try {
+          if (fs.existsSync(packageArchivePath)) {
+            redeployBuffer = fs.readFileSync(packageArchivePath);
+          }
+        } catch (err) {
+          console.error('[JobRunner] Failed to read archived package:', err);
+        }
       }
 
-      remotePath = findDirResult.stdout.trim();
+      if (redeployBuffer && redeployFileName) {
+        const deployResult = await deployTestPackage(
+          { host, port: port || 22, username, password },
+          redeployBuffer,
+          redeployFileName,
+        );
+        if (deployResult.success && deployResult.remotePath) {
+          remotePath = deployResult.remotePath;
+          addJobLog(jobId, 'info', `用例包已重新部署: ${remotePath}`);
+          // 回写新路径，供后续阶段与再次恢复使用
+          if (isPipelineMode) {
+            updateJob(jobId, {
+              config: {
+                ...jobConfig!,
+                stages: (jobConfig?.stages || []).map((s) =>
+                  s.id === stage.id ? { ...s, remotePath } : s,
+                ),
+              },
+            });
+          } else {
+            updateJob(jobId, { config: { ...jobConfig!, remotePath } });
+          }
+        } else {
+          addJobLog(jobId, 'error', `用例包重新部署失败: ${deployResult.message}`);
+        }
+      }
+
+      if (!remotePath) {
+        // 没有可用的用例包来源：给出明确提示，不再误用其他任务的目录
+        addJobLog(jobId, 'error', '测试包目录已丢失且无法自动重新部署，请重新选择用例包后再启动任务');
+        return {
+          success: false,
+          results: stageResults,
+          errorMessage: '测试包目录已丢失且无法自动重新部署',
+        };
+      }
     }
     addJobLog(jobId, 'info', `找到测试包: ${remotePath}`);
 

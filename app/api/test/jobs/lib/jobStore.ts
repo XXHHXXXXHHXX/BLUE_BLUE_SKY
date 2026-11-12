@@ -128,6 +128,10 @@ export interface JobConfig {
   globalBmcSessionId?: string | null;
   // 已部署的远程测试包路径（流水线/多阶段任务使用）
   remotePath?: string;
+  // 用例包来源：恢复任务时若远程目录已被清理，据此重新部署
+  packageLibraryId?: string;
+  packageArchivePath?: string;
+  packageFileName?: string;
   // 当前正在运行的测试脚本目录（用于中止时执行 stop.sh）
   activeScriptDir?: string;
   // 流水线阶段（多阶段顺序执行）
@@ -141,6 +145,10 @@ export interface PipelineStage {
   name: string;
   order: number;
   remotePath: string;
+  /** 该阶段用例包来源：恢复时若远程目录已丢失，据此重新部署 */
+  packageLibraryId?: string;
+  packageArchivePath?: string;
+  packageFileName?: string;
   iterationParams: JobConfig['iterationParams'];
   adjustmentCommands: JobConfig['adjustmentCommands'];
   monitorCommands?: JobConfig['monitorCommands'];
@@ -970,6 +978,26 @@ export function toJobView(job: Job, options: JobViewOptions = {}): Job {
   return clone;
 }
 
+/** 清理任务归档的用例包（上传包在服务端留了一份副本，供恢复时重新部署） */
+function cleanJobPackageArchives(job: Job | undefined): void {
+  if (!job) return;
+  const archives = new Set<string>();
+  if (job.config.packageArchivePath) archives.add(job.config.packageArchivePath);
+  for (const stage of job.config.stages || []) {
+    if (stage.packageArchivePath) archives.add(stage.packageArchivePath);
+  }
+  for (const archivePath of archives) {
+    try {
+      if (fs.existsSync(archivePath)) {
+        fs.rmSync(path.dirname(archivePath), { recursive: true, force: true });
+        console.log('[JobStore] Cleaned package archive:', archivePath);
+      }
+    } catch (err) {
+      console.error('[JobStore] Failed to clean package archive:', archivePath, err);
+    }
+  }
+}
+
 function cleanJobRelatedFiles(id: string): void {
   const dirsToClean = [
     path.join(process.cwd(), '.data', 'logs', id),
@@ -988,10 +1016,12 @@ function cleanJobRelatedFiles(id: string): void {
 }
 
 export function deleteJob(id: string): boolean {
+  const job = jobs.get(id);
   const deleted = jobs.delete(id);
   if (deleted) {
     saveJobs(id);
     cleanJobRelatedFiles(id);
+    cleanJobPackageArchives(job);
   }
   return deleted;
 }
@@ -1000,10 +1030,12 @@ export function batchDeleteJobs(ids: string[]): { deleted: string[]; failed: str
   const deleted: string[] = [];
   const failed: string[] = [];
   for (const id of ids) {
-    if (jobs.has(id)) {
+    const job = jobs.get(id);
+    if (job) {
       jobs.delete(id);
       deleted.push(id);
       cleanJobRelatedFiles(id);
+      cleanJobPackageArchives(job);
     } else {
       failed.push(id);
     }
@@ -1022,8 +1054,10 @@ export function deleteJobsByStatus(statuses: Array<'pending' | 'running' | 'comp
     }
   }
   for (const id of toDelete) {
+    const job = jobs.get(id);
     jobs.delete(id);
     cleanJobRelatedFiles(id);
+    cleanJobPackageArchives(job);
   }
   if (toDelete.length > 0) {
     for (const id of toDelete) saveJobs(id);

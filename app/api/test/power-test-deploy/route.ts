@@ -1,98 +1,24 @@
 /** 功耗遍历测试 - 部署测试包 API */
 import { NextRequest, NextResponse } from 'next/server';
-import { NodeSSH } from 'node-ssh';
-import { writeFile, unlink } from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import fs from 'fs';
+import path from 'path';
 import { resolvePackage } from '../lib/packageStore';
+import { deployTestPackage, type DeployConfig } from '../lib/deployPackage';
 
-interface DeployConfig {
-  host: string;
-  port: number;
-  username: string;
-  password: string;
-}
+const DATA_DIR = path.join(process.cwd(), '.data');
+const DEPLOY_ARCHIVES_DIR = path.join(DATA_DIR, 'deploy-archives');
 
-/** 部署测试包到远程主机 */
-async function deployTestPackage(
-  config: DeployConfig,
-  fileBuffer: Buffer,
-  fileName: string
-): Promise<{ success: boolean; message: string; remotePath?: string }> {
-  const ssh = new NodeSSH();
-  
+/** 归档本次上传的测试包，便于任务恢复时重新部署（远程 /tmp 会随重启清空） */
+function archiveUploadedPackage(fileBuffer: Buffer, fileName: string): string | null {
   try {
-    // 连接SSH
-    await ssh.connect({
-      host: config.host,
-      port: config.port || 22,
-      username: config.username,
-      password: config.password,
-      readyTimeout: 30000,
-    });
-    
-    const remoteDir = `/tmp/blue_sky_power_test_${Date.now()}`;
-    const remoteFilePath = `${remoteDir}/${fileName}`;
-    
-    // 创建远程目录
-    const mkdirResult = await ssh.execCommand(`mkdir -p ${remoteDir}`);
-    if (mkdirResult.code !== 0) {
-      throw new Error(`创建目录失败: ${mkdirResult.stderr}`);
-    }
-    
-    // 保存到临时文件
-    const tempLocalPath = join(tmpdir(), fileName);
-    await writeFile(tempLocalPath, fileBuffer);
-    
-    // 上传文件到远程主机
-    await ssh.putFile(tempLocalPath, remoteFilePath);
-    
-    // 删除本地临时文件
-    await unlink(tempLocalPath);
-    
-    // 解压文件
-    let extractCmd: string;
-    if (fileName.endsWith('.zip')) {
-      extractCmd = `cd ${remoteDir} && unzip -o ${fileName}`;
-    } else if (fileName.endsWith('.tar.gz')) {
-      extractCmd = `cd ${remoteDir} && tar -xzf ${fileName}`;
-    } else if (fileName.endsWith('.tar')) {
-      extractCmd = `cd ${remoteDir} && tar -xf ${fileName}`;
-    } else {
-      throw new Error('不支持的文件格式');
-    }
-    
-    const extractResult = await ssh.execCommand(extractCmd);
-    if (extractResult.code !== 0) {
-      throw new Error(`解压失败: ${extractResult.stderr}`);
-    }
-    
-    // 查找 run.sh
-    const findResult = await ssh.execCommand(`find ${remoteDir} -name "run.sh" -type f | head -1`);
-    const runShPath = findResult.stdout.trim();
-    
-    if (!runShPath) {
-      throw new Error('压缩包中未找到 run.sh 脚本');
-    }
-    
-    // 给 run.sh 添加执行权限
-    await ssh.execCommand(`chmod +x ${runShPath}`);
-    
-    return {
-      success: true,
-      message: '部署成功',
-      remotePath: remoteDir,
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error('[Power Test Deploy] Error:', errorMessage);
-    
-    return {
-      success: false,
-      message: errorMessage,
-    };
-  } finally {
-    ssh.dispose();
+    const dir = path.join(DEPLOY_ARCHIVES_DIR, `pkg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, fileName);
+    fs.writeFileSync(filePath, fileBuffer);
+    return filePath;
+  } catch (err) {
+    console.error('[Power Test Deploy] Failed to archive package:', err);
+    return null;
   }
 }
 
@@ -118,6 +44,7 @@ export async function POST(request: NextRequest) {
 
     let fileBuffer: Buffer | null = null;
     let fileName = '';
+    let archivePath: string | null = null;
 
     if (packageId) {
       // 用例包来自服务器存储：按 ID 直接在服务器端读取，不经过浏览器下载
@@ -144,6 +71,8 @@ export async function POST(request: NextRequest) {
       // 读取文件
       fileBuffer = Buffer.from(await file.arrayBuffer());
       fileName = file.name;
+      // 上传的包在服务端归档一份，恢复任务时若远程 /tmp 已清空可重新部署
+      archivePath = archiveUploadedPackage(fileBuffer, fileName);
     } else {
       return NextResponse.json(
         { success: false, message: '缺少测试包文件' },
@@ -164,6 +93,10 @@ export async function POST(request: NextRequest) {
       success: result.success,
       message: result.message,
       remotePath: result.remotePath,
+      // 用例包来源：恢复任务时据此重新部署
+      packageLibraryId: packageId || undefined,
+      packageArchivePath: archivePath || undefined,
+      packageFileName: fileName,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
