@@ -16,6 +16,8 @@ interface JobResultDisplayProps {
   results: JobResult[];
   config: JobConfig;
   jobId?: string;
+  /** 流水线阶段 ID：日志按阶段分目录存放，下载时需要带上 */
+  stageId?: string;
   onAverageRangeApplied?: () => void;
 }
 
@@ -66,7 +68,7 @@ const IterationDetailChart = React.memo(function IterationDetailChart({
   return <ReactECharts option={option} style={{ height: 400 }} onChartReady={bindYAxisWheelZoom} />;
 });
 
-export default function JobResultDisplay({ results, config, jobId, onAverageRangeApplied }: JobResultDisplayProps) {
+export default function JobResultDisplay({ results, config, jobId, stageId, onAverageRangeApplied }: JobResultDisplayProps) {
   const { updateJobCustomAvgRanges } = useTestJobStore();
   const [monitorDetailModal, setMonitorDetailModal] = useState<{
     open: boolean;
@@ -433,7 +435,10 @@ export default function JobResultDisplay({ results, config, jobId, onAverageRang
                   size="small"
                   icon={<FileTextOutlined />}
                   onClick={() => {
-                    window.open(`/api/test/logs/download?jobId=${jobId}&iteration=${r.iteration}`);
+                    const stageParam = stageId || r.stageId;
+                    window.open(
+                      `/api/test/logs/download?jobId=${jobId}&iteration=${r.iteration}${stageParam ? `&stageId=${stageParam}` : ''}`
+                    );
                   }}
                 >
                   第 {r.iteration} 轮
