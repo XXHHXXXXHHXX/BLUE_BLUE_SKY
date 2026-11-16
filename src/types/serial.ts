@@ -1,4 +1,45 @@
-/** BMC SOL 串口监控类型定义（前后端共享） */
+/** 串口解析模板（TS 代码模板，前后端共享的类型与元信息）
+ *
+ * 模板就是一段 TypeScript 片段，在服务端 Node 沙箱里执行（见 src/server/serialTemplateRuntime.ts）：
+ *
+ *   const meta = { name: 'power 0（各电源域功耗）', command: 'power 0', uarts: [1], unit: 'mW' };
+ *   function parse(output: string): Record<string, number>[] { ... }
+ *   function label(metric: string): string { ... }   // 可选，指标显示名
+ *
+ * 页面只做三件事：选模板 / 粘贴或上传代码 / 试解析。
+ */
+
+import {
+  templateSnapshotOf,
+  type SerialTemplateRecord,
+  type SerialTemplateSnapshot,
+} from '../utils/serialCodeTemplates.builtin';
+
+export type {
+  CompiledSerialTemplate,
+  SerialTemplateMeta,
+  SerialTemplateParseResult,
+  SerialTemplateSnapshot,
+  SerialTemplateRecord,
+} from '../utils/serialTemplateContract';
+export type {
+  SerialAnchor,
+  SerialDslTemplate,
+  SerialMetricRule,
+  SerialSampleMode,
+  SerialSumCheck,
+} from '../utils/serialDsl';
+export {
+  BUILTIN_SERIAL_TEMPLATES,
+  DEFAULT_SERIAL_PROMPT,
+  DEFAULT_SERIAL_TEMPLATE_ID,
+  legacyKindToTemplateId,
+  findSerialTemplateRecord,
+  hasTemplateVariant,
+  serialTemplateOptions,
+  templateSnapshotOf,
+  templateSnapshotVariant,
+} from '../utils/serialCodeTemplates.builtin';
 
 /** 可用 UART 编号（对应 # =Nh 的 N） */
 export type SerialUartId = 0 | 1 | 3 | 4 | 8 | 9;
@@ -31,100 +72,83 @@ export function isSerialUartId(value: unknown): value is SerialUartId {
 /** 默认 UART 切换寄存器地址（CPU 板 Smc 对象 BlockIO 写） */
 export const DEFAULT_SERIAL_UART_REGISTER = '0x00008A00';
 
-/** 默认 SOL 提示符（与 py 版 endswith("LiteOS #") 等价） */
-export const DEFAULT_SERIAL_PROMPT = 'Huawei LiteOS #\\s*$';
-
 /** SOL 会话激活/关闭命令（BMC Linux shell） */
 export const SERIAL_SOL_ACTIVATE = 'bash -l -c "source /etc/profile; ipmcset -t sol -d activate -v 1 0"';
 export const SERIAL_SOL_DEACTIVATE = 'bash -l -c "ipmcset -t sol -d deactivate -v 1 0"';
 
-/** 串口监控可选的命令类型
- * - power0：各电源域功耗快照，仅 IMU（uart=1）可用
- * - powerCap：功耗封顶计算结果，仅 IPU（uart=3/4/8/9）可用
- * - custom：自定义命令，不解析，输出原样存盘
- */
-export type SerialCommandKind = 'power0' | 'powerCap' | 'custom';
-
-/** 命令预设：命令文本固定，限制可用的 UART 集合 */
-export interface SerialCommandPreset {
-  kind: SerialCommandKind;
-  label: string;
-  command: string;
-  /** 允许的 UART；空表示不限（custom） */
-  uarts: SerialUartId[];
-  /** 是否解析输出（false 时仅存日志） */
-  parsed: boolean;
-}
-
-export const SERIAL_COMMAND_PRESETS: SerialCommandPreset[] = [
-  { kind: 'power0', label: 'power 0（各电源域功耗）', command: 'power 0', uarts: [1], parsed: true },
-  { kind: 'powerCap', label: 'powerCap 3（功耗封顶）', command: 'powerCap 3', uarts: [3, 4, 8, 9], parsed: true },
-  { kind: 'custom', label: '自定义命令（仅记录日志，不解析）', command: '', uarts: [], parsed: false },
-];
-
-export function serialCommandPreset(kind: SerialCommandKind): SerialCommandPreset {
-  return SERIAL_COMMAND_PRESETS.find((p) => p.kind === kind) ?? SERIAL_COMMAND_PRESETS[2];
-}
-
-/** 该命令类型是否允许在指定 UART 上使用 */
-export function isCommandAllowedOnUart(kind: SerialCommandKind, uart: SerialUartId): boolean {
-  const preset = serialCommandPreset(kind);
-  return preset.uarts.length === 0 || preset.uarts.includes(uart);
-}
-
 /** 串口监控配置（挂在单条 MonitorCommand 上）
- * 命令类型限定为 power0 / powerCap / custom；custom 不解析、原样保存输出。
- * AP 串口（id=0）为只读观察模式
+ *
+ * 解析方式完全由代码模板决定：
+ *   - template   ：内联快照（代码 + 元信息）。任务提交时写入，历史任务重放不受模板库后续修改影响
+ *   - templateId ：模板库引用；提交任务时解析成 template
  */
 export interface SerialMonitorConfig {
   /** 目标 UART */
   uart: SerialUartId;
-  /** 命令类型；缺省按 command 文本推断（兼容旧配置） */
-  kind?: SerialCommandKind;
-  /** 周期下发命令；power0/powerCap 由预设决定，custom 时必填；AP 观察模式留空 */
+  /** 解析模板内联快照（代码 + 元信息），优先使用 */
+  template?: SerialTemplateSnapshot;
+  /** 解析模板库 ID（builtin:* 或 serial-template-*） */
+  templateId?: string;
+  /** 命令文本覆盖模板默认命令；留空用模板 meta.command */
   command?: string;
   /** 最小发送间隔（ms）；0 表示背靠背尽可能快 */
   minIntervalMs?: number;
-  /** 采集指标白名单；留空表示自动发现（按首轮输出的全部指标采集）。
-   * power0: board / sN.total / sN.<domain>；powerCap: power / core / uncore */
+  /** 采集指标白名单；留空表示按首轮解析结果自动发现全部指标 */
   metrics?: string[];
-  /** 单次输出包含多次采样时取最近 N 次；默认 0=取全部（仅 powerCap 生效）。
-   * 窗口刷新远快于命令往返，各行均为新数据，无需去重 */
-  samples?: number;
-  /** 提示符正则；缺省 DEFAULT_SERIAL_PROMPT */
-  expect?: string;
   /** UART 切换后等待稳定时间（ms），默认 1000 */
   uartSettleMs?: number;
-  /** 每 N 个样本落一次盘做快照，默认 500 */
+  /** 每 N 个采样落一次盘做快照，默认 500 */
   snapshotEvery?: number;
+  /** 旧版命令类型字段：仅出现在已落盘的旧配置里，加载时删除 */
+  kind?: string;
 }
 
-/** 已知电源域名（仅作 UI 提示；不同机型/固件域名差异很大，
- * 实际采集指标由首轮输出自动发现） */
-export const SERIAL_POWER0_KNOWN_DOMAINS = [
-  'TA_CORE_DVFS',
-  'DDRIO',
-  'TB_CORE_DVFS',
-  'IO_NB_AVS',
-  'UNCORE_DVFS',
-  'IO_NA_AVS',
-  'T0_TA_CORE_DVFS',
-  'T0_TB_CORE_DVFS',
-  'T0_DVDD_UNCORE',
-  'T1_TA_CORE_DVFS',
-  'T1_TB_CORE_DVFS',
-  'T1_DVDD_UNCORE',
-  'T0T1_DDRIO',
-  '1V1_NA_SDS',
-  '1V1_NB_SDS',
-] as const;
+/** 模板允许在该 UART 上使用（meta.uarts 为空或不设表示不限） */
+export function isTemplateAllowedOnUart(
+  meta: { uarts?: number[] },
+  uart: SerialUartId
+): boolean {
+  return !meta.uarts || meta.uarts.length === 0 || meta.uarts.includes(uart);
+}
 
-/** 指标 id 的可读名（用于 commandName 后缀） */
-export function power0MetricLabel(metric: string): string {
-  if (metric === 'board') return '整板合计';
-  const m = metric.match(/^s(\d+)\.(.+)$/);
-  if (!m) return metric;
-  const [, socketIdx, rest] = m;
-  if (rest === 'total') return `PS${socketIdx} 合计`;
-  return `PS${socketIdx} ${rest}`;
+/** 该配置是否走只读观察（AP 串口无提示符，或模板显式声明 observe） */
+export function isSerialObserveMode(
+  meta: { observe?: boolean },
+  uart: SerialUartId
+): boolean {
+  return meta.observe === true
+    || SERIAL_UART_PRESETS.find((p) => p.id === uart)?.mode === 'observe';
+}
+
+/** 校验一条串口监控配置，返回错误文案；null 表示通过
+ *
+ * 只做结构性校验（UART 匹配、命令非空）；代码本身的语法/运行时错误由服务端编译时给出。
+ * 前端提交前与阶段校验共用，保证前后端判定一致。
+ */
+export function validateSerialMonitorConfig(
+  config: SerialMonitorConfig,
+  userTemplates: SerialTemplateRecord[] = []
+): string | null {
+  const snapshot = templateSnapshotOf(config, userTemplates);
+  if (!snapshot) return '未选择解析模板';
+  if (snapshot.kind === 'code' && !snapshot.code?.trim()) {
+    return `解析模板「${snapshot.name}」代码为空`;
+  }
+  if (snapshot.kind === 'dsl' && !snapshot.dsl) {
+    return `解析模板「${snapshot.name}」表单内容为空`;
+  }
+
+  if (!isTemplateAllowedOnUart(snapshot.meta, config.uart)) {
+    const allowed = (snapshot.meta.uarts ?? [])
+      .map((id) => SERIAL_UART_PRESETS.find((p) => p.id === id)?.label ?? `UART ${id}`)
+      .join(' / ');
+    const current = SERIAL_UART_PRESETS.find((p) => p.id === config.uart)?.label ?? `UART ${config.uart}`;
+    return `解析模板「${snapshot.name}」不支持 ${current}，仅支持 ${allowed}`;
+  }
+
+  const observe = isSerialObserveMode(snapshot.meta, config.uart);
+  if (!observe && !(config.command || snapshot.meta.command || '').trim()) {
+    return `解析模板「${snapshot.name}」未配置下发命令`;
+  }
+  return null;
 }

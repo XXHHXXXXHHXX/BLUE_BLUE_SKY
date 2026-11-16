@@ -20,15 +20,10 @@ import { parseScoreFromOutput } from '../../../../../src/utils/scoreParsing';
 import { resolvePackage } from '../../lib/packageStore';
 import { deployTestPackage } from '../../lib/deployPackage';
 import { SerialMonitor } from './serialMonitor';
-import { power0MetricLabel } from '../../../../../src/types/serial';
-import { powerCapMetricLabel, POWERCAP_METRICS } from '../../../../../src/utils/powerCapParser';
-
-/** 串口指标显示名：powerCap 的指标名（power/core/uncore）与电源域指标不重叠 */
-function serialMetricLabel(metric: string): string {
-  return (POWERCAP_METRICS as readonly string[]).includes(metric)
-    ? powerCapMetricLabel(metric)
-    : power0MetricLabel(metric);
-}
+import { templateSnapshotOf } from '../../../../../src/types/serial';
+import { loadUserSerialTemplates } from '../../../../../src/server/storage/serialTemplateStore';
+import { compileTemplateSnapshot } from '../../../../../src/server/serialTemplateCompiler';
+import type { CompiledSerialTemplate } from '../../../../../src/utils/serialTemplateContract';
 
 /** 单条监控命令的运行状态（SSH 轮询 / 持续模式 / 串口采集） */
 interface MonitorState {
@@ -42,6 +37,8 @@ interface MonitorState {
   serialMonitor?: SerialMonitor;
   /** 串口采集的监控命令显示名（用于拼接指标名） */
   serialCommandName?: string;
+  /** 串口采集使用的解析模板（用于指标显示名） */
+  serialCompiled?: CompiledSerialTemplate;
 }
 
 /** 生成笛卡尔积迭代组合（支持从高到低和自定义列表） */
@@ -1015,20 +1012,34 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
             addJobLog(jobId, 'warning', `监控 [${cmd.name}] 串口模式需要 BMC 会话，已跳过`);
             continue;
           }
-          const monitor = new SerialMonitor({
-            jobId,
-            commandId: cmd.id,
-            commandName: cmd.name,
-            config: cmd.serial,
-            bmcConfig: cmd.bmcConfig,
-            logDir: path.join(getLogBaseDir(stage), `iteration-${iteration}`),
-            onLog: (level, message) => addJobLog(jobId, level === 'error' ? 'error' : level, `监控 [${cmd.name}] ${message}`),
-          });
+          const userTemplates = loadUserSerialTemplates();
+          let monitor: SerialMonitor;
+          let compiled: CompiledSerialTemplate;
+          try {
+            const snapshot = templateSnapshotOf(cmd.serial, userTemplates);
+            if (!snapshot) throw new Error('未选择串口解析模板');
+            compiled = compileTemplateSnapshot(snapshot);
+            monitor = new SerialMonitor({
+              jobId,
+              commandId: cmd.id,
+              commandName: cmd.name,
+              config: cmd.serial,
+              bmcConfig: cmd.bmcConfig,
+              logDir: path.join(getLogBaseDir(stage), `iteration-${iteration}`),
+              userTemplates,
+              onLog: (level, message) => addJobLog(jobId, level === 'error' ? 'error' : level, `监控 [${cmd.name}] ${message}`),
+            });
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            addJobLog(jobId, 'warning', `监控 [${cmd.name}]（串口模式）解析模板无效: ${errMsg}`);
+            continue;
+          }
           const state: MonitorState = {
             dataPoints: [],
             intervalId: null as unknown as ReturnType<typeof setInterval>,
             serialMonitor: monitor,
             serialCommandName: cmd.name,
+            serialCompiled: compiled,
           };
           try {
             await monitor.start();
@@ -1266,17 +1277,18 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
               .map((p) => p.value);
             const averageValue = validValues.length > 0 ? validValues.reduce((a, b) => a + b, 0) / validValues.length : 0;
             const key = `${cmd.id}__serial__${metric}`;
+            const label = state.serialCompiled ? state.serialCompiled.label(metric) : metric;
             monitorResults[key] = {
               commandId: key,
-              commandName: `${cmd.name} - ${serialMetricLabel(metric)}`,
+              commandName: `${cmd.name} - ${label}`,
               dataPoints: filteredPoints,
               averageValue,
             };
           }
           if (series.length === 0) {
-            // custom 命令只记录日志，不产采样点属正常
-            if (cmd.serial?.kind === 'custom') {
-              addJobLog(jobId, 'info', `监控 [${cmd.name}]（串口模式）自定义命令仅记录日志，无采样点`);
+            // raw 模板只记录日志，不产采样点属正常
+            if (state.serialCompiled?.meta.raw) {
+              addJobLog(jobId, 'info', `监控 [${cmd.name}]（串口模式）原始日志模板仅记录日志，无采样点`);
             } else {
               addJobLog(jobId, 'warning', `监控 [${cmd.name}]（串口模式）本轮未采集到数据`);
             }

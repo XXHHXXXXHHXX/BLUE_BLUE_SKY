@@ -1,11 +1,14 @@
-/** BMC SOL 串口监控 - 通过 BMC SSH 打开 SOL 会话，按 UART 周期下发 LiteOS 命令并采集电源域功耗
+/** BMC SOL 串口监控 - 通过 BMC SSH 打开 SOL 会话，按 UART 周期下发 LiteOS 命令并采集功耗数据
  *
  * 与既有持续模式（nohup + kill）的区别：SOL 会话是本进程持有的双工流，
  * 结束时先发 Ctrl-C / deactivate 再销毁通道，不依赖远端信号继承行为。
  *
  * 采集模型：
- *   - send 模式：写命令 → 正则匹配提示符（空闲补空行催提示符）→ 解析 → 立即发下一条
- *   - observe 模式（AP 串口，无 LiteOS 提示符）：只读流，按窗口聚合，从不写入
+ *   - send 模式：写命令 → 正则匹配提示符（空闲补空行催提示符）→ 按解析模板解析 → 立即发下一条
+ *   - observe 模式（AP 串口，无 LiteOS 提示符）：只读流，按窗口聚合后解析，从不写入
+ *
+ * 解析完全由模板驱动（见 src/utils/serialCodeTemplates.builtin.ts 的代码模板契约）：
+ * 采样切分、指标取值、显示名、一致性校验都在模板代码里，本文件不含任何命令专属格式知识。
  *
  * 串口流只有一个常驻 data 监听器：所有输出先进入 buffer，
  * 由当前 pending 请求判断是否命中提示符，避免每条命令反复增删监听器。
@@ -21,22 +24,16 @@ import {
   SERIAL_SOL_ACTIVATE,
   SERIAL_SOL_DEACTIVATE,
   SERIAL_UART_PRESETS,
-  isCommandAllowedOnUart,
-  serialCommandPreset,
-  type SerialCommandKind,
+  isSerialObserveMode,
+  isTemplateAllowedOnUart,
+  templateSnapshotOf,
+  type SerialTemplateRecord,
+  type SerialTemplateSnapshot,
   type SerialMonitorConfig,
   type SerialUartId,
 } from '../../../../../src/types/serial';
-import {
-  getPower0Metric,
-  listPower0Metrics,
-  parsePower0,
-  type Power0Snapshot,
-} from '../../../../../src/utils/power0Parser';
-import {
-  POWERCAP_METRICS,
-  parsePowerCap,
-} from '../../../../../src/utils/powerCapParser';
+import { compileTemplateSnapshot } from '../../../../../src/server/serialTemplateCompiler';
+import type { CompiledSerialTemplate } from '../../../../../src/utils/serialTemplateContract';
 
 export interface SerialMonitorBmcConfig {
   host: string;
@@ -53,10 +50,12 @@ export interface SerialMonitorOptions {
   bmcConfig: SerialMonitorBmcConfig;
   /** 服务器本地日志目录（.data/logs/<jobId>/[<stageId>/]iteration-<n>） */
   logDir: string;
+  /** 用户模板库（templateId 引用时用于解析；任务内联模板优先） */
+  userTemplates?: SerialTemplateRecord[];
   onLog?: (level: 'info' | 'warning' | 'error', message: string) => void;
 }
 
-/** 采集样本：无 raw（原始输出不落盘，仅保留解析结果） */
+/** 采集样本 */
 export interface SerialDataPoint {
   timestamp: string;
   value: number;
@@ -64,13 +63,16 @@ export interface SerialDataPoint {
 }
 
 export interface SerialMetricSeries {
-  /** 指标 id（board / sN.total / sN.<domain>） */
+  /** 指标 id，由模板的 id 模板插值得到（如 board / s0.total / s0.TA_CORE_DVFS） */
   metric: string;
   points: SerialDataPoint[];
 }
 
 interface SendResult {
+  /** 一次命令的原始输出（含回显与提示符） */
   text: string;
+  /** 采样时刻（ms，Date.now()）；line 模式下多行采样按模板间隔回溯 */
+  at: number;
   /** prompt=命中提示符；fallback=预算耗尽（输出可能被截断） */
   via: 'prompt' | 'fallback';
 }
@@ -88,17 +90,18 @@ interface PendingSend {
 const IDLE_NUDGE_MS = 300;
 const MAX_NUDGES = 3;
 const SEND_BUDGET_MS = 5000;
-/** 连续解析失败多少次后停止采集（命令配置错误时避免空转占用串口） */
+/** 连续解析失败多少次后停止采集（模板配置错误时避免空转占用串口） */
 const MAX_PARSE_FAILURES = 50;
-
-/** 命令结束符：LiteOS 串口只需 CR。
- * 用 `\r\n` 时 `\n` 会被当作下一行的首个输入，命令变成 `\npower 0\r`，
- * LiteOS 将 `power` 与参数拆开执行，输出 `power:command not found`。 */
-const SERIAL_LINE_ENDING = '\r';
 
 export class SerialMonitor {
   private readonly options: SerialMonitorOptions;
-  /** 采集指标；null 表示自动发现（按首轮输出决定），发现后固定下来 */
+  private readonly template: SerialTemplateSnapshot;
+  private readonly compiled: CompiledSerialTemplate;
+  /** 下单命令（模板命令，可被 config.command 覆盖）；observe 模式为空 */
+  private readonly command: string;
+  private readonly lineEnding: string;
+  private readonly observe: boolean;
+  /** 采集指标；null 表示按首轮输出自动发现，发现后固定 */
   private metrics: string[] | null;
 
   private ssh: NodeSSH | null = null;
@@ -115,16 +118,12 @@ export class SerialMonitor {
   private currentUart: SerialUartId | null = null;
 
   private loopPromise: Promise<void> | null = null;
-  private queue: Promise<unknown> = Promise.resolve();
 
   /** 列式存储：metric → { 时间偏移(ms), 值 } */
   private columns = new Map<string, { t: number[]; v: number[] }>();
   private startTs = 0;
   private sinceSnapshot = 0;
-  private lastSnapshot: Power0Snapshot | null = null;
-  /** 命令类型：power0/powerCap 解析入库；custom 仅原样记录日志 */
-  private readonly kind: SerialCommandKind;
-  /** custom 命令的原始输出流（仅在 custom 模式下创建） */
+  /** 模板为 raw 模式时的原始输出流 */
   private rawLogStream: fs.WriteStream | null = null;
   private rawLogChunks = 0;
   /** 连续解析失败计数与上次告警时间（日志限流用） */
@@ -133,11 +132,19 @@ export class SerialMonitor {
 
   constructor(options: SerialMonitorOptions) {
     this.options = options;
+
+    const snapshot = templateSnapshotOf(options.config, options.userTemplates);
+    if (!snapshot) throw new Error('未选择串口解析模板');
+    this.template = snapshot;
+    // 代码模板在沙箱里编译；语法/契约问题在这里直接抛给调用方
+    this.compiled = compileTemplateSnapshot(snapshot);
+    this.observe = isSerialObserveMode(this.compiled.meta, options.config.uart);
+    this.command = (options.config.command || this.compiled.meta.command || '').trim();
+    this.lineEnding = this.compiled.meta.lineEnding ?? '\r';
+
     this.metrics = options.config.metrics && options.config.metrics.length > 0
       ? options.config.metrics
       : null;
-    this.kind = options.config.kind
-      ?? (/^\s*powercap\b/i.test(options.config.command ?? '') ? 'powerCap' : 'power0');
   }
 
   private log(level: 'info' | 'warning' | 'error', message: string) {
@@ -145,22 +152,22 @@ export class SerialMonitor {
   }
 
   /** 解析失败日志限流：背靠背采集下每秒数十条会刷满任务日志上限 */
-  private logParseFailure(kind: string, text: string, via: SendResult['via']) {
+  private logParseFailure(detail: string, via: SendResult['via']) {
     this.parseFailureCount++;
     const now = Date.now();
     const first = this.parseFailureCount === 1;
     // 首次立即输出（便于定位），之后每 30 秒汇总一次
     if (!first && now - this.lastParseFailureLogAt < 30_000) return;
     this.lastParseFailureLogAt = now;
-    const detail = first ? `；输出片段: ${JSON.stringify(text.replace(/\s+/g, ' ').trim().slice(0, 120))}` : '';
+    const snippet = first ? `；输出片段: ${JSON.stringify(detail.replace(/\s+/g, ' ').trim().slice(0, 120))}` : '';
     this.log(
       'warning',
-      `串口监控未解析到${kind}数据（via=${via}，累计 ${this.parseFailureCount} 次${detail}）`
+      `串口监控未解析到数据（模板「${this.template.name}」，via=${via}，累计 ${this.parseFailureCount} 次${snippet}）`
     );
 
     // 持续解析失败时直接终止，避免无意义地占用串口
     if (this.parseFailureCount >= MAX_PARSE_FAILURES) {
-      this.log('error', `串口监控连续 ${this.parseFailureCount} 次解析失败，已停止采集，请检查命令是否正确`);
+      this.log('error', `串口监控连续 ${this.parseFailureCount} 次解析失败，已停止采集，请检查命令与解析模板`);
       this.running = false;
     }
   }
@@ -173,13 +180,17 @@ export class SerialMonitor {
   async start(): Promise<void> {
     const cfg = this.options.config;
 
-    // 命令类型与 UART 的绑定关系在连接前校验，避免占用串口后才发现配置错误
-    if (!isCommandAllowedOnUart(this.kind, cfg.uart)) {
-      const forbidden = serialCommandPreset(this.kind);
+    // 模板与 UART 的匹配关系在连接前校验，避免占用串口后才发现配置错误
+    if (!isTemplateAllowedOnUart(this.compiled.meta, cfg.uart)) {
+      const allowed = (this.compiled.meta.uarts ?? []).map(uartLabel).join(' / ') || '不限';
       throw new Error(
-        `命令「${forbidden.label}」不支持 ${uartLabel(cfg.uart)}，仅支持 ${forbidden.uarts.map(uartLabel).join(' / ')}`
+        `解析模板「${this.template.name}」不支持 ${uartLabel(cfg.uart)}，仅支持 ${allowed}`
       );
     }
+    if (!this.observe && !this.command) {
+      throw new Error(`解析模板「${this.template.name}」未配置下发命令`);
+    }
+
     this.ssh = new NodeSSH();
     await withTimeout(
       this.ssh.connect({
@@ -198,23 +209,17 @@ export class SerialMonitor {
     this.stream = await this.openExecStream(SERIAL_SOL_ACTIVATE, 30000, '串口 SOL 激活');
     this.attachStream();
     this.startTs = Date.now();
-    this.log('info', `SOL 会话已激活（UART ${cfg.uart} / ${uartLabel(cfg.uart)}）`);
+    this.log('info', `SOL 会话已激活（UART ${cfg.uart} / ${uartLabel(cfg.uart)}），解析模板「${this.template.name}」`);
 
     await this.switchUart(cfg.uart);
 
-    const preset = SERIAL_UART_PRESETS.find((p) => p.id === cfg.uart);
-    if (preset?.mode === 'observe') {
-      this.log('info', 'AP 串口为只读观察模式，不下发命令');
+    if (this.observe) {
+      this.log('info', this.compiled.meta.observe
+        ? '只读观察模式：不下发命令，按窗口解析模板采集'
+        : 'AP 串口为只读观察模式，不下发命令');
       this.running = true;
       this.startObserveLoop();
       return;
-    }
-
-    const command = (this.kind === 'custom'
-      ? cfg.command
-      : serialCommandPreset(this.kind).command)?.trim();
-    if (!command) {
-      throw new Error(this.kind === 'custom' ? '自定义串口命令不能为空' : `命令「${serialCommandPreset(this.kind).label}」缺少命令内容`);
     }
 
     // 连上后先发一个换行并等提示符回来，确认串口处于干净的行首：
@@ -222,7 +227,7 @@ export class SerialMonitor {
     await this.syncPrompt();
 
     this.running = true;
-    this.loopPromise = this.runSendLoop(command);
+    this.loopPromise = this.runSendLoop();
   }
 
   /** 停止采集并关闭 SOL 会话 */
@@ -272,7 +277,7 @@ export class SerialMonitor {
     this.log('info', `串口监控已停止，共 ${this.sampleCount()} 个采样点`);
   }
 
-  /** 采集结果：每个指标一条序列（指标集合在首轮输出后自动确定） */
+  /** 采集结果：每个指标一条序列 */
   results(): SerialMetricSeries[] {
     const out: SerialMetricSeries[] = [];
     for (const [metric, col] of this.columns) {
@@ -287,11 +292,6 @@ export class SerialMonitor {
       });
     }
     return out;
-  }
-
-  /** 最近一次解析的快照（调试/校验用） */
-  lastPower0Snapshot(): Power0Snapshot | null {
-    return this.lastSnapshot;
   }
 
   // ========== 流监听 ==========
@@ -337,7 +337,7 @@ export class SerialMonitor {
     const pending = this.pending;
     if (!pending) return;
     this.pending = null;
-    pending.resolve({ text: this.buffer.slice(pending.mark), via });
+    pending.resolve({ text: this.buffer.slice(pending.mark), at: Date.now(), via });
   }
 
   // ========== 会话控制 ==========
@@ -382,19 +382,18 @@ export class SerialMonitor {
 
   // ========== 采集循环 ==========
 
-  private async runSendLoop(command: string): Promise<void> {
+  private async runSendLoop(): Promise<void> {
     const minInterval = this.options.config.minIntervalMs ?? 0;
-    const expect = this.options.config.expect ?? DEFAULT_SERIAL_PROMPT;
 
     while (this.running && !this.streamClosed) {
       const startedAt = Date.now();
       try {
-        const result = await this.sendAndWait(command, expect);
+        const result = await this.sendAndWait(this.command);
         // 停止时被强制收尾的请求（输出为空）不计入统计
-        if (this.running) this.handleSnapshot(result);
+        if (this.running) this.handleResult(result);
       } catch (err) {
         if (!this.running) break;
-        this.log('warning', `串口命令 [${command}] 执行失败: ${err instanceof Error ? err.message : String(err)}`);
+        this.log('warning', `串口命令 [${this.command}] 执行失败: ${err instanceof Error ? err.message : String(err)}`);
         await sleep(500);
       }
 
@@ -415,24 +414,15 @@ export class SerialMonitor {
         const text = this.buffer;
         this.buffer = '';
         if (!text.trim()) continue;
-
-        const matches = [...text.matchAll(/-?\d+(?:\.\d+)?/g)];
-        if (matches.length === 0) continue;
-        const value = Number(matches[matches.length - 1][0]);
-        if (Number.isNaN(value)) continue;
-
-        this.appendMetricAt('board', Date.now() - this.startTs, value);
-        this.sinceSnapshot++;
-        this.maybePersist();
+        this.handleResult({ text, at: Date.now(), via: 'fallback' });
       }
     })();
   }
 
   /** 发送空行并等回提示符，清掉上一阶段可能残留的输入，确保从干净行首开始 */
   private async syncPrompt(): Promise<void> {
-    const expect = this.options.config.expect ?? DEFAULT_SERIAL_PROMPT;
     try {
-      const result = await this.sendAndWait('', expect);
+      const result = await this.sendAndWait('');
       if (result.via !== 'prompt') {
         this.log('warning', '串口首行同步未收到提示符，可能仍有残留输入');
       }
@@ -444,7 +434,7 @@ export class SerialMonitor {
   }
 
   /** 写入命令并等待提示符（事件驱动 + 空闲补空行催提示符） */
-  private sendAndWait(command: string, expect: string): Promise<SendResult> {
+  private sendAndWait(command: string): Promise<SendResult> {
     const stream = this.stream;
     if (!stream || this.streamClosed) {
       return Promise.reject(new Error('SOL 通道未就绪'));
@@ -456,13 +446,13 @@ export class SerialMonitor {
     this.settlePending('fallback');
 
     const mark = this.buffer.length;
-    stream.write(`${command}${SERIAL_LINE_ENDING}`);
+    stream.write(`${command}${this.lineEnding}`);
 
     return new Promise<SendResult>((resolve, reject) => {
       const pending: PendingSend = {
         seq,
         mark,
-        expectRe: new RegExp(expect),
+        expectRe: this.compiled.expectRe,
         sawOutput: false,
         resolve,
         reject,
@@ -483,7 +473,7 @@ export class SerialMonitor {
         }
         nudges++;
         try {
-          stream.write(SERIAL_LINE_ENDING);
+          stream.write(this.lineEnding);
         } catch {
           /* ignore */
         }
@@ -511,38 +501,31 @@ export class SerialMonitor {
 
   // ========== 采样落库 ==========
 
-  /** 按命令类型分发：custom 只记录原始输出，不解析 */
-  private handleSnapshot(result: SendResult) {
-    const text = stripEcho(result.text);
-    if (this.kind === 'custom') {
-      this.appendRawLog(text);
-    } else if (this.kind === 'powerCap') {
-      this.handlePowerCap(text, result.via);
-    } else {
-      this.handlePower0(text, result.via);
-    }
-  }
-
-  /** 解析一次 power 0 输出，按指标追加采样点 */
-  private handlePower0(text: string, via: SendResult['via']) {
-    const snapshot = parsePower0(text);
-    this.lastSnapshot = snapshot;
-
-    if (!snapshot.hasData) {
-      this.logParseFailure(' power 0 ', text, via);
-      return;
-    }
-    if (snapshot.consistent === false) {
-      this.log(
-        'warning',
-        `串口监控完整性校验失败：socket 合计 ${snapshot.sockets.map((s) => s.totalPwr ?? '-').join('+')} ≠ 整板 ${snapshot.boardTotal}`
-      );
+  /** 解析一次输出并追加采样点 */
+  private handleResult(result: SendResult) {
+    if (this.compiled.meta.raw) {
+      // raw 模板：原文落日志，不产采样点
+      this.appendRawLog(result.text);
       return;
     }
 
-    // 未显式配置指标时，用首轮快照的实际指标集合（不同机型域名/ socket 数差异很大）
+    let parsed;
+    try {
+      parsed = this.compiled.parse(result.text);
+    } catch (err) {
+      // 模板运行期异常属于配置问题，按解析失败计入并在达到上限后停机
+      this.logParseFailure(`${err instanceof Error ? err.message : String(err)} | ${result.text}`, result.via);
+      return;
+    }
+    if (!parsed.hasData) {
+      this.logParseFailure(result.text, result.via);
+      return;
+    }
+
+    // 未显式配置指标时，固定为首轮解析出的指标集合
     if (this.metrics === null) {
-      this.metrics = listPower0Metrics(snapshot);
+      // 用全部采样的并集，避免某些指标只在后续行/后续采样出现时被漏掉
+      this.metrics = [...new Set(parsed.samples.flatMap((sample) => Object.keys(sample)))];
       if (this.metrics.length === 0) {
         this.log('warning', '串口监控解析到数据，但未发现可用指标');
         return;
@@ -550,63 +533,30 @@ export class SerialMonitor {
       this.log('info', `串口监控自动发现 ${this.metrics.length} 个指标: ${this.metrics.join(', ')}`);
     }
 
-    const offset = Date.now() - this.startTs;
+    const spacing = Math.max(0, this.compiled.meta.spacingMs ?? 0);
+    const nowOffset = result.at - this.startTs;
     let appended = 0;
-    for (const metric of this.metrics) {
-      const value = getPower0Metric(snapshot, metric);
-      if (value === undefined) continue;
-      this.appendMetricAt(metric, offset, value);
-      appended++;
-    }
-    if (appended === 0) {
-      this.log('warning', '串口监控解析到数据，但所选指标均无值，请检查指标配置');
-      return;
-    }
-
-    this.parseFailureCount = 0;
-    this.sinceSnapshot++;
-    this.maybePersist();
-  }
-
-  /** 解析一次 powerCap 输出：每行一次采样，默认只取最后一行（最新结果） */
-  private handlePowerCap(text: string, via: SendResult['via']) {
-    const snapshot = parsePowerCap(text);
-    if (!snapshot.hasData) {
-      this.logParseFailure(' powerCap ', text, via);
-      return;
-    }
-
-    if (this.metrics === null) {
-      this.metrics = [...POWERCAP_METRICS];
-      this.log('info', `串口监控采集 powerCap 指标: ${this.metrics.join(', ')}`);
-    }
-
-    // 默认取全部行：powerCap 窗口刷新远快于命令往返，各行均为新数据
-    const take = this.options.config.samples ?? 0;
-    const picked = take > 0 ? snapshot.samples.slice(-take) : snapshot.samples;
-    // 同一次输出的多行按 1 秒等间隔回溯，最后一行对齐当前时刻
-    const now = Date.now() - this.startTs;
-    let appended = 0;
-    picked.forEach((sample, i) => {
-      const offset = now - (picked.length - 1 - i) * 1000;
+    parsed.samples.forEach((sample, i) => {
+      // 同一次输出的多行采样按模板间隔回溯，最后一行对齐采样时刻
+      const offset = nowOffset - (parsed.samples.length - 1 - i) * spacing;
       for (const metric of this.metrics!) {
-        const value = (sample as Record<string, number | undefined>)[metric];
+        const value = sample[metric];
         if (typeof value !== 'number') continue;
         this.appendMetricAt(metric, offset, value);
         appended++;
       }
     });
     if (appended === 0) {
-      this.log('warning', '串口监控解析到 powerCap 数据，但所选指标均无值，请检查指标配置');
+      this.log('warning', '串口监控解析到数据，但所选指标均无值，请检查指标配置');
       return;
     }
 
     this.parseFailureCount = 0;
-    this.sinceSnapshot++;
+    this.sinceSnapshot += parsed.samples.length;
     this.maybePersist();
   }
 
-  /** custom 命令：原始输出按时间戳追加到 .log，不解析、不产采样点 */
+  /** raw 模板：原始输出按时间戳追加到 .log，不解析、不产采样点 */
   private appendRawLog(text: string) {
     if (!text.trim()) return;
     try {
@@ -659,7 +609,8 @@ export class SerialMonitor {
         commandId: this.options.commandId,
         commandName: this.options.commandName,
         uart: this.options.config.uart,
-        unit: 'mW',
+        templateName: this.template.name,
+        unit: this.compiled.meta.unit || 'mW',
         startedAt: new Date(this.startTs).toISOString(),
         updatedAt: new Date().toISOString(),
         series,
@@ -671,23 +622,8 @@ export class SerialMonitor {
   }
 }
 
-function uartLabel(id: SerialUartId): string {
+function uartLabel(id: number): string {
   return SERIAL_UART_PRESETS.find((p) => p.id === id)?.label ?? `UART ${id}`;
-}
-
-/** 去掉命令回显与尾部提示符（定界用的 `Huawei LiteOS #` 会带进输出段） */
-function stripEcho(text: string): string {
-  const lines = text.split(/\r?\n/);
-  const first = lines.findIndex((l) => l.trim() !== '');
-  if (first >= 0 && /LiteOS\s*#/.test(lines[first])) {
-    lines.splice(first, 1);
-  }
-  while (lines.length > 0) {
-    const last = lines[lines.length - 1];
-    if (!/LiteOS\s*#/.test(last) && last.trim() !== '') break;
-    lines.pop();
-  }
-  return lines.join('\n');
 }
 
 function sleep(ms: number): Promise<void> {
