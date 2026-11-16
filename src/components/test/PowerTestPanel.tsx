@@ -54,7 +54,6 @@ import {
   DesktopOutlined,
   SettingOutlined,
   DeleteOutlined,
-  InboxOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
   ReloadOutlined,
@@ -72,12 +71,10 @@ import { useTestIterationConfigStore } from '../../stores/testIterationConfigSto
 import ConfigTemplateSelect from './ConfigTemplateSelect';
 import GroupedSelect from './GroupedSelect';
 import { useBMCSessionStore } from '../../stores/bmcSessionStore';
-import { useTestDraftStore } from '../../stores/testDraftStore';
 import { useTestJobStore, type Job, type PipelineStage as ServerPipelineStage } from '../../stores/testJobStore';
 import { useTestPipelineTemplateStore, type PipelineStageTemplateData } from '../../stores/testPipelineTemplateStore';
 import TestPackageLibrary from './TestPackageLibrary';
 import TestReportManager from './TestReportManager';
-import TestDraftManager from './TestDraftManager';
 import MonitorConfigPanel from './MonitorConfigPanel';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import ScoreDisplay from './ScoreDisplay';
@@ -170,7 +167,6 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     removePackage,
   } = useTestPackageStore();
   const { addReport, buildFolderTreeOptions, getSelectedFolderId, fetchFolders } = useTestReportStore();
-  const { addDraft } = useTestDraftStore();
   const { startJob, abortJob } = useTestJobStore();
   const { configs: savedConfigs, fetchConfigs, addConfig } = useTestIterationConfigStore();
   const {
@@ -209,7 +205,6 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const [savePipelineTemplateForm] = Form.useForm();
   const [isSavePipelineTemplateModalOpen, setIsSavePipelineTemplateModalOpen] = useState(false);
   const [selectedPipelineTemplateId, setSelectedPipelineTemplateId] = useState<string | null>(null);
-  const [isDraftManagerOpen, setIsDraftManagerOpen] = useState(false);
   const [monitorDetailModal, setMonitorDetailModal] = useState<{
     open: boolean;
     commandId: string;
@@ -322,45 +317,6 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     fetchPackages();
   }, [fetchPackages]);
 
-  // 自动保存草稿：当测试结束（完成/中止/出错）且有结果数据时
-  const prevIsRunningRef = useRef(tab.isRunningTest);
-  useEffect(() => {
-    const wasRunning = prevIsRunningRef.current;
-    const isRunning = tab.isRunningTest;
-    prevIsRunningRef.current = isRunning;
-
-    // 从运行中变为非运行状态，且有测试结果
-    if (wasRunning && !isRunning && tab.testResults.length > 0) {
-      const status: 'completed' | 'aborted' | 'error' =
-        tab.testStatus === 'completed' ? 'completed' :
-        tab.testStatus === 'error' ? 'error' : 'aborted';
-
-      addDraft({
-        name: `${tab.name} - ${new Date().toLocaleString()}`,
-        sourceTabName: tab.name,
-        host: tab.sshConfig.host,
-        config: {
-          iterationParams: tab.powerTestConfig.iterationParams,
-          adjustmentCommands: tab.powerTestConfig.adjustmentCommands,
-          monitorCommands: tab.powerTestConfig.monitorCommands,
-          envVars: tab.powerTestConfig.envVars,
-          logMonitorConfig: tab.powerTestConfig.logMonitorConfig,
-          globalBmcSessionId: tab.powerTestConfig.globalBmcSessionId,
-        },
-        results: tab.testResults,
-        status,
-      });
-
-      if (status === 'aborted') {
-        message.info('测试已中止，数据已自动保存到草稿箱');
-      } else if (status === 'error') {
-        message.warning('测试出错，数据已自动保存到草稿箱');
-      } else {
-        message.success('测试完成，数据已自动保存到草稿箱');
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.isRunningTest, tab.testStatus, tab.testResults.length]);
 
   // 切换标签页时重置本组件的运行时状态，避免新标签页继承旧任务/临时配置
   useEffect(() => {
@@ -377,7 +333,6 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     setSelectedConfigId(null);
     setIsSavePipelineTemplateModalOpen(false);
     setSelectedPipelineTemplateId(null);
-    setIsDraftManagerOpen(false);
     setMonitorDetailModal(null);
     setActiveJobId(null);
     setActiveJob(null);
@@ -387,7 +342,6 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     processedResultCountRef.current = 0;
     prevJobStatusRef.current = null;
     isAbortingRef.current = false;
-    prevIsRunningRef.current = false;
     saveReportForm.resetFields();
     saveConfigForm.resetFields();
     savePipelineTemplateForm.resetFields();
@@ -3315,13 +3269,6 @@ echo "{\"score\": \${SCORE}}"
                   </Button>
                   <Button
                     size="small"
-                    icon={<InboxOutlined />}
-                    onClick={() => setIsDraftManagerOpen(true)}
-                  >
-                    草稿箱
-                  </Button>
-                  <Button
-                    size="small"
                     type="primary"
                     icon={<SaveOutlined />}
                     onClick={() => setIsSaveModalOpen(true)}
@@ -3344,13 +3291,6 @@ echo "{\"score\": \${SCORE}}"
           }
           extra={
             <Space>
-              <Button
-                type="link"
-                icon={<InboxOutlined />}
-                onClick={() => setIsDraftManagerOpen(true)}
-              >
-                草稿箱
-              </Button>
               <Button
                 type="link"
                 icon={<FileTextOutlined />}
@@ -3740,27 +3680,6 @@ echo "{\"score\": \${SCORE}}"
       <TestReportManager
         visible={isReportManagerOpen}
         onClose={() => setIsReportManagerOpen(false)}
-      />
-
-      <TestDraftManager
-        visible={isDraftManagerOpen}
-        onClose={() => setIsDraftManagerOpen(false)}
-        onImportDraft={(draft) => {
-          // 恢复草稿到当前标签页
-          setPowerTestConfig(tab.id, {
-            iterationParams: draft.config.iterationParams,
-            adjustmentCommands: draft.config.adjustmentCommands,
-            monitorCommands: draft.config.monitorCommands,
-            envVars: draft.config.envVars,
-          });
-          // 恢复结果数据
-          clearTestResults(tab.id);
-          draft.results.forEach((result) => {
-            addTestResult(tab.id, result);
-          });
-          setTestStatus(tab.id, 'completed');
-          message.success(`已恢复草稿: ${draft.name}`);
-        }}
       />
 
       <Modal
