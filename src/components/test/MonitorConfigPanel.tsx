@@ -35,13 +35,18 @@ import { useTestIterationConfigStore, type SavedTestConfig } from '../../stores/
 import ConfigTemplateSelect from './ConfigTemplateSelect';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import {
+  DEFAULT_SERIAL_TEMPLATE_ID,
   SERIAL_UART_PRESETS,
-  SERIAL_COMMAND_PRESETS,
-  isCommandAllowedOnUart,
-  serialCommandPreset,
-  type SerialCommandKind,
+  isTemplateAllowedOnUart,
+  serialTemplateOptions,
+  findSerialTemplateRecord,
+  templateSnapshotOf,
   type SerialUartId,
+  type SerialTemplateSnapshot,
 } from '../../types/serial';
+import { useSerialTemplateStore } from '../../stores/serialTemplateStore';
+import SerialParseTemplateEditor from './SerialParseTemplateEditor';
+import { EditOutlined } from '@ant-design/icons';
 
 const { Option } = Select;
 
@@ -74,10 +79,61 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
 
   const saveModal = useMaximizableModal({ minWidth: 700 });
 
+  // 串口解析模板库（内置 + 用户自定义）
+  const { templates: serialTemplateRecords, fetchTemplates } = useSerialTemplateStore();
+  const userTemplates = serialTemplateRecords.filter((t) => !t.builtin);
+  const templateOptions = serialTemplateOptions(userTemplates);
+  const [templateEditor, setTemplateEditor] = useState<{
+    open: boolean;
+    templateId?: string;
+    /** 触发编辑的监控命令；保存新模板后自动绑定到该命令 */
+    commandId?: string;
+    /** 打开时的模板快照（同名、代码或表单内容都以它为准） */
+    snapshot: SerialTemplateSnapshot;
+    /** 同一模板的另一种形态（内置模板的 code ↔ dsl 等价配置） */
+    alternative?: SerialTemplateSnapshot;
+  }>({ open: false, snapshot: templateSnapshotOf({ templateId: DEFAULT_SERIAL_TEMPLATE_ID })! });
+
+  useEffect(() => {
+    fetchTemplates();
+  }, [fetchTemplates]);
+
   // 加载监控配置模板列表
   useEffect(() => {
     fetchConfigs('monitor');
   }, [fetchConfigs]);
+
+  /** 打开模板编辑器：内置模板以内容为起点，保存即另存为自定义模板 */
+  const openTemplateEditor = (commandId: string, templateId: string) => {
+    const record = findSerialTemplateRecord(templateId, userTemplates);
+    if (!record) return;
+    const builtin = templateId.startsWith('builtin:');
+    setTemplateEditor({
+      open: true,
+      commandId,
+      templateId: builtin ? undefined : templateId,
+      // 内置模板的名称固定，重命名会让用户以为改动了内置内容，因此清空交给保存时的输入框
+      snapshot: builtin ? { ...record.template, name: '' } : record.template,
+      alternative: record.alt,
+    });
+  };
+
+  /** 保存后把新模板绑定到触发编辑的监控命令 */
+  const handleTemplateSaved = (recordId: string) => {
+    const index = commands.findIndex((c) => c.id === templateEditor.commandId);
+    const record = serialTemplateOptions(userTemplates).find((t) => t.id === recordId);
+    if (index >= 0 && record) {
+      updateCommand(index, {
+        serial: {
+          ...commands[index].serial!,
+          templateId: record.id,
+          template: record.template,
+          command: record.template.meta.command || '',
+        },
+      });
+    }
+    setTemplateEditor((cur) => ({ ...cur, open: false }));
+  };
 
   const updateCommands = (newCommands: MonitorCommand[]) => {
     if (onChange) {
@@ -245,7 +301,11 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
         </Empty>
       ) : (
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          {commands.map((cmd, index) => (
+          {commands.map((cmd, index) => {
+            const serialTemplate = cmd.serial
+              ? templateSnapshotOf(cmd.serial, userTemplates)?.meta ?? null
+              : null;
+            return (
             <div
               key={cmd.id}
               style={{
@@ -288,7 +348,13 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                       onChange={(e) =>
                         updateCommand(index, {
                           serial: e.target.checked
-                            ? { uart: 1, kind: 'power0', command: 'power 0', minIntervalMs: 0 }
+                            ? {
+                                uart: 1,
+                                templateId: DEFAULT_SERIAL_TEMPLATE_ID,
+                                template: templateSnapshotOf({ templateId: DEFAULT_SERIAL_TEMPLATE_ID }),
+                                command: '',
+                                minIntervalMs: 0,
+                              }
                             : undefined,
                           continuous: e.target.checked ? false : cmd.continuous,
                           target: e.target.checked ? 'bmc' : cmd.target,
@@ -334,23 +400,7 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                             value={cmd.serial.uart}
                             onChange={(value) => {
                               const uart = value as SerialUartId;
-                              const kind: SerialCommandKind = cmd.serial!.kind || 'power0';
-                              // 切换 UART 后若原命令不适用，自动回退到该 UART 支持的第一种命令
-                              if (isCommandAllowedOnUart(kind, uart)) {
-                                updateCommand(index, { serial: { ...cmd.serial!, uart } });
-                                return;
-                              }
-                              const fallback = SERIAL_COMMAND_PRESETS.find(
-                                (p) => p.parsed && isCommandAllowedOnUart(p.kind, uart)
-                              );
-                              updateCommand(index, {
-                                serial: {
-                                  ...cmd.serial!,
-                                  uart,
-                                  kind: fallback?.kind ?? 'custom',
-                                  command: fallback?.command ?? '',
-                                },
-                              });
+                              updateCommand(index, { serial: { ...cmd.serial!, uart } });
                             }}
                             disabled={disabled}
                           >
@@ -361,66 +411,79 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                             ))}
                           </Select>
                         </Col>
-                        {cmd.serial.uart === 0 ? (
-                          <Col span={16}>
-                            <div style={{ fontSize: 12, color: '#666', paddingTop: 4 }}>
-                              AP 串口为只读观察模式，不下发命令
-                            </div>
-                          </Col>
-                        ) : (
-                          <>
-                            <Col span={7}>
-                              <Select
-                                size="small"
-                                style={{ width: '100%' }}
-                                value={cmd.serial.kind || 'power0'}
-                                onChange={(value) => {
-                                  const kind = value as SerialCommandKind;
-                                  const preset = serialCommandPreset(kind);
-                                  updateCommand(index, {
-                                    serial: {
-                                      ...cmd.serial!,
-                                      kind,
-                                      command: preset.parsed ? preset.command : '',
-                                    },
-                                  });
-                                }}
-                                disabled={disabled}
-                              >
-                                {SERIAL_COMMAND_PRESETS.map((preset) => (
-                                  <Option
-                                    key={preset.kind}
-                                    value={preset.kind}
-                                    disabled={!isCommandAllowedOnUart(preset.kind, cmd.serial!.uart)}
-                                  >
-                                    {preset.label}
-                                  </Option>
-                                ))}
-                              </Select>
-                            </Col>
-                            {cmd.serial.kind === 'custom' || !cmd.serial.kind ? (
-                              <Col span={9}>
-                                <Input
+                        <Col span={9}>
+                          <Select
+                            size="small"
+                            style={{ width: '100%' }}
+                            value={cmd.serial.templateId ?? DEFAULT_SERIAL_TEMPLATE_ID}
+                            onChange={(value) => {
+                              const option = templateOptions.find((t) => t.id === value);
+                              updateCommand(index, {
+                                serial: {
+                                  ...cmd.serial!,
+                                  templateId: value,
+                                  template: option?.template,
+                                  command: option?.template.meta.command || '',
+                                },
+                              });
+                            }}
+                            disabled={disabled}
+                            dropdownRender={(menu) => (
+                              <>
+                                {menu}
+                                <Divider style={{ margin: '4px 0' }} />
+                                <Button
+                                  type="link"
                                   size="small"
-                                  placeholder="自定义命令（输出原样存盘）"
-                                  value={cmd.serial.command || ''}
-                                  onChange={(e) =>
-                                    updateCommand(index, {
-                                      serial: { ...cmd.serial!, command: e.target.value },
-                                    })
-                                  }
-                                  disabled={disabled}
-                                  prefix={<span style={{ color: '#999', fontSize: 12 }}>命令</span>}
-                                />
-                              </Col>
-                            ) : (
-                              <Col span={9}>
-                                <div style={{ fontSize: 12, color: '#666', paddingTop: 4 }}>
-                                  下发：{serialCommandPreset(cmd.serial.kind).command}
-                                </div>
-                              </Col>
+                                  icon={<EditOutlined />}
+                                  onClick={() => openTemplateEditor(cmd.id, cmd.serial!.templateId ?? DEFAULT_SERIAL_TEMPLATE_ID)}
+                                >
+                                  查看 / 编辑解析模板
+                                </Button>
+                              </>
                             )}
-                          </>
+                          >
+                            {templateOptions.map((option) => (
+                              <Option key={option.id} value={option.id}>
+                                {option.template.name}
+                                {!option.builtin && <Tag style={{ marginLeft: 6 }}>自定义</Tag>}
+                              </Option>
+                            ))}
+                          </Select>
+                        </Col>
+                        <Col span={4}>
+                          <Button
+                            size="small"
+                            icon={<EditOutlined />}
+                            onClick={() => openTemplateEditor(cmd.id, cmd.serial!.templateId ?? DEFAULT_SERIAL_TEMPLATE_ID)}
+                            disabled={disabled}
+                          >
+                            模板
+                          </Button>
+                        </Col>
+                        <Col span={24}>
+                          <Input
+                            size="small"
+                            placeholder={serialTemplate?.command || '下发命令（只读观察模板可留空）'}
+                            value={cmd.serial.command ?? ''}
+                            onChange={(e) =>
+                              updateCommand(index, {
+                                serial: { ...cmd.serial!, command: e.target.value },
+                              })
+                            }
+                            disabled={disabled}
+                            prefix={<span style={{ color: '#999', fontSize: 12 }}>命令</span>}
+                          />
+                        </Col>
+                        {serialTemplate && !isTemplateAllowedOnUart(serialTemplate, cmd.serial.uart) && (
+                          <Col span={24}>
+                            <Alert
+                              type="warning"
+                              showIcon
+                              style={{ padding: '2px 8px', fontSize: 12 }}
+                              message={`该模板不支持 ${SERIAL_UART_PRESETS.find((p) => p.id === cmd.serial!.uart)?.label ?? '当前 UART'}`}
+                            />
+                          </Col>
                         )}
                       </>
                     )}
@@ -571,12 +634,11 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                     {cmd.serial && (
                       <Col span={24}>
                         <div style={{ fontSize: 12, color: '#666' }}>
-                          {(cmd.serial.kind || 'power0') === 'custom'
-                            ? '自定义命令：输出原样写入日志（serial-<id>.log），不解析、不产生采样点'
-                            : (cmd.serial.kind || 'power0') === 'powerCap'
-                              ? 'powerCap：每行一次封顶计算结果，采集 power / core / uncore；默认取全部行'
-                              : 'power 0：采集整板合计、每 socket 合计与各电源域功耗（单位 mW）；按首轮输出自动发现全部指标'}
-                          {(cmd.serial.kind || 'power0') !== 'custom' && '，每个指标独立生成采样序列'}
+                          {serialTemplate?.raw
+                            ? 'raw 模板：输出原样写入日志（serial-<id>.log），不解析、不产生采样点'
+                            : serialTemplate?.observe
+                              ? '只读观察模板：不下发命令，按窗口解析采集'
+                              : `解析模板「${serialTemplate?.name ?? '-'}」：由模板代码切分采样与提取指标，每个指标独立生成采样序列`}
                         </div>
                       </Col>
                     )}
@@ -697,7 +759,8 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
                 </Col>
               </Row>
             </div>
-          ))}
+            );
+          })}
 
           <Button
             type="dashed"
@@ -751,6 +814,15 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
           </Form.Item>
         </Form>
       </Modal>
+
+      <SerialParseTemplateEditor
+        open={templateEditor.open}
+        templateId={templateEditor.templateId}
+        onCancel={() => setTemplateEditor((cur) => ({ ...cur, open: false }))}
+        initial={templateEditor.snapshot}
+        alternative={templateEditor.alternative}
+        onSaved={handleTemplateSaved}
+      />
     </Card>
   );
 };

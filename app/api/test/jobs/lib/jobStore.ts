@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import type { SerialMonitorConfig } from '../../../../../src/types/serial';
+import { normalizeSerialMonitorCommands } from '../../../../../src/server/storage/serialTemplateStore';
 
 const DATA_DIR = path.join(process.cwd(), '.data');
 const JOBS_FILE = path.join(DATA_DIR, 'test-jobs.json');
@@ -290,6 +291,14 @@ function loadJobs(): void {
           timestamp: new Date().toISOString(),
         });
       }
+      // 兼容旧数据：串口 kind → templateId，并内联模板快照
+      if (normalizeSerialMonitorCommands(job.config?.monitorCommands)) {
+        try {
+          writeJobRecord(job);
+        } catch (err) {
+          console.error('[JobStore] Failed to normalize serial config:', job.id, err);
+        }
+      }
       // 兼容旧数据：补齐日志单调序号（详情页增量拉取依赖 seq）
       let seq = 0;
       for (const log of job.logs) {
@@ -539,6 +548,8 @@ export function getJob(id: string): Job | undefined {
 }
 
 export function createJob(config: JobConfig, name: string, tabId?: string, clientId?: string): Job {
+  // 串口监控：把模板内联进任务快照，保证历史任务重放结果不随模板库变更漂移
+  normalizeSerialMonitorCommands(config.monitorCommands);
   const job: Job = {
     id: `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     tabId,

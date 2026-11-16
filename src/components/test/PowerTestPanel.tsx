@@ -83,11 +83,7 @@ import useMaximizableModal from '../../hooks/useMaximizableModal';
 import ScoreDisplay from './ScoreDisplay';
 import { getClientId } from '../../utils/clientId';
 import { stripMonitorSeriesSuffix } from '../../utils/monitorKeys';
-import {
-  SERIAL_UART_PRESETS,
-  isCommandAllowedOnUart,
-  serialCommandPreset,
-} from '../../types/serial';
+import { validateSerialMonitorConfig } from '../../types/serial';
 
 const { Dragger } = Upload;
 const { Option } = Select;
@@ -847,19 +843,10 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           message.error(`监控命令 [${monitor.name}] 串口模式必须使用 BMC 会话`);
           return;
         }
-        if (monitor.serial.uart !== 0) {
-          const kind = monitor.serial.kind || 'power0';
-          if (!isCommandAllowedOnUart(kind, monitor.serial.uart)) {
-            const preset = serialCommandPreset(kind);
-            message.error(
-              `监控命令 [${monitor.name}]「${preset.label}」不支持该 UART，仅支持 ${preset.uarts.map((u) => SERIAL_UART_PRESETS.find((p) => p.id === u)?.label ?? u).join(' / ')}`
-            );
-            return;
-          }
-          if (kind === 'custom' && !monitor.serial.command?.trim()) {
-            message.error(`监控命令 [${monitor.name}] 自定义串口命令不能为空`);
-            return;
-          }
+        const serialError = validateSerialMonitorConfig(monitor.serial);
+        if (serialError) {
+          message.error(`监控命令 [${monitor.name}] ${serialError}`);
+          return;
         }
       } else if (monitor.continuous) {
         if (!monitor.startCommand?.trim()) {
@@ -1155,19 +1142,10 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
             message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] 串口模式必须使用 BMC 会话`);
             return;
           }
-          if (monitor.serial.uart !== 0) {
-            const kind = monitor.serial.kind || 'power0';
-            if (!isCommandAllowedOnUart(kind, monitor.serial.uart)) {
-              const preset = serialCommandPreset(kind);
-              message.error(
-                `阶段 [${stage.name}] 的监控命令 [${monitor.name}]「${preset.label}」不支持该 UART，仅支持 ${preset.uarts.map((u) => SERIAL_UART_PRESETS.find((p) => p.id === u)?.label ?? u).join(' / ')}`
-              );
-              return;
-            }
-            if (kind === 'custom' && !monitor.serial.command?.trim()) {
-              message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] 自定义串口命令不能为空`);
-              return;
-            }
+          const serialError = validateSerialMonitorConfig(monitor.serial);
+          if (serialError) {
+            message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] ${serialError}`);
+            return;
           }
         } else if (monitor.continuous) {
           // 持续模式：校验启动命令与结束命令

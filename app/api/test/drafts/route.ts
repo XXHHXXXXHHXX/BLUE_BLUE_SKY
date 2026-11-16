@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import type { SerialMonitorConfig } from '../../../../src/types/serial';
+import { normalizeSerialMonitorCommands } from '../../../../src/server/storage/serialTemplateStore';
 
 // ========== 数据目录配置 ==========
 const DATA_DIR = path.join(process.cwd(), '.data');
@@ -114,6 +115,8 @@ function migrateDrafts() {
       delete (draft as any).testSuite;
       changed = true;
     }
+    // 串口监控：旧 kind → templateId，并把模板内联到草稿快照
+    if (normalizeSerialMonitorCommands(draft.config?.monitorCommands)) changed = true;
   }
   if (changed) {
     saveDrafts(drafts);
