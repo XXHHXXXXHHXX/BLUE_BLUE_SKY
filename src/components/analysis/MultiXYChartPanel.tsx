@@ -10,30 +10,39 @@ import CustomXYChartPanel from './CustomXYChartPanel';
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
 const ROW_HEIGHT = 60;
-const PANEL_W = 6;
-const PANEL_H = 10;
+/** 每张图表占满整行，新增时依次向下排列，避免并排后挤在一起看不清 */
+const PANEL_W = 12;
+const PANEL_H = 13;
 const COLS = { lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 };
 
 let idCounter = 0;
 
-function createLayoutItem(id: string, index: number): Layout {
+/** 生成某断点下占满整行的布局项 */
+function createLayoutItem(id: string, index: number, cols: number): Layout {
   return {
     i: id,
-    x: (index % 2) * PANEL_W,
-    y: Math.floor(index / 2) * PANEL_H,
-    w: PANEL_W,
+    x: 0,
+    y: index * PANEL_H,
+    w: Math.min(PANEL_W, cols),
     h: PANEL_H,
-    minW: 4,
-    minH: 6,
+    minW: Math.min(4, cols),
+    minH: 8,
   };
+}
+
+/** 为所有断点生成同一套「整行纵向排列」布局 */
+function createLayouts(panels: string[]): Layouts {
+  const result: Layouts = {};
+  for (const [bp, cols] of Object.entries(COLS)) {
+    result[bp] = panels.map((id, index) => createLayoutItem(id, index, cols));
+  }
+  return result;
 }
 
 const MultiXYChartPanel: React.FC = () => {
   const { reports, fetchReports } = useTestReportStore();
   const [panels, setPanels] = useState<string[]>(['xy-0']);
-  const [layouts, setLayouts] = useState<Layouts>({
-    lg: [createLayoutItem('xy-0', 0)],
-  });
+  const [layouts, setLayouts] = useState<Layouts>(() => createLayouts(['xy-0']));
 
   useEffect(() => {
     fetchReports();
@@ -44,12 +53,17 @@ const MultiXYChartPanel: React.FC = () => {
     const newId = `xy-${idCounter}`;
     setPanels((prev) => {
       const next = [...prev, newId];
-      setLayouts((prevLayouts) => ({
-        lg: [
-          ...(prevLayouts.lg || []),
-          createLayoutItem(newId, prev.length),
-        ],
-      }));
+      // 新图表追加到末尾（下方），整行宽度
+      setLayouts((prevLayouts) => {
+        const updated: Layouts = {};
+        for (const [bp, cols] of Object.entries(COLS)) {
+          updated[bp] = [
+            ...(prevLayouts[bp] || []),
+            createLayoutItem(newId, prev.length, cols),
+          ];
+        }
+        return updated;
+      });
       return next;
     });
   };
@@ -58,9 +72,16 @@ const MultiXYChartPanel: React.FC = () => {
     setPanels((prev) => {
       if (prev.length <= 1) return prev;
       const next = prev.filter((p) => p !== id);
-      setLayouts((prevLayouts) => ({
-        lg: prevLayouts.lg?.filter((l) => l.i !== id) || [],
-      }));
+      setLayouts((prevLayouts) => {
+        const updated: Layouts = {};
+        for (const [bp, cols] of Object.entries(COLS)) {
+          updated[bp] = (prevLayouts[bp] || [])
+            .filter((l) => l.i !== id)
+            // 删除后重新纵向排列，避免留下空洞
+            .map((l, index) => ({ ...l, x: 0, y: index * PANEL_H, w: Math.min(PANEL_W, cols) }));
+        }
+        return updated;
+      });
       return next;
     });
   };
@@ -86,7 +107,7 @@ const MultiXYChartPanel: React.FC = () => {
         }}
       >
         <span style={{ color: '#595959' }}>
-          可拖拽每个 XY 图表面板自由排列；拖到另一个面板旁边即可自动并排显示。
+          每张 XY 图表默认占满整行并依次向下排列；可拖拽标题栏调整顺序。
         </span>
         <Button type="primary" icon={<PlusOutlined />} onClick={addPanel}>
           新增 XY 图表

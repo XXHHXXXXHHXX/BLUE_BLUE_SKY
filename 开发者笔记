@@ -71,7 +71,7 @@ UART 选择	支持 CPU0/CPU1 的 AP(0)、IMU(1)、IPU0/IPU1(4/3, 9/8) 共 6 路
 模板库	内置 power0 / powerCap / observe / raw 四套模板；用户模板存 .data/serial-parse-templates.json，任务落盘时内联快照
 电源域解析	builtin:power0：block 模式，锚点维护 socket/域上下文，采整板合计 + 每 socket 合计 + 各域功耗（mW），附 socket 求和校验
 功耗封顶解析	builtin:powercap：line 模式，每行一次采样，采集 power / core / uncore，默认取全部行
-试解析	编辑器内粘贴样张即时解析（前端同引擎），不占串口
+试解析	编辑器内粘贴样张，服务端沙箱解析并返回指标表与校验结果，不占串口
 自定义命令	builtin:raw：不解析，输出按时间戳分段存入 serial-<id>.log，随每轮压缩包打包
 只读观察	AP 串口无 LiteOS 提示符，仅读取不下发命令（builtin:observe / window 模式）
 日志与打包	解析结果按列式写入 .data/logs/<jobId>/iteration-<n>/serial-<cmdId>.json，随每轮 zip 打包

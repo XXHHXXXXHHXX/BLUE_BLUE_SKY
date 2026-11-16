@@ -10,7 +10,6 @@ import {
   EditOutlined,
   AppstoreOutlined,
   FileTextOutlined,
-  InboxOutlined,
   ClusterOutlined,
   BarChartOutlined,
 } from '@ant-design/icons';
@@ -19,7 +18,6 @@ import { useMonitorStore } from '../../stores/monitorStore';
 import { useBMCSessionStore } from '../../stores/bmcSessionStore';
 import TestPackageLibrary from '../test/TestPackageLibrary';
 import TestReportManager from '../test/TestReportManager';
-import TestDraftManager from '../test/TestDraftManager';
 
 const { Header, Sider, Content } = Layout;
 
@@ -43,7 +41,6 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const { sessions, connectedSessionId } = useBMCSessionStore();
   const [isPackageLibraryOpen, setIsPackageLibraryOpen] = useState(false);
   const [isReportManagerOpen, setIsReportManagerOpen] = useState(false);
-  const [isDraftManagerOpen, setIsDraftManagerOpen] = useState(false);
 
   // 分身页面（/view）隐藏导航栏和顶部 Header，全屏显示拓扑
   const isClonePage = pathname === '/view';
@@ -109,15 +106,6 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                     type="primary"
                     ghost
                     size="small"
-                    icon={<InboxOutlined />}
-                    onClick={() => setIsDraftManagerOpen(true)}
-                  >
-                    草稿箱
-                  </Button>
-                  <Button
-                    type="primary"
-                    ghost
-                    size="small"
                     icon={<ClusterOutlined />}
                     onClick={() => router.push('/test/jobs')}
                   >
@@ -131,10 +119,6 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                 <TestReportManager
                   visible={isReportManagerOpen}
                   onClose={() => setIsReportManagerOpen(false)}
-                />
-                <TestDraftManager
-                  visible={isDraftManagerOpen}
-                  onClose={() => setIsDraftManagerOpen(false)}
                 />
               </>
             ) : (

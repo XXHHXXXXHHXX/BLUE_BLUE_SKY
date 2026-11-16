@@ -20,6 +20,8 @@ import {
   Input,
   Modal,
   TreeSelect,
+  Tabs,
+  Empty,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -410,6 +412,52 @@ export default function JobDetailPage() {
     };
   }, [job]);
 
+  // 流水线阶段：按 order 排序，详情页按阶段分页展示结果
+  const pipelineStages = useMemo(() => {
+    const stages = job?.config.stages;
+    if (!stages || stages.length === 0) return [];
+    return stages.slice().sort((a, b) => a.order - b.order);
+  }, [job]);
+
+  // 每个阶段的展示数据：优先使用 job.results 中带 stageId 的明细（运行中实时更新），
+  // 历史数据缺失 stageId 时回退到 stageResults
+  const stageResultEntries = useMemo(() => {
+    if (!job || pipelineStages.length === 0) return [];
+    return pipelineStages.map((stage, index) => {
+      const sr = job.stageResults?.[stage.id];
+      const filtered = job.results.filter((r) => r.stageId === stage.id);
+      const results = filtered.length > 0 ? filtered : (sr?.results || []);
+      // 阶段状态缺失时（如运行中尚未回写 stageResults）按当前阶段索引推断
+      const status = sr?.status
+        || (job.status === 'running' && (job.config.currentStageIndex ?? 0) === index ? 'running' : undefined);
+      return { stage, status, errorMessage: sr?.errorMessage, results };
+    });
+  }, [job, pipelineStages]);
+
+  const stageStatusTag = (status?: string) => {
+    switch (status) {
+      case 'completed':
+        return <Tag color="green">已完成</Tag>;
+      case 'running':
+        return <Tag color="processing">运行中</Tag>;
+      case 'error':
+        return <Tag color="red">出错</Tag>;
+      case 'skipped':
+        return <Tag>已跳过</Tag>;
+      default:
+        return <Tag>等待中</Tag>;
+    }
+  };
+
+  // 阶段配置：结果展示/图表需要该阶段自己的迭代参数与监控命令
+  const buildStageConfig = (stage: NonNullable<Job['config']['stages']>[number]) => ({
+    ...job!.config,
+    iterationParams: stage.iterationParams,
+    adjustmentCommands: stage.adjustmentCommands,
+    monitorCommands: stage.monitorCommands || [],
+    envVars: stage.envVars,
+  });
+
   if (loading || !job || !mockTab) {
     return (
       <div style={{ padding: 24, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -476,6 +524,13 @@ export default function JobDetailPage() {
         {job.progress.currentLabel && (
           <Text type="secondary" style={{ fontSize: 12 }}>
             当前参数: {job.progress.currentLabel}
+          </Text>
+        )}
+        {pipelineStages.length > 0 && (
+          <Text type="secondary" style={{ fontSize: 12, marginLeft: 12 }}>
+            流水线阶段: {pipelineStages[Math.min(job.config.currentStageIndex ?? 0, pipelineStages.length - 1)]?.name}
+            {' '}({Math.min((job.config.currentStageIndex ?? 0) + 1, pipelineStages.length)}/{pipelineStages.length})
+            ，共 {pipelineStages.length} 个阶段、{stageResultEntries.reduce((acc, s) => acc + s.results.length, 0)} 轮结果
           </Text>
         )}
       </div>
@@ -575,7 +630,46 @@ export default function JobDetailPage() {
               </Col>
             )}
 
-            {job.results.length > 0 && (
+            {pipelineStages.length > 0 ? (
+              <Col span={24}>
+                <Card
+                  title={<Space><LineChartOutlined />测试结果（按流水线阶段）</Space>}
+                  size="small"
+                >
+                  <Tabs
+                    size="small"
+                    items={stageResultEntries.map(({ stage, status, errorMessage, results }, index) => ({
+                      key: stage.id,
+                      label: (
+                        <Space size={4}>
+                          <span>{`${index + 1}. ${stage.name}`}</span>
+                          <Tag>{results.length} 轮</Tag>
+                          {stageStatusTag(status)}
+                        </Space>
+                      ),
+                      children: (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {errorMessage && (
+                            <Text type="danger" style={{ fontSize: 12 }}>{errorMessage}</Text>
+                          )}
+                          {results.length === 0 ? (
+                            <Empty description="该阶段暂无结果数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                          ) : (
+                            <JobResultDisplay
+                              results={results}
+                              config={buildStageConfig(stage) as any}
+                              jobId={job.id}
+                              stageId={stage.id}
+                              onAverageRangeApplied={refetchJob}
+                            />
+                          )}
+                        </Space>
+                      ),
+                    }))}
+                  />
+                </Card>
+              </Col>
+            ) : job.results.length > 0 && (
               <Col span={24}>
                 <Card title={<Space><LineChartOutlined />测试结果</Space>} size="small">
                   <JobResultDisplay results={job.results} config={job.config} jobId={job.id} onAverageRangeApplied={refetchJob} />

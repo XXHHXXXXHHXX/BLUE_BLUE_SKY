@@ -123,6 +123,12 @@ export interface JobConfig {
   globalBmcSessionId?: string | null;
   // 已部署的远程测试包路径（流水线/多阶段任务使用）
   remotePath?: string;
+  // 用例包来源：恢复任务时若远程目录已被清理，据此重新部署
+  packageLibraryId?: string;
+  packageArchivePath?: string;
+  packageFileName?: string;
+  // 当前正在运行的测试脚本目录（用于中止时执行 stop.sh）
+  activeScriptDir?: string;
   // 流水线阶段（多阶段顺序执行）
   stages?: PipelineStage[];
   currentStageIndex?: number;
@@ -134,6 +140,10 @@ export interface PipelineStage {
   name: string;
   order: number;
   remotePath: string;
+  /** 该阶段用例包来源：恢复时若远程目录已丢失，据此重新部署 */
+  packageLibraryId?: string;
+  packageArchivePath?: string;
+  packageFileName?: string;
   iterationParams: JobConfig['iterationParams'];
   adjustmentCommands: JobConfig['adjustmentCommands'];
   monitorCommands?: JobConfig['monitorCommands'];

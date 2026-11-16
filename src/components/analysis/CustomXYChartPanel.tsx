@@ -480,8 +480,12 @@ const CustomXYChartPanel: React.FC<CustomXYChartPanelProps> = ({
   return (
     <div>
       <Row gutter={16}>
-        <Col xs={24} lg={7}>
-          <Card title="图表配置" size="small">
+        <Col xs={24} lg={8}>
+          <Card
+            title="图表配置"
+            size="small"
+            styles={{ body: { maxHeight: 620, overflowY: 'auto' } }}
+          >
             <Space direction="vertical" style={{ width: '100%' }}>
               <div>
                 <Text type="secondary" style={{ fontSize: 12 }}>选择报告</Text>
@@ -838,10 +842,10 @@ const CustomXYChartPanel: React.FC<CustomXYChartPanelProps> = ({
           </Card>
         </Col>
 
-        <Col xs={24} lg={17}>
+        <Col xs={24} lg={16}>
           <Card title="XY 关系图" size="small" style={{ height: '100%' }}>
             {chartOption ? (
-              <ReactECharts option={chartOption} style={{ height: 520 }} notMerge />
+              <ReactECharts option={chartOption} style={{ height: 620 }} notMerge />
             ) : (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
