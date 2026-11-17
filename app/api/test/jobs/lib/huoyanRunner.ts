@@ -17,7 +17,7 @@ import {
   type Job,
   type JobResult,
 } from './jobStore';
-import { appendQueueItem, cancelRun, fetchQueue, fetchRun, HuoyanError } from './huoyanClient';
+import { appendQueueItem, cancelRun, fetchQueue, fetchRun, skipQueueItem, HuoyanError } from './huoyanClient';
 import { MonitorCollector } from './monitorCollector';
 
 /** 轮询队列状态的间隔（毫秒） */
@@ -87,12 +87,30 @@ export async function runHuoyanJob(jobId: string): Promise<void> {
   const abortHandler = () => {
     addJobLog(jobId, 'info', '正在中止火眼任务...');
     monitor.abort().catch(() => { /* ignore */ });
-    const currentRunId = getJob(jobId)?.huoyanState?.runId;
-    if (currentRunId) {
-      cancelRun(clientOptions, currentRunId).catch((err) => {
-        addJobLog(jobId, 'warning', `取消火眼运行失败: ${err instanceof Error ? err.message : String(err)}`);
-      });
+
+    // 已产生 run：取消这次运行
+    if (runId) {
+      cancelRun(clientOptions, runId)
+        .then(() => addJobLog(jobId, 'info', `已请求火眼平台取消运行 ${runId}`))
+        .catch((err) => {
+          addJobLog(jobId, 'warning', `取消火眼运行失败: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      return;
     }
+
+    // 尚未产生 run（用例还在排队/预检）：把队列项标记为 skipped，
+    // 否则平台稍后仍会照常执行它。必须带 item_id，避免误跳过队列里别人的用例。
+    if (itemId) {
+      skipQueueItem(clientOptions, config.queueId, itemId)
+        .then(() => addJobLog(jobId, 'info', `已请求火眼平台跳过队列项 ${itemId}`))
+        .catch((err) => {
+          addJobLog(jobId, 'warning', `跳过火眼队列项失败: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      return;
+    }
+
+    // 用例还没提交成功：无需通知平台，提交完成后的中止检查会处理
+    addJobLog(jobId, 'info', '用例尚未提交到火眼队列，无需通知平台');
   };
 
   registerJobRunner(jobId, abortHandler);
@@ -130,6 +148,17 @@ export async function runHuoyanJob(jobId: string): Promise<void> {
       addJobLog(jobId, 'warning', `火眼预检警告 [${warning.code}] ${warning.message}`);
     }
     addJobLog(jobId, 'info', `用例已提交，队列 item_id=${itemId}，队列状态=${appended.queue.status}`);
+
+    // 提交期间被中止：abortHandler 当时还拿不到 itemId，这里补发跳过
+    if (isAborted()) {
+      addJobLog(jobId, 'info', '提交过程中收到中止请求，正在跳过刚提交的队列项...');
+      await skipQueueItem(clientOptions, config.queueId, itemId).catch((err) => {
+        addJobLog(jobId, 'warning', `跳过火眼队列项失败: ${err instanceof Error ? err.message : String(err)}`);
+      });
+      await monitor.abort();
+      updateJob(jobId, { status: 'aborted' });
+      return;
+    }
 
     updateJob(jobId, {
       huoyanState: {

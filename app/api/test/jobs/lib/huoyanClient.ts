@@ -164,6 +164,26 @@ export async function cancelRun(options: HuoyanClientOptions, runId: string): Pr
   );
 }
 
+/** 跳过队列中的某一项（未给 itemId 时跳过当前正在跑的那项）
+ *
+ * 用于用例还在排队/预检、尚未产生 run_id 时中止：此时没有 run 可取消，
+ * 只能把队列项标记为 skipped，否则它稍后仍会被平台执行。
+ * 注意不要用 /queues/{id}/cancel —— 那会把整个共享队列的排队项都取消。
+ */
+export async function skipQueueItem(
+  options: HuoyanClientOptions,
+  queueId: string,
+  itemId?: string,
+): Promise<void> {
+  await request(
+    options,
+    'POST',
+    `/api/v1/queues/${encodeURIComponent(queueId)}/skip`,
+    { item_id: itemId || null },
+    { idempotent: true, timeoutMs: 60000 },
+  );
+}
+
 interface QueueCandidateItem {
   item_id?: string | null;
   definition_id: string;

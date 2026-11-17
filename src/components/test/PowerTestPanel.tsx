@@ -164,7 +164,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     removePackage,
   } = useTestPackageStore();
   const { addReport, buildFolderTreeOptions, getSelectedFolderId, fetchFolders } = useTestReportStore();
-  const { startJob, abortJob } = useTestJobStore();
+  const { startJob, abortJob, getRunningJobForTab } = useTestJobStore();
   const { configs: savedConfigs, fetchConfigs, addConfig } = useTestIterationConfigStore();
   const {
     templates: pipelineTemplates,
@@ -1459,11 +1459,21 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   };
 
   const handleStopTest = () => {
-    if (activeJobId) {
-      isAbortingRef.current = true;
-      abortJob(activeJobId);
-      addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 正在中止后台任务，等待当前命令结束...`);
+    // 优先用当前关联的任务；页面刷新/恢复后 activeJobId 可能为空，回退到该标签页的运行中任务，
+    // 避免点了停止却什么都没发给服务端（火眼模式下就表现为「没通知火眼平台」）
+    const jobId = activeJobId || getRunningJobForTab(tab.id)?.id;
+    if (!jobId) {
+      message.warning('没有找到运行中的任务');
+      return;
     }
+    isAbortingRef.current = true;
+    abortJob(jobId);
+    addShellOutput(
+      tab.id,
+      tab.powerTestConfig.packageMode === 'huoyan'
+        ? `[${new Date().toLocaleTimeString()}] 正在中止火眼任务，已请求火眼平台停止该用例...`
+        : `[${new Date().toLocaleTimeString()}] 正在中止后台任务，等待当前命令结束...`,
+    );
   };
 
   // 获取某个参数对应的调整命令（通过 paramId 一一对应，兼容旧配置按索引回退）
