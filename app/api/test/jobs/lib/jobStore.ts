@@ -4,6 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import type { SerialMonitorConfig } from '../../../../../src/types/serial';
 import { normalizeSerialMonitorCommands } from '../../../../../src/server/storage/serialTemplateStore';
+import type { HuoyanJobConfig, HuoyanRunState } from '../../../../../src/types/huoyan';
 
 const DATA_DIR = path.join(process.cwd(), '.data');
 const JOBS_FILE = path.join(DATA_DIR, 'test-jobs.json');
@@ -138,6 +139,8 @@ export interface JobConfig {
   // 流水线阶段（多阶段顺序执行）
   stages?: PipelineStage[];
   currentStageIndex?: number;
+  // 火眼自动化平台执行模式（设置后不再本地部署/执行 run.sh）
+  huoyan?: HuoyanJobConfig;
 }
 
 /** 流水线阶段配置（复用 JobConfig 的大部分字段，去掉主机连接信息） */
@@ -196,6 +199,8 @@ export interface Job {
   customAvgRanges?: Record<string, { avgStart?: number; avgEnd?: number }>;
   /** 恢复任务时：从被中止阶段的第几轮继续（1-based，由 resumeJob 计算） */
   resumeFromIteration?: number;
+  /** 火眼任务运行态（item_id / run_id / 队列状态） */
+  huoyanState?: HuoyanRunState;
   /** 列表摘要（仅 summary 视图返回，不落盘） */
   resultSummary?: {
     totalCount: number;

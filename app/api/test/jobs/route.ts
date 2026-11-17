@@ -54,7 +54,15 @@ export async function POST(request: NextRequest) {
       scheduledStartAt?: string;
     };
 
-    if (!config || !config.host || !config.iterationParams) {
+    // 火眼模式不需要本地迭代参数，但需要队列与用例定义
+    if (config?.huoyan) {
+      if (!config.huoyan.queueId || !config.huoyan.definitionId) {
+        return NextResponse.json(
+          { success: false, message: '火眼模式缺少队列或用例定义' },
+          { status: 400 }
+        );
+      }
+    } else if (!config || !config.host || !config.iterationParams) {
       return NextResponse.json(
         { success: false, message: '缺少必要参数' },
         { status: 400 }

@@ -551,6 +551,42 @@ export default function JobDetailPage() {
               </Card>
             </Col>
 
+            {job.config.huoyan && (
+              <Col span={24}>
+                <Card title={<Space><ExperimentOutlined />火眼执行信息</Space>} size="small">
+                  <Descriptions size="small" column={2} bordered>
+                    <Descriptions.Item label="平台地址">
+                      {job.config.huoyan.baseUrl || '默认地址'}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="队列">{job.config.huoyan.queueId}</Descriptions.Item>
+                    <Descriptions.Item label="用例">
+                      {job.config.huoyan.definitionName || job.config.huoyan.definitionId}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="item_id">
+                      {job.huoyanState?.itemId || '-'}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="run_id">{job.huoyanState?.runId || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="状态">
+                      {job.huoyanState?.itemStatus || '-'}
+                      {job.huoyanState?.runStatus && job.huoyanState.runStatus !== job.huoyanState.itemStatus
+                        ? ` / run=${job.huoyanState.runStatus}`
+                        : ''}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="参数" span={2}>
+                      {job.config.huoyan.arguments.map((a) => `${a.name}=${String(a.value)}`).join(', ') || '-'}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="目标机" span={2}>
+                      {job.config.huoyan.bindings.map((b) => `${b.role} → ${b.target_name}`).join(', ') || '-'}
+                    </Descriptions.Item>
+                  </Descriptions>
+                  {job.huoyanState?.error && (
+                    <Text type="danger" style={{ fontSize: 12 }}>{job.huoyanState.error}</Text>
+                  )}
+                </Card>
+              </Col>
+            )}
+
+            {!job.config.huoyan && (
             <Col span={24}>
               <Card title={<Space><CodeOutlined />迭代参数</Space>} size="small">
                 <Table
@@ -571,6 +607,7 @@ export default function JobDetailPage() {
                 />
               </Card>
             </Col>
+            )}
 
             {job.config.adjustmentCommands && job.config.adjustmentCommands.length > 0 && (
               <Col span={24}>

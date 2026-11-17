@@ -3,6 +3,7 @@
  */
 import { create } from 'zustand';
 import type { SerialMonitorConfig } from '../types/serial';
+import type { HuoyanJobConfig } from '../types/huoyan';
 
 export interface SSHConfig {
   host: string;
@@ -171,6 +172,10 @@ export interface TestTab {
     jobName?: string;
     // 定时启动时间（ISO 字符串）；为空表示立即启动
     scheduledStartAt?: string | null;
+    // 测试包来源模式：local=本地用例包（部署到目标机执行），huoyan=火眼自动化平台
+    packageMode?: 'local' | 'huoyan';
+    // 火眼模式配置
+    huoyanConfig?: HuoyanJobConfig;
   };
   
   // 测试结果

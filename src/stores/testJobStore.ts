@@ -3,6 +3,7 @@
  */
 import { create } from 'zustand';
 import type { SerialMonitorConfig } from '../types/serial';
+import type { HuoyanJobConfig, HuoyanRunState } from '../types/huoyan';
 
 export interface JobLog {
   type: string;
@@ -132,6 +133,8 @@ export interface JobConfig {
   // 流水线阶段（多阶段顺序执行）
   stages?: PipelineStage[];
   currentStageIndex?: number;
+  // 火眼自动化平台执行模式
+  huoyan?: HuoyanJobConfig;
 }
 
 /** 流水线阶段配置 */
@@ -186,6 +189,8 @@ export interface Job {
     errorMessage?: string;
   }>;
   customAvgRanges?: Record<string, { avgStart?: number; avgEnd?: number }>;
+  /** 火眼任务运行态 */
+  huoyanState?: HuoyanRunState;
   /** 列表摘要（summary 模式返回，不含 results 明细） */
   resultSummary?: JobResultSummary;
 }

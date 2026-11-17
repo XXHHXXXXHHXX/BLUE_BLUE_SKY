@@ -24,6 +24,7 @@ import { templateSnapshotOf } from '../../../../../src/types/serial';
 import { loadUserSerialTemplates } from '../../../../../src/server/storage/serialTemplateStore';
 import { compileTemplateSnapshot } from '../../../../../src/server/serialTemplateCompiler';
 import type { CompiledSerialTemplate } from '../../../../../src/utils/serialTemplateContract';
+import { runHuoyanJob } from './huoyanRunner';
 
 /** 单条监控命令的运行状态（SSH 轮询 / 持续模式 / 串口采集） */
 interface MonitorState {
@@ -276,6 +277,13 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
   const job = getJob(jobId);
   if (!job) {
     console.error(`[JobRunner] Job ${jobId} not found`);
+    return;
+  }
+
+  // 火眼模式：不部署用例包、不执行 run.sh，交由火眼平台运行
+  if (job.config.huoyan) {
+    updateJob(jobId, { resumeFromIteration: undefined });
+    await runHuoyanJob(jobId);
     return;
   }
 

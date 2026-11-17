@@ -76,6 +76,7 @@ import { useTestPipelineTemplateStore, type PipelineStageTemplateData } from '..
 import TestPackageLibrary from './TestPackageLibrary';
 import TestReportManager from './TestReportManager';
 import MonitorConfigPanel from './MonitorConfigPanel';
+import HuoyanConfigPanel, { validateHuoyanConfig } from './HuoyanConfigPanel';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import ScoreDisplay from './ScoreDisplay';
 import { getClientId } from '../../utils/clientId';
@@ -1292,6 +1293,120 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     }
   };
 
+  /** 火眼模式：把用例提交到火眼平台队列执行，蓝天只负责监控采集 */
+  const handleStartHuoyan = async () => {
+    const huoyanConfig = tab.powerTestConfig.huoyanConfig;
+    const configError = validateHuoyanConfig(huoyanConfig);
+    if (configError) {
+      message.error(configError);
+      return;
+    }
+    if (!huoyanConfig) return;
+
+    const scheduleError = validateScheduledStartAt(tab.powerTestConfig.scheduledStartAt);
+    if (scheduleError) {
+      message.error(scheduleError);
+      return;
+    }
+
+    // 目标机绑定必须完整（火眼按 role 找机器）
+    const missingBinding = (huoyanConfig.bindings || []).find((b) => !b.target_name);
+    if (missingBinding) {
+      message.error(`请为角色 "${missingBinding.role}" 选择火眼目标机`);
+      return;
+    }
+
+    // 火眼平台负责跑用例，但监控采集仍由蓝天通过 SSH 执行
+    if (!tab.isSSHConnected) {
+      message.error('请先连接目标机 SSH（火眼模式仍需要 SSH 采集监控数据）');
+      return;
+    }
+
+    // 监控命令若指定了 BMC 目标，需要统一 BMC 会话
+    const enabledMonitors = tab.powerTestConfig.monitorCommands.filter((c) => c.enabled);
+    if (enabledMonitors.some((c) => c.target === 'bmc') && !tab.powerTestConfig.globalBmcSessionId) {
+      message.error('有监控命令选择了 BMC 目标，请在 BMC 会话区域选择统一的 BMC 会话');
+      return;
+    }
+
+    clearTestResults(tab.id);
+    setIsRunningTest(tab.id, true);
+    setTestStatus(tab.id, 'testing');
+    addShellOutput(tab.id, `\n[${new Date().toLocaleTimeString()}] ====== 开始火眼任务 ======`);
+    addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 队列: ${huoyanConfig.queueId}`);
+    addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 用例: ${huoyanConfig.definitionName || huoyanConfig.definitionId}`);
+    addShellOutput(
+      tab.id,
+      `[${new Date().toLocaleTimeString()}] 参数: ${huoyanConfig.arguments.map((a) => `${a.name}=${String(a.value)}`).join(', ') || '(无)'}`,
+    );
+
+    try {
+      const globalBmcSession = tab.powerTestConfig.globalBmcSessionId
+        ? bmcSessions.find((s) => s.id === tab.powerTestConfig.globalBmcSessionId)
+        : null;
+
+      const resolvedMonitorCommands = tab.powerTestConfig.monitorCommands.map((cmd) => {
+        if (cmd.target === 'bmc' && globalBmcSession) {
+          return {
+            ...cmd,
+            bmcConfig: {
+              host: globalBmcSession.ip,
+              port: globalBmcSession.port || 22,
+              username: globalBmcSession.username,
+              password: globalBmcSession.password,
+            },
+          };
+        }
+        return { ...cmd };
+      });
+
+      const job = await startJob({
+        name: tab.powerTestConfig.jobName || `${huoyanConfig.definitionName || '火眼用例'} - ${new Date().toLocaleDateString()}`,
+        tabId: tab.id,
+        clientId: getClientId(),
+        scheduledStartAt: tab.powerTestConfig.scheduledStartAt || undefined,
+        config: {
+          // 火眼模式不部署用例包，但监控命令需要目标机的 SSH 信息
+          host: tab.sshConfig.host,
+          port: tab.sshConfig.port,
+          username: tab.sshConfig.username,
+          password: tab.sshConfig.password,
+          iterationParams: [],
+          adjustmentCommands: [],
+          monitorCommands: resolvedMonitorCommands,
+          heartbeatEnabled: tab.powerTestConfig.heartbeatEnabled,
+          heartbeatInterval: tab.powerTestConfig.heartbeatInterval,
+          heartbeatMaxFailures: tab.powerTestConfig.heartbeatMaxFailures,
+          alertWebhook: tab.powerTestConfig.alertWebhook,
+          globalBmcSessionId: tab.powerTestConfig.globalBmcSessionId,
+          huoyan: huoyanConfig,
+        },
+      });
+
+      if (job) {
+        setActiveJobId(job.id);
+        lastJobIdRef.current = job.id;
+        processedLogCountRef.current = 0;
+        lastLogSeqRef.current = -1;
+        processedResultCountRef.current = 0;
+        prevJobStatusRef.current = job.status;
+        const scheduleHint = job.scheduledStartAt
+          ? `，将于 ${new Date(job.scheduledStartAt).toLocaleString()} 自动开始`
+          : '，正在运行中';
+        addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 火眼后台任务已创建 [${job.id}]${scheduleHint}...`);
+      } else {
+        throw new Error('创建火眼后台任务失败');
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : '火眼任务执行失败';
+      message.error(errorMsg);
+      addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 错误: ${errorMsg}`);
+      setTestStatus(tab.id, 'error');
+      setIsRunningTest(tab.id, false);
+      setActiveJobId(null);
+    }
+  };
+
   const handleSaveAllStageReports = async () => {
     const jobId = lastJobIdRef.current;
     if (!jobId) {
@@ -2004,6 +2119,9 @@ echo "{\"score\": \${SCORE}}"
 
       <Row gutter={24}>
         <Col span={8}>
+          {/* 火眼模式由平台执行用例，本地迭代参数/调整命令不参与 */}
+          {tab.powerTestConfig.packageMode !== 'huoyan' && (
+          <>
           {/* 配置模板保存/加载 */}
           <Card title="配置模板" size="small" style={{ marginBottom: 16 }}>
             <Space direction="vertical" style={{ width: '100%' }}>
@@ -2331,6 +2449,8 @@ echo "{\"score\": \${SCORE}}"
             </div>
 
           </Card>
+          </>
+          )}
 
           <MonitorConfigPanel
             tabId={tab.id}
@@ -2562,16 +2682,35 @@ echo "{\"score\": \${SCORE}}"
             size="small"
           >
             <div style={{ marginBottom: 12 }}>
-              <Switch
-                checked={tab.pipelineMode}
-                onChange={(checked) => setPipelineMode(tab.id, checked)}
-                disabled={tab.isRunningTest}
-                checkedChildren="流水线模式"
-                unCheckedChildren="单阶段模式"
-              />
+              <Space size="middle">
+                <Radio.Group
+                  size="small"
+                  value={tab.powerTestConfig.packageMode || 'local'}
+                  onChange={(e) => setPowerTestConfig(tab.id, { packageMode: e.target.value })}
+                  disabled={tab.isRunningTest}
+                >
+                  <Radio.Button value="local">本地用例包</Radio.Button>
+                  <Radio.Button value="huoyan">火眼模式</Radio.Button>
+                </Radio.Group>
+                {(!tab.powerTestConfig.packageMode || tab.powerTestConfig.packageMode === 'local') && (
+                  <Switch
+                    checked={tab.pipelineMode}
+                    onChange={(checked) => setPipelineMode(tab.id, checked)}
+                    disabled={tab.isRunningTest}
+                    checkedChildren="流水线模式"
+                    unCheckedChildren="单阶段模式"
+                  />
+                )}
+              </Space>
             </div>
 
-            {tab.pipelineMode ? (
+            {tab.powerTestConfig.packageMode === 'huoyan' ? (
+              <HuoyanConfigPanel
+                value={tab.powerTestConfig.huoyanConfig}
+                onChange={(huoyanConfig) => setPowerTestConfig(tab.id, { huoyanConfig })}
+                disabled={tab.isRunningTest}
+              />
+            ) : tab.pipelineMode ? (
               <div>
                 {/* 流水线模板：保存/选择/删除 */}
                 <Card size="small" style={{ marginBottom: 12, background: '#fafafa' }}>
@@ -3201,9 +3340,17 @@ echo "{\"score\": \${SCORE}}"
                     type="primary"
                     size="large"
                     icon={<PlayCircleOutlined />}
-                    onClick={tab.pipelineMode ? handleStartPipeline : handleStartTest}
+                    onClick={
+                      tab.powerTestConfig.packageMode === 'huoyan'
+                        ? handleStartHuoyan
+                        : tab.pipelineMode
+                        ? handleStartPipeline
+                        : handleStartTest
+                    }
                   >
-                    {tab.powerTestConfig.scheduledStartAt
+                    {tab.powerTestConfig.packageMode === 'huoyan'
+                      ? (tab.powerTestConfig.scheduledStartAt ? '定时火眼任务' : '开始火眼任务')
+                      : tab.powerTestConfig.scheduledStartAt
                       ? (tab.pipelineMode ? '定时流水线测试' : '定时迭代测试')
                       : (tab.pipelineMode ? '开始流水线测试' : '开始迭代测试')}
                   </Button>
