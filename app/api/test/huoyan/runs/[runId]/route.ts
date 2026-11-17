@@ -1,6 +1,6 @@
 /** 火眼平台代理：单次运行结果 */
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchRun, HuoyanError } from '../../jobs/lib/huoyanClient';
+import { fetchRun, HuoyanError } from '../../../jobs/lib/huoyanClient';
 
 interface RouteParams {
   params: Promise<{ runId: string }>;
