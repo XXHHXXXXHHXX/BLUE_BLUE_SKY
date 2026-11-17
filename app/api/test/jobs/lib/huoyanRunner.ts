@@ -59,6 +59,15 @@ export async function runHuoyanJob(jobId: string): Promise<void> {
   }
 
   const config = job.config.huoyan;
+  // 空值参数必须省略而不是传空串：火眼的可选参数（如 _cpu_bind_seq / _use_existing_chroot）
+  // 收到 '' 会被当成真实取值，直接报「绑核序列解析出错」之类的实例化错误
+  const args = (config.arguments || []).filter((arg) => {
+    const v = arg.value;
+    if (v === null || v === undefined) return false;
+    if (typeof v === 'string') return v.trim() !== '';
+    if (Array.isArray(v)) return v.length > 0;
+    return true;
+  });
   const clientOptions = { baseUrl: config.baseUrl, clientId: `blue-sky-${jobId}` };
   const isAborted = () => !!getJob(jobId)?.abortRequested;
 
@@ -100,7 +109,7 @@ export async function runHuoyanJob(jobId: string): Promise<void> {
     addJobLog(
       jobId,
       'info',
-      `参数: ${config.arguments.map((a) => `${a.name}=${String(a.value)}`).join(', ') || '(无)'}`,
+      `参数: ${args.map((a) => `${a.name}=${String(a.value)}`).join(', ') || '(无)'}`,
     );
     addJobLog(
       jobId,
@@ -112,7 +121,7 @@ export async function runHuoyanJob(jobId: string): Promise<void> {
     addJobLog(jobId, 'info', '正在提交用例到火眼队列（prepare → commit）...');
     const appended = await appendQueueItem(clientOptions, config.queueId, {
       definitionId: config.definitionId,
-      arguments: config.arguments,
+      arguments: args,
       bindings: config.bindings,
       comment: `蓝天系统任务 ${job.name}`,
     });

@@ -10,6 +10,7 @@ import {
   appendJobResult,
   registerJobRunner,
   unregisterJobRunner,
+  isJobRunnerActive,
   requestAbortJob,
   forceSaveJobs,
   type JobConfig,
@@ -277,6 +278,12 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
   const job = getJob(jobId);
   if (!job) {
     console.error(`[JobRunner] Job ${jobId} not found`);
+    return;
+  }
+
+  // 同一任务只允许一个运行器：重复调用（页面重复提交/重试）会重复向火眼队列追加用例
+  if (isJobRunnerActive(jobId)) {
+    console.warn(`[JobRunner] Job ${jobId} 已有运行器，忽略重复启动`);
     return;
   }
 

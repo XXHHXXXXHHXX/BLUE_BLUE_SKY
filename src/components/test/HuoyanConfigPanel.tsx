@@ -171,8 +171,10 @@ const HuoyanConfigPanel: React.FC<HuoyanConfigPanelProps> = ({ value, onChange, 
   /** 切换用例时，按新用例的参数 schema 重置参数与角色绑定 */
   const handleDefinitionChange = (definitionId: string) => {
     const def = definitions.find((d) => d.definition_id === definitionId);
+    // 默认值为 null 的可选参数不提交：服务端会把空串当成真实取值
+    // （如 _cpu_bind_seq='' 会触发「绑核序列解析出错」）
     const args: HuoyanArgument[] = (def?.parameters || [])
-      .filter((p) => p.has_default)
+      .filter((p) => p.has_default && p.default !== null && p.default !== undefined)
       .map((p) => ({ name: p.name, value: coerceValue(p, defaultValueToString(p.default)) }));
     const bindings: HuoyanBinding[] = (def?.roles || []).map((role) => ({
       role,
