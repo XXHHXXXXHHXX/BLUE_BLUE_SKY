@@ -30,6 +30,7 @@ const BMCUnifiedSessionCard: React.FC<BMCUnifiedSessionCardProps> = ({ tab }) =>
 
   return (
     <Card
+      data-field-key="bmc"
       title={
         <Space>
           <SafetyOutlined />

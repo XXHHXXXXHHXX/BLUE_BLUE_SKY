@@ -80,6 +80,7 @@ import HuoyanConfigPanel, { validateHuoyanConfig } from './HuoyanConfigPanel';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import ScoreDisplay from './ScoreDisplay';
 import { getClientId } from '../../utils/clientId';
+import { highlightFields } from '../../utils/highlightField';
 import { stripMonitorSeriesSuffix } from '../../utils/monitorKeys';
 import { validateSerialMonitorConfig } from '../../types/serial';
 
@@ -728,15 +729,21 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     },
   };
 
+  /** 校验失败：提示错误并高亮闪烁需要补充的配置区域，避免用户在长配置页里找不到 */
+  const failValidation = (msg: string, fieldKeys?: string | string[]) => {
+    message.error(msg);
+    if (fieldKeys) highlightFields(Array.isArray(fieldKeys) ? fieldKeys : [fieldKeys]);
+  };
+
   const handleStartTest = async () => {
     if (!tab.isSSHConnected) {
-      message.error('请先连接SSH');
+      failValidation('请先连接SSH', 'ssh');
       return;
     }
 
     const scheduleError = validateScheduledStartAt(tab.powerTestConfig.scheduledStartAt);
     if (scheduleError) {
-      message.error(scheduleError);
+      failValidation(scheduleError, 'schedule');
       return;
     }
 
@@ -744,27 +751,27 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
 
     // 验证迭代参数
     if (iterationParams.length === 0) {
-      message.error('请至少配置一个迭代参数');
+      failValidation('请至少配置一个迭代参数', 'iteration');
       return;
     }
     for (const param of iterationParams) {
       if (!param.name.trim()) {
-        message.error('请填写所有迭代参数的名称');
+        failValidation('请填写所有迭代参数的名称', 'iteration');
         return;
       }
       if (param.mode === 'custom') {
         const validValues = (param.values || []).filter(v => v.trim() !== '');
         if (validValues.length === 0) {
-          message.error(`参数 [${param.name}] 的自定义值列表不能为空`);
+          failValidation(`参数 [${param.name}] 的自定义值列表不能为空`, 'iteration');
           return;
         }
       } else {
         if (param.step <= 0) {
-          message.error(`参数 [${param.name}] 的步长必须大于0`);
+          failValidation(`参数 [${param.name}] 的步长必须大于0`, 'iteration');
           return;
         }
         if (param.start === param.end) {
-          message.error(`参数 [${param.name}] 的起始值和终止值不能相同`);
+          failValidation(`参数 [${param.name}] 的起始值和终止值不能相同`, 'iteration');
           return;
         }
       }
@@ -773,15 +780,15 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     // 验证调整命令
     for (const cmd of adjustmentCommands) {
       if (!cmd.name.trim()) {
-        message.error('请填写所有调整命令的名称');
+        failValidation('请填写所有调整命令的名称', 'iteration');
         return;
       }
       if (!cmd.command.trim()) {
-        message.error(`调整命令 [${cmd.name}] 未填写命令内容`);
+        failValidation(`调整命令 [${cmd.name}] 未填写命令内容`, 'iteration');
         return;
       }
       if (!cmd.parameterName.trim()) {
-        message.error(`调整命令 [${cmd.name}] 未选择关联参数`);
+        failValidation(`调整命令 [${cmd.name}] 未选择关联参数`, 'iteration');
         return;
       }
     }
@@ -790,30 +797,30 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     const enabledMonitors = monitorCommands.filter(c => c.enabled);
     for (const monitor of enabledMonitors) {
       if (!monitor.name.trim()) {
-        message.error('请填写所有启用的监控命令名称');
+        failValidation('请填写所有启用的监控命令名称', 'monitor');
         return;
       }
       if (monitor.serial) {
         if (monitor.target !== 'bmc') {
-          message.error(`监控命令 [${monitor.name}] 串口模式必须使用 BMC 会话`);
+          failValidation(`监控命令 [${monitor.name}] 串口模式必须使用 BMC 会话`, ['monitor', 'bmc']);
           return;
         }
         const serialError = validateSerialMonitorConfig(monitor.serial);
         if (serialError) {
-          message.error(`监控命令 [${monitor.name}] ${serialError}`);
+          failValidation(`监控命令 [${monitor.name}] ${serialError}`, 'monitor');
           return;
         }
       } else if (monitor.continuous) {
         if (!monitor.startCommand?.trim()) {
-          message.error(`监控命令 [${monitor.name}] 持续模式已启用，请填写启动命令`);
+          failValidation(`监控命令 [${monitor.name}] 持续模式已启用，请填写启动命令`, 'monitor');
           return;
         }
         if (!monitor.fetchCommand?.trim()) {
-          message.error(`监控命令 [${monitor.name}] 持续模式已启用，请填写结束命令`);
+          failValidation(`监控命令 [${monitor.name}] 持续模式已启用，请填写结束命令`, 'monitor');
           return;
         }
       } else if (!monitor.command.trim()) {
-        message.error(`监控命令 [${monitor.name}] 未填写命令内容`);
+        failValidation(`监控命令 [${monitor.name}] 未填写命令内容`, 'monitor');
         return;
       }
     }
@@ -823,20 +830,20 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     if (logMonitor.enabled) {
       if ((logMonitor.mode || 'interval') === 'continuous') {
         if (!logMonitor.startCommand?.trim()) {
-          message.error('日志监控持续模式已启用，请填写启动命令');
+          failValidation('日志监控持续模式已启用，请填写启动命令', 'logMonitor');
           return;
         }
         if (!logMonitor.fetchCommand?.trim()) {
-          message.error('日志监控持续模式已启用，请填写获取命令');
+          failValidation('日志监控持续模式已启用，请填写获取命令', 'logMonitor');
           return;
         }
       } else {
         if (!logMonitor.command.trim()) {
-          message.error('日志监控已启用，请填写日志获取命令');
+          failValidation('日志监控已启用，请填写日志获取命令', 'logMonitor');
           return;
         }
         if (logMonitor.interval < 0.1) {
-          message.error('日志监控间隔必须大于等于0.1秒');
+          failValidation('日志监控间隔必须大于等于0.1秒', 'logMonitor');
           return;
         }
       }
@@ -850,18 +857,18 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
 
     if (hasBmcTarget) {
       if (!tab.powerTestConfig.globalBmcSessionId) {
-        message.error('有命令选择了 BMC 目标，请在 BMC 会话区域选择统一的 BMC 会话');
+        failValidation('有命令选择了 BMC 目标，请在 BMC 会话区域选择统一的 BMC 会话', 'bmc');
         return;
       }
       const globalSession = bmcSessions.find((s) => s.id === tab.powerTestConfig.globalBmcSessionId);
       if (!globalSession) {
-        message.error('统一的 BMC 会话不存在，请重新选择');
+        failValidation('统一的 BMC 会话不存在，请重新选择', 'bmc');
         return;
       }
     }
 
     if (!packageFile && !selectedLibraryPackageId) {
-      message.error('请先从用例包库选择测试包或上传测试包');
+      failValidation('请先从用例包库选择测试包或上传测试包', 'package');
       return;
     }
 
@@ -871,7 +878,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         for (const envKey of pkg.requiredEnvVars) {
           const envValue = tab.powerTestConfig.envVars.find(e => e.key === envKey)?.value;
           if (!envValue?.trim()) {
-            message.error(`用例包要求填写环境变量 "${envKey}"`);
+            failValidation(`用例包要求填写环境变量 "${envKey}"`, ['package', 'envVars']);
             return;
           }
         }
@@ -1051,29 +1058,30 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
 
   const handleStartPipeline = async () => {
     if (!tab.isSSHConnected) {
-      message.error('请先连接SSH');
+      failValidation('请先连接SSH', 'ssh');
       return;
     }
 
     const scheduleError = validateScheduledStartAt(tab.powerTestConfig.scheduledStartAt);
     if (scheduleError) {
-      message.error(scheduleError);
+      failValidation(scheduleError, 'schedule');
       return;
     }
 
     const stages = tab.pipelineStages || [];
     if (stages.length === 0) {
-      message.error('请至少添加一个流水线阶段');
+      failValidation('请至少添加一个流水线阶段', 'package');
       return;
     }
 
     for (const stage of stages) {
+      const stageKey = `stage-${stage.id}`;
       if (!stage.name.trim()) {
-        message.error('请填写所有阶段名称');
+        failValidation('请填写所有阶段名称', stageKey);
         return;
       }
       if (stage.packageSource === 'library' && !stage.packageLibraryId) {
-        message.error(`阶段 [${stage.name}] 未选择用例包`);
+        failValidation(`阶段 [${stage.name}] 未选择用例包`, stageKey);
         return;
       }
       if (stage.packageLibraryId) {
@@ -1081,7 +1089,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         if (pkg?.requiredEnvVars && pkg.requiredEnvVars.length > 0) {
           for (const envKey of pkg.requiredEnvVars) {
             if (!stage.requiredEnvVarValues?.[envKey]?.trim()) {
-              message.error(`阶段 [${stage.name}] 的用例包要求填写环境变量 "${envKey}"`);
+              failValidation(`阶段 [${stage.name}] 的用例包要求填写环境变量 "${envKey}"`, stageKey);
               return;
             }
           }
@@ -1091,32 +1099,32 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       const enabledStageMonitors = stageMonitors.filter((c) => c.enabled);
       for (const monitor of enabledStageMonitors) {
         if (!monitor.name.trim()) {
-          message.error(`阶段 [${stage.name}] 的监控命令存在空名称`);
+          failValidation(`阶段 [${stage.name}] 的监控命令存在空名称`, stageKey);
           return;
         }
         // 串口模式：校验 BMC 会话与串口命令（与单阶段校验保持一致）
         if (monitor.serial) {
           if (monitor.target !== 'bmc') {
-            message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] 串口模式必须使用 BMC 会话`);
+            failValidation(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] 串口模式必须使用 BMC 会话`, [stageKey, 'bmc']);
             return;
           }
           const serialError = validateSerialMonitorConfig(monitor.serial);
           if (serialError) {
-            message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] ${serialError}`);
+            failValidation(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] ${serialError}`, stageKey);
             return;
           }
         } else if (monitor.continuous) {
           // 持续模式：校验启动命令与结束命令
           if (!monitor.startCommand?.trim()) {
-            message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] 持续模式已启用，请填写启动命令`);
+            failValidation(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] 持续模式已启用，请填写启动命令`, stageKey);
             return;
           }
           if (!monitor.fetchCommand?.trim()) {
-            message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] 持续模式已启用，请填写结束命令`);
+            failValidation(`阶段 [${stage.name}] 的监控命令 [${monitor.name}] 持续模式已启用，请填写结束命令`, stageKey);
             return;
           }
         } else if (!monitor.command.trim()) {
-          message.error(`阶段 [${stage.name}] 的监控命令 [${monitor.name || '未命名'}] 未填写命令`);
+          failValidation(`阶段 [${stage.name}] 的监控命令 [${monitor.name || '未命名'}] 未填写命令`, stageKey);
           return;
         }
       }
@@ -1298,34 +1306,34 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     const huoyanConfig = tab.powerTestConfig.huoyanConfig;
     const configError = validateHuoyanConfig(huoyanConfig);
     if (configError) {
-      message.error(configError);
+      failValidation(configError, 'huoyan');
       return;
     }
     if (!huoyanConfig) return;
 
     const scheduleError = validateScheduledStartAt(tab.powerTestConfig.scheduledStartAt);
     if (scheduleError) {
-      message.error(scheduleError);
+      failValidation(scheduleError, 'schedule');
       return;
     }
 
     // 目标机绑定必须完整（火眼按 role 找机器）
     const missingBinding = (huoyanConfig.bindings || []).find((b) => !b.target_name);
     if (missingBinding) {
-      message.error(`请为角色 "${missingBinding.role}" 选择火眼目标机`);
+      failValidation(`请为角色 "${missingBinding.role}" 选择火眼目标机`, 'huoyan');
       return;
     }
 
     // 火眼平台负责跑用例，但监控采集仍由蓝天通过 SSH 执行
     if (!tab.isSSHConnected) {
-      message.error('请先连接目标机 SSH（火眼模式仍需要 SSH 采集监控数据）');
+      failValidation('请先连接目标机 SSH（火眼模式仍需要 SSH 采集监控数据）', 'ssh');
       return;
     }
 
     // 监控命令若指定了 BMC 目标，需要统一 BMC 会话
     const enabledMonitors = tab.powerTestConfig.monitorCommands.filter((c) => c.enabled);
     if (enabledMonitors.some((c) => c.target === 'bmc') && !tab.powerTestConfig.globalBmcSessionId) {
-      message.error('有监控命令选择了 BMC 目标，请在 BMC 会话区域选择统一的 BMC 会话');
+      failValidation('有监控命令选择了 BMC 目标，请在 BMC 会话区域选择统一的 BMC 会话', ['monitor', 'bmc']);
       return;
     }
 
@@ -2162,6 +2170,7 @@ echo "{\"score\": \${SCORE}}"
           </Card>
 
           <Card
+            data-field-key="iteration"
             title="迭代参数与调整命令"
             size="small"
             extra={
@@ -2469,7 +2478,7 @@ echo "{\"score\": \${SCORE}}"
           />
 
           {/* 心跳检测与告警配置 */}
-          <Card title="高级配置" size="small" style={{ marginTop: 16 }}>
+          <Card data-field-key="advanced" title="高级配置" size="small" style={{ marginTop: 16 }}>
             <div style={{ marginBottom: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <span style={{ fontWeight: 'bold', fontSize: 13 }}>
@@ -2542,7 +2551,7 @@ echo "{\"score\": \${SCORE}}"
             <Divider style={{ margin: '8px 0' }} />
 
             {/* 日志监控配置 */}
-            <div>
+            <div data-field-key="logMonitor">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <span style={{ fontWeight: 'bold', fontSize: 13 }}>
                   <FileTextOutlined style={{ marginRight: 6, color: '#52c41a' }} />
@@ -2670,6 +2679,7 @@ echo "{\"score\": \${SCORE}}"
 
         <Col span={16}>
           <Card
+            data-field-key="package"
             title={
               <Space>
                 <span>测试包选择</span>
@@ -2817,6 +2827,7 @@ echo "{\"score\": \${SCORE}}"
                   {(tab.pipelineStages || []).map((stage, index) => (
                     <Card
                       key={stage.id}
+                      data-field-key={`stage-${stage.id}`}
                       size="small"
                       title={
                         <Space>
@@ -3171,7 +3182,7 @@ echo "{\"score\": \${SCORE}}"
 
             {/* 环境变量配置 - 测试包选择成功后显示（流水线模式下在各自阶段内独立配置） */}
             {!tab.pipelineMode && (tab.powerTestConfig.packageFile || selectedLibraryPackageId) && (
-              <div style={{ marginTop: 16 }}>
+              <div data-field-key="envVars" style={{ marginTop: 16 }}>
                 <Divider style={{ margin: '8px 0 12px' }} />
                 <div style={{ fontWeight: 'bold', marginBottom: 8, fontSize: 14 }}>
                   <DatabaseOutlined style={{ marginRight: 6 }} />
@@ -3314,7 +3325,7 @@ echo "{\"score\": \${SCORE}}"
                         style={{ width: 300 }}
                       />
                     </Space>
-                    <Space size="small">
+                    <Space size="small" data-field-key="schedule">
                       <span style={{ fontSize: 12, color: '#666' }}>定时启动:</span>
                       <Input
                         size="small"

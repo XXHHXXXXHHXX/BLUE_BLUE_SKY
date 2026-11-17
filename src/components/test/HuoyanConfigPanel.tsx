@@ -270,6 +270,7 @@ const HuoyanConfigPanel: React.FC<HuoyanConfigPanelProps> = ({ value, onChange, 
   };
 
   return (
+    <div data-field-key="huoyan">
     <Space direction="vertical" style={{ width: '100%' }} size="small">
       {loadError && (
         <Alert
@@ -367,6 +368,7 @@ const HuoyanConfigPanel: React.FC<HuoyanConfigPanelProps> = ({ value, onChange, 
         </div>
       )}
     </Space>
+    </div>
   );
 };
 

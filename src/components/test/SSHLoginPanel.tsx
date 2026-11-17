@@ -95,7 +95,8 @@ const SSHLoginPanel: React.FC<SSHLoginPanelProps> = ({ tab }) => {
   };
 
   return (
-    <Card 
+    <Card
+      data-field-key="ssh"
       title={
         <Space>
           <DesktopOutlined />

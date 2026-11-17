@@ -766,3 +766,35 @@ html, body, #root {
   width: 100%;
   min-width: 0;
 }
+
+/* ===== 校验失败定位：高亮闪烁需要补充的配置区域 ===== */
+.field-highlight-flash {
+  animation: field-highlight-flash 0.9s ease-in-out 4;
+  border-radius: 8px;
+  outline: 2px solid #ff4d4f;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgba(255, 77, 79, 0.18);
+}
+
+@keyframes field-highlight-flash {
+  0%,
+  100% {
+    outline-color: rgba(255, 77, 79, 0.15);
+    box-shadow: 0 0 0 0 rgba(255, 77, 79, 0);
+    background-color: transparent;
+  }
+  50% {
+    outline-color: #ff4d4f;
+    box-shadow: 0 0 0 6px rgba(255, 77, 79, 0.28);
+    background-color: rgba(255, 77, 79, 0.06);
+  }
+}
+
+/* 尊重系统的减少动效偏好：只保留静态描边 */
+@media (prefers-reduced-motion: reduce) {
+  .field-highlight-flash {
+    animation: none;
+    outline-color: #ff4d4f;
+    box-shadow: 0 0 0 4px rgba(255, 77, 79, 0.18);
+  }
+}

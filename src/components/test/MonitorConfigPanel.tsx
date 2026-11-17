@@ -211,6 +211,7 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
 
   return (
     <Card
+      data-field-key="monitor"
       title={
         <Space>
           <DesktopOutlined />
