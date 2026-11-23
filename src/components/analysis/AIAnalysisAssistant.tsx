@@ -6,6 +6,7 @@ import { RobotOutlined, SendOutlined, EyeOutlined, EyeInvisibleOutlined, FolderO
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
 import ReactMarkdown from 'react-markdown';
 import ReportPicker from './ReportPicker';
+import { getClientId } from '../../utils/clientId';
 
 const { Text } = Typography;
 const { Panel } = Collapse;
@@ -113,6 +114,10 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
   );
   const listRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /** 服务端会话持久化：浏览器 clientId + 保存防抖定时器 */
+  const clientIdRef = useRef<string>('');
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const { reports, fetchReports } = useTestReportStore();
 
   const activeSession = useMemo(
@@ -148,6 +153,74 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
       fetchReports();
     }
   }, [open, fetchReports]);
+
+  /** 首次打开抽屉时从服务端拉取该浏览器的历史会话 */
+  useEffect(() => {
+    if (!open || sessionsLoaded) return;
+    const clientId = getClientId();
+    clientIdRef.current = clientId;
+    if (!clientId) {
+      setSessionsLoaded(true);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/ai/sessions', {
+          headers: { 'x-client-id': clientId },
+        });
+        const data = (await res.json()) as { success?: boolean; sessions?: ChatSession[] };
+        if (cancelled) return;
+        if (data.success && Array.isArray(data.sessions) && data.sessions.length > 0) {
+          const restored = data.sessions.map((s) => ({
+            ...s,
+            // 流式态不落库，恢复时统一置为已完成
+            messages: (s.messages || []).map((m) => ({ ...m, loading: false })),
+          }));
+          setSessions(restored);
+          setActiveSessionId(restored[0].id);
+        }
+      } catch (err) {
+        console.error('加载 AI 会话失败:', err);
+      } finally {
+        if (!cancelled) setSessionsLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, sessionsLoaded]);
+
+  /** 会话变化后防抖保存当前会话到服务端 */
+  useEffect(() => {
+    if (!sessionsLoaded) return;
+    const clientId = clientIdRef.current || getClientId();
+    if (!clientId) return;
+    const session = sessions.find((s) => s.id === activeSessionId);
+    if (!session) return;
+    // 全新的空会话不落库，避免服务端堆积空壳
+    if (session.messages.length === 0 && session.title === '新会话') return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      // 流式中的 loading 标记不落库
+      const payload = {
+        ...session,
+        messages: session.messages.map((m) => {
+          const copy = { ...m };
+          delete copy.loading;
+          return copy;
+        }),
+      };
+      fetch('/api/ai/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-client-id': clientId },
+        body: JSON.stringify({ session: payload }),
+      }).catch((err) => console.error('保存 AI 会话失败:', err));
+    }, 800);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [sessions, activeSessionId, sessionsLoaded]);
 
   useEffect(() => {
     if (listRef.current) {
@@ -188,6 +261,12 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
   const handleDeleteSession = useCallback(
     (id: string, e: React.MouseEvent) => {
       e.stopPropagation();
+      const clientId = clientIdRef.current || getClientId();
+      if (clientId) {
+        fetch(`/api/ai/sessions?clientId=${encodeURIComponent(clientId)}&sessionId=${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+        }).catch((err) => console.error('删除 AI 会话失败:', err));
+      }
       setSessions((prev) => {
         let next = prev.filter((s) => s.id !== id);
         if (next.length === 0) {

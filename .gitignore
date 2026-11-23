@@ -12,6 +12,9 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
 
 # Editor directories and files
 .vscode/*
@@ -42,6 +45,7 @@ tsconfig.tsbuildinfo
 .data/logs/
 .data/records/
 .data/serial-parse-templates.json
+.data/ai-sessions.json
 
 # codegraph index cache
 .codegraph/
