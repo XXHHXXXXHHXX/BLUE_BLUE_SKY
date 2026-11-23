@@ -22,9 +22,9 @@ import {
   FilterOutlined,
   FolderOpenOutlined,
 } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
 import ReportPicker from './ReportPicker';
+import AutoResizeChart from './AutoResizeChart';
 import {
   buildXYChartOption,
   computeXYChart,
@@ -495,7 +495,7 @@ const CustomXYChartPanel: React.FC<CustomXYChartPanelProps> = ({
         <Col xs={24} lg={16}>
           <Card title="XY 关系图" size="small" style={{ height: '100%' }}>
             {chartOption ? (
-              <ReactECharts option={chartOption} style={{ height: 620 }} notMerge />
+              <AutoResizeChart option={chartOption} height={620} />
             ) : (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}

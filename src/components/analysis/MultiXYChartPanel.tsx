@@ -11,9 +11,9 @@ import {
   SettingOutlined,
 } from '@ant-design/icons';
 import { Responsive, WidthProvider, type Layout, type Layouts } from 'react-grid-layout';
-import ReactECharts from 'echarts-for-react';
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
 import CustomXYChartPanel from './CustomXYChartPanel';
+import AutoResizeChart from './AutoResizeChart';
 import {
   buildMergedXYChartOption,
   computeXYChart,
@@ -82,10 +82,16 @@ const MultiXYChartPanel: React.FC = () => {
     fetchReports();
   }, [fetchReports]);
 
-  // 图表组变化时重建纵向布局
-  useEffect(() => {
-    setLayouts(createLayouts(groups));
-  }, [groups]);
+  /** 同步更新图表组与布局
+   *
+   * 必须同时更新：如果只在 useEffect 里重建布局，新拆出的图表会先以
+   * 「没有布局项」的状态渲染一帧，卡片宽度为 0，ECharts 会按 0 宽度初始化，
+   * 导致 X/Y 轴全挤在一条线上。
+   */
+  const applyGroups = useCallback((next: ChartGroup[]) => {
+    setGroups(next);
+    setLayouts(createLayouts(next));
+  }, []);
 
   const reportMap = useMemo(() => new Map(reports.map((r) => [r.id, r])), [reports]);
 
@@ -101,24 +107,26 @@ const MultiXYChartPanel: React.FC = () => {
     [reportMap],
   );
 
-  const addPanel = () => setGroups(appendGroup);
+  const addPanel = () => applyGroups(appendGroup(groups));
 
-  const removeGroup = (groupId: string) => setGroups((prev) => removeGroupFromList(prev, groupId));
+  const removeGroup = (groupId: string) => applyGroups(removeGroupFromList(groups, groupId));
 
   const updateGroupConfig = (groupId: string, index: number, config: XYChartConfig) =>
-    setGroups((prev) => updateMemberConfig(prev, groupId, index, config));
+    applyGroups(updateMemberConfig(groups, groupId, index, config));
 
   /** 把某个成员从合并组里拆出来，单独成为一个图表 */
   const splitMember = (groupId: string, index: number) =>
-    setGroups((prev) => splitMemberFromList(prev, groupId, index));
+    applyGroups(splitMemberFromList(groups, groupId, index));
 
   /** 把合并组全部拆开，每个成员各成一张图 */
-  const splitAll = (groupId: string) => setGroups((prev) => splitAllFromList(prev, groupId));
+  const splitAll = (groupId: string) => applyGroups(splitAllFromList(groups, groupId));
 
   /** 把 sourceGroupId 合并进 targetGroupId */
-  const mergeGroups = useCallback((sourceGroupId: string, targetGroupId: string) => {
-    setGroups((prev) => mergeGroupList(prev, sourceGroupId, targetGroupId));
-  }, []);
+  const mergeGroups = useCallback(
+    (sourceGroupId: string, targetGroupId: string) =>
+      applyGroups(mergeGroupList(groups, sourceGroupId, targetGroupId)),
+    [applyGroups, groups],
+  );
 
   /** 找到被拖拽图表压住的其它图表组（拖拽合并的判定依据）
    *
@@ -364,7 +372,7 @@ const MergedChartView: React.FC<MergedChartViewProps> = ({
       </Space>
 
       {option ? (
-        <ReactECharts option={option} style={{ height: 620 }} notMerge />
+        <AutoResizeChart option={option} height={620} />
       ) : (
         <div style={{ color: '#999', textAlign: 'center', paddingTop: 80 }}>
           {hasData ? '合并图表暂无可绘制数据' : '组内图表尚未配置 X/Y 轴数据'}
