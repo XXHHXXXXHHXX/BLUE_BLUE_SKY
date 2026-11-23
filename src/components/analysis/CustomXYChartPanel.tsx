@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   Select,
@@ -24,7 +24,8 @@ import {
 } from '@ant-design/icons';
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
 import ReportPicker from './ReportPicker';
-import AutoResizeChart from './AutoResizeChart';
+import AutoResizeChart, { type AutoResizeChartHandle } from './AutoResizeChart';
+import ChartExportActions from './ChartExportActions';
 import {
   buildXYChartOption,
   computeXYChart,
@@ -54,6 +55,8 @@ const CustomXYChartPanel: React.FC<CustomXYChartPanelProps> = ({
   const { reports, fetchReports } = useTestReportStore();
   const [innerConfig, setInnerConfig] = useState<XYChartConfig>(createDefaultXYChartConfig);
   const [pickerOpen, setPickerOpen] = useState(false);
+  /** 图表实例句柄：供保存快照 / 导出 Excel 取图 */
+  const chartRef = useRef<AutoResizeChartHandle>(null);
 
   const isControlled = controlledConfig !== undefined;
   const config = isControlled ? controlledConfig! : innerConfig;
@@ -130,6 +133,48 @@ const CustomXYChartPanel: React.FC<CustomXYChartPanelProps> = ({
       group: groupBy ? String(getSeriesValue(p.raw, groupBy, seriesOptions) ?? '未分组') : '',
     }));
   }, [computed.points, config.groupByKey, seriesOptions]);
+
+  const exportTitle = useMemo(() => {
+    if (!computed.ready) return 'XY 图表';
+    const base = `${computed.yLabel} vs ${computed.xLabel}`;
+    return selectedReport ? `${selectedReport.name} · ${base}` : base;
+  }, [computed.ready, computed.xLabel, computed.yLabel, selectedReport]);
+
+  /** Excel 数据表：与页面「数据明细」保持一致 */
+  const exportColumns = useMemo(
+    () => ['迭代', '迭代参数', computed.xLabel || 'X', computed.yLabel || 'Y', '分组'],
+    [computed.xLabel, computed.yLabel],
+  );
+
+  const exportRows = useMemo(
+    () =>
+      tableData.map((row) => [
+        row.iteration,
+        row.label,
+        row.x,
+        row.y,
+        row.group || '',
+      ] as Array<string | number | null>),
+    [tableData],
+  );
+
+  const exportNotes = useMemo(() => {
+    const notes = [`X 轴：${computed.xLabel}`, `Y 轴：${computed.yLabel}`];
+    notes.push(`图表类型：${config.chartType === 'line' ? '折线图' : '散点图'}`);
+    if (config.chartType === 'scatter' && config.showTrendline) {
+      const trendLabel =
+        config.trendType === 'poly' ? `${config.polyOrder} 次多项式拟合`
+        : config.trendType === 'exp' ? '指数拟合'
+        : '线性拟合';
+      notes.push(`趋势线：${trendLabel}`);
+    }
+    if (config.groupByKey) {
+      const groupSeries = seriesOptions.find((s) => s.key === config.groupByKey);
+      if (groupSeries) notes.push(`分组维度：${groupSeries.label}`);
+    }
+    notes.push(`数据点：${computed.points.length} 个`);
+    return notes;
+  }, [computed.xLabel, computed.yLabel, computed.points.length, config, seriesOptions]);
 
   return (
     <div>
@@ -493,9 +538,24 @@ const CustomXYChartPanel: React.FC<CustomXYChartPanelProps> = ({
         </Col>
 
         <Col xs={24} lg={16}>
-          <Card title="XY 关系图" size="small" style={{ height: '100%' }}>
+          <Card
+            title="XY 关系图"
+            size="small"
+            style={{ height: '100%' }}
+            extra={
+              chartOption ? (
+                <ChartExportActions
+                  chartRef={chartRef}
+                  title={exportTitle}
+                  columns={exportColumns}
+                  rows={exportRows}
+                  notes={exportNotes}
+                />
+              ) : undefined
+            }
+          >
             {chartOption ? (
-              <AutoResizeChart option={chartOption} height={620} />
+              <AutoResizeChart ref={chartRef} option={chartOption} height={620} />
             ) : (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}

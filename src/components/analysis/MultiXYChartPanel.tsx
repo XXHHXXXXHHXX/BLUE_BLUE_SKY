@@ -13,7 +13,8 @@ import {
 import { Responsive, WidthProvider, type Layout, type Layouts } from 'react-grid-layout';
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
 import CustomXYChartPanel from './CustomXYChartPanel';
-import AutoResizeChart from './AutoResizeChart';
+import AutoResizeChart, { type AutoResizeChartHandle } from './AutoResizeChart';
+import ChartExportActions from './ChartExportActions';
 import {
   buildMergedXYChartOption,
   computeXYChart,
@@ -334,6 +335,33 @@ const MergedChartView: React.FC<MergedChartViewProps> = ({
 
   const option = useMemo(() => buildMergedXYChartOption(members), [members]);
   const hasData = members.some((m) => m.computed.points.length > 0);
+  /** 图表实例句柄：供保存快照 / 导出 Excel 取图 */
+  const chartRef = useRef<AutoResizeChartHandle>(null);
+
+  const exportTitle = `合并图表 #${groupIndex + 1}（${members.length} 张）`;
+
+  /** 合并图的数据表：每张成员图表各自一组数据，用「图表」列区分 */
+  const exportColumns = ['图表', '迭代', '迭代参数', 'X', 'Y'];
+
+  const exportRows = useMemo(() => {
+    const rows: Array<Array<string | number | null>> = [];
+    members.forEach((m) => {
+      m.computed.points.forEach((p) => {
+        rows.push([m.title, p.iteration, p.label, p.x, p.y]);
+      });
+    });
+    return rows;
+  }, [members]);
+
+  const exportNotes = useMemo(() => {
+    const notes: string[] = [`合并图表成员：${members.length} 张`];
+    members.forEach((m) => {
+      notes.push(
+        `${m.title} —— X 轴：${m.computed.xLabel}，Y 轴：${m.computed.yLabel}，数据点 ${m.computed.points.length} 个`,
+      );
+    });
+    return notes;
+  }, [members]);
 
   return (
     <div>
@@ -372,7 +400,18 @@ const MergedChartView: React.FC<MergedChartViewProps> = ({
       </Space>
 
       {option ? (
-        <AutoResizeChart option={option} height={620} />
+        <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+            <ChartExportActions
+              chartRef={chartRef}
+              title={exportTitle}
+              columns={exportColumns}
+              rows={exportRows}
+              notes={exportNotes}
+            />
+          </div>
+          <AutoResizeChart ref={chartRef} option={option} height={620} />
+        </>
       ) : (
         <div style={{ color: '#999', textAlign: 'center', paddingTop: 80 }}>
           {hasData ? '合并图表暂无可绘制数据' : '组内图表尚未配置 X/Y 轴数据'}
