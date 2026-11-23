@@ -2,10 +2,11 @@
 
 import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import { Drawer, Input, Button, Space, FloatButton, List, Card, Typography, Tag, Collapse, Alert } from 'antd';
-import { RobotOutlined, SendOutlined, EyeOutlined, EyeInvisibleOutlined, FolderOpenOutlined, FileExcelOutlined, FilePptOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { RobotOutlined, SendOutlined, EyeOutlined, EyeInvisibleOutlined, FolderOpenOutlined, FileExcelOutlined, FilePptOutlined, PlusOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
 import ReactMarkdown from 'react-markdown';
 import ReportPicker from './ReportPicker';
+import AIPluginPanel from './AIPluginPanel';
 import { getClientId } from '../../utils/clientId';
 
 const { Text } = Typography;
@@ -109,6 +110,7 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pluginPanelOpen, setPluginPanelOpen] = useState(false);
   const [selectedReportIds, setSelectedReportIds] = useState<string[]>(
     externalSelectedReportIds ?? (selectedReportId ? [selectedReportId] : [])
   );
@@ -411,7 +413,7 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
       const res = await fetch('/api/ai/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: bodyMessages }),
+        body: JSON.stringify({ messages: bodyMessages, clientId: clientIdRef.current || getClientId() }),
         signal: controller.signal,
       });
 
@@ -828,6 +830,13 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
                 >
                   {showTrace ? '隐藏交互过程' : '显示交互过程'}
                 </Button>
+                <Button
+                  size="small"
+                  icon={<ApiOutlined />}
+                  onClick={() => setPluginPanelOpen(true)}
+                >
+                  插件
+                </Button>
               </Space>
             </div>
 
@@ -888,6 +897,8 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
           </div>
         </div>
       </Drawer>
+
+      <AIPluginPanel open={pluginPanelOpen} onClose={() => setPluginPanelOpen(false)} />
     </>
   );
 };

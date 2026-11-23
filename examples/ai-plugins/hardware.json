@@ -1,0 +1,54 @@
+{
+  "id": "example.hardware",
+  "name": "硬件规格查询（示例）",
+  "description": "演示如何用 JSON 声明一个 HTTP 工具插件。复制到 .data/ai-plugins/ 后即可在 AI 助手中使用。",
+  "promptHint": "当用户询问机器硬件规格时，可调用 getCpuSpec 查询。",
+  "tools": [
+    {
+      "name": "getCpuSpec",
+      "description": "查询测试机的 CPU 型号、核心数与 TDP",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "目标主机 IP，可选"
+          }
+        },
+        "required": []
+      },
+      "request": {
+        "url": "http://127.0.0.1:8080/api/hardware/cpu?host={{host}}",
+        "method": "GET",
+        "headers": {
+          "Authorization": "Bearer {{env.HARDWARE_API_KEY}}"
+        },
+        "timeoutMs": 15000
+      },
+      "responsePath": "data"
+    },
+    {
+      "name": "postDiagnosis",
+      "description": "把一段诊断请求提交给外部诊断服务（演示 POST 与请求体模板）",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "reportId": { "type": "string", "description": "报告 ID" },
+          "question": { "type": "string", "description": "要诊断的问题" }
+        },
+        "required": ["reportId", "question"]
+      },
+      "request": {
+        "url": "http://127.0.0.1:8080/api/diagnose",
+        "method": "POST",
+        "headers": { "Content-Type": "application/json" },
+        "body": {
+          "report_id": "{{reportId}}",
+          "question": "{{question}}",
+          "source": "blue-sky-ai"
+        },
+        "timeoutMs": 30000
+      }
+    }
+  ]
+}

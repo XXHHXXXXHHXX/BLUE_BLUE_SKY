@@ -46,6 +46,8 @@ tsconfig.tsbuildinfo
 .data/records/
 .data/serial-parse-templates.json
 .data/ai-sessions.json
+.data/ai-plugins/
+.data/ai-plugin-state.json
 
 # codegraph index cache
 .codegraph/
