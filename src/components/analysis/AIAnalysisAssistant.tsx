@@ -8,6 +8,7 @@ import ReactMarkdown from 'react-markdown';
 import ReportPicker from './ReportPicker';
 import AIPluginPanel from './AIPluginPanel';
 import { getClientId } from '../../utils/clientId';
+import { useAiContextStore } from '../../stores/aiContextStore';
 
 const { Text } = Typography;
 const { Panel } = Collapse;
@@ -97,11 +98,14 @@ function createSession(): ChatSession {
 interface AIAnalysisAssistantProps {
   selectedReportId?: string;
   selectedReportIds?: string[];
+  /** 当前页面路径，仅用于在提示中说明所处页面 */
+  pageContext?: string;
 }
 
 const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
   selectedReportId,
   selectedReportIds: externalSelectedReportIds,
+  pageContext,
 }) => {
   const [open, setOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>(() => [createSession()]);
@@ -121,6 +125,17 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const { reports, fetchReports } = useTestReportStore();
+  /** 页面写入的选中报告（全局挂载后不再由 props 传递） */
+  const contextReportIds = useAiContextStore((s) => s.selectedReportIds);
+  /** 页面写入的当前拓扑（拓扑监控/设计页） */
+  const contextTopologyId = useAiContextStore((s) => s.selectedTopologyId);
+
+  // 页面选中报告变化时同步到本地选择（用户也可在抽屉内自行改选）
+  useEffect(() => {
+    if (contextReportIds.length > 0) {
+      setSelectedReportIds(contextReportIds);
+    }
+  }, [contextReportIds]);
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId) || sessions[0] || createSession(),
@@ -231,7 +246,10 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
   }, [messages, isLoading]);
 
   useEffect(() => {
-    setSelectedReportIds(externalSelectedReportIds ?? (selectedReportId ? [selectedReportId] : []));
+    // 仅在显式传入 props 时覆盖；全局挂载下选择由 aiContextStore 驱动
+    if (externalSelectedReportIds || selectedReportId) {
+      setSelectedReportIds(externalSelectedReportIds ?? (selectedReportId ? [selectedReportId] : []));
+    }
   }, [externalSelectedReportIds, selectedReportId]);
 
   const selectedReports = useMemo(
@@ -403,9 +421,17 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
             .join('\n')}\n请优先基于这些报告回答，如需更详细数据可调用 getReportDetail。`
         : '';
 
+      const pageContextHint = [
+        pageContext ? `当前页面：${pageContext}` : '',
+        contextTopologyId ? `当前拓扑ID：${contextTopologyId}` : '',
+      ]
+        .filter(Boolean)
+        .join('；');
+      const contextHint = pageContextHint ? `\n\n（${pageContextHint}）` : '';
+
       const bodyMessages = chatMessages.map((m, idx) => {
         if (idx === chatMessages.length - 1 && m.role === 'user') {
-          return { ...m, content: m.content + selectedReportsContext };
+          return { ...m, content: m.content + selectedReportsContext + contextHint };
         }
         return m;
       });

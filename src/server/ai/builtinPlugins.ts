@@ -22,6 +22,8 @@ import {
   summarizeReport,
 } from './reportTools';
 import type { AiPlugin } from './pluginTypes';
+import { topologyPlugin } from './topologyPlugin';
+import { testPlugin } from './testPlugin';
 
 /** 报告查询插件 */
 const reportQueryPlugin: AiPlugin = {
@@ -207,4 +209,6 @@ export const BUILTIN_PLUGINS: AiPlugin[] = [
   webPlugin,
   utilityPlugin,
   exportPlugin,
+  topologyPlugin,
+  testPlugin,
 ];

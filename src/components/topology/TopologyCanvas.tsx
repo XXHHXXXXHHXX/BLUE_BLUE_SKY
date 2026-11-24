@@ -21,6 +21,7 @@ import CPUPowerDomain from '../panels/CPUPowerDomain';
 import TopologyOverviewPanel from '../panels/TopologyOverviewPanel';
 import { useTopologyStore } from '../../stores/topologyStore';
 import { useMonitorStore } from '../../stores/monitorStore';
+import { useAiContextStore } from '../../stores/aiContextStore';
 import { calculateAggregatorStats, AGGREGATOR_NODE_TYPE } from '../../services/lossCalculation';
 import { collectLinkedViews, collectFoldedViewIds } from '../../utils/linkedViews';
 import type { TopologyNode } from '../../types/topology';
@@ -37,7 +38,16 @@ const TopologyCanvas: React.FC = () => {
     onEdgesChange,
     setSelectedNodeIds,
     nodeScales,
+    currentTopologyId,
   } = useTopologyStore();
+
+  // 把当前拓扑同步给全局 AI 助手，作为对话上下文
+  const setContextTopologyId = useAiContextStore((s) => s.setSelectedTopologyId);
+  useEffect(() => {
+    setContextTopologyId(currentTopologyId);
+  }, [currentTopologyId, setContextTopologyId]);
+  // 离开页面时清空，避免其他页面误用旧拓扑
+  useEffect(() => () => setContextTopologyId(null), [setContextTopologyId]);
 
   // 从 monitorStore 获取监控状态
   const { isPolling } = useMonitorStore();

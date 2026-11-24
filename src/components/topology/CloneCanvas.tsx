@@ -20,6 +20,7 @@ import CloneNodeDetailPanel from '../panels/CloneNodeDetailPanel';
 import CloneTopologyOverviewPanel from '../panels/CloneTopologyOverviewPanel';
 import CPUPowerDomain from '../panels/CPUPowerDomain';
 import { useCloneTopologyStore, initCloneStore, loadCloneTopologyId } from '../../stores/cloneTopologyStore';
+import { useAiContextStore } from '../../stores/aiContextStore';
 import { calculateAggregatorStats, AGGREGATOR_NODE_TYPE } from '../../services/lossCalculation';
 import { collectLinkedViews, collectFoldedViewIds } from '../../utils/linkedViews';
 import type { TopologyNode } from '../../types/topology';
@@ -48,7 +49,16 @@ const CloneCanvas: React.FC<CloneCanvasProps> = ({ initialTopologyId }) => {
     loadTopologiesList,
     switchTopology,
     nodeScales,
+    currentTopologyId,
   } = useCloneTopologyStore();
+
+  // 把当前拓扑同步给全局 AI 助手，作为对话上下文
+  const setContextTopologyId = useAiContextStore((s) => s.setSelectedTopologyId);
+  useEffect(() => {
+    setContextTopologyId(currentTopologyId);
+  }, [currentTopologyId, setContextTopologyId]);
+  // 离开页面时清空，避免其他页面误用旧拓扑
+  useEffect(() => () => setContextTopologyId(null), [setContextTopologyId]);
 
   // 监控状态现在存储在 sessionStorage 中，每个标签页独立
 

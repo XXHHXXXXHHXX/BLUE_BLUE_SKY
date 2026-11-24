@@ -34,7 +34,7 @@ import { useTestReportStore, type TestReport } from '../../stores/testReportStor
 import { collectScoreNames } from '../../utils/scoreParsing';
 import BaselineComparisonPanel from './BaselineComparisonPanel';
 import MultiXYChartPanel from './MultiXYChartPanel';
-import AIAnalysisAssistant from './AIAnalysisAssistant';
+import { useAiContextStore } from '../../stores/aiContextStore';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -93,6 +93,13 @@ const DataAnalysisPanel: React.FC = () => {
   useEffect(() => {
     fetchReports();
   }, [fetchReports]);
+
+  // 把当前选中的报告同步给全局 AI 助手，作为对话上下文；离开页面时清空避免残留
+  const setContextReportIds = useAiContextStore((s) => s.setSelectedReportIds);
+  useEffect(() => {
+    setContextReportIds(selectedReportId ? [selectedReportId] : []);
+  }, [selectedReportId, setContextReportIds]);
+  useEffect(() => () => setContextReportIds([]), [setContextReportIds]);
 
   const allReports = useMemo(() => {
     return [...reports].sort(
@@ -708,7 +715,6 @@ const DataAnalysisPanel: React.FC = () => {
           },
         ]}
       />
-      <AIAnalysisAssistant selectedReportId={selectedReportId} />
     </div>
   );
 };

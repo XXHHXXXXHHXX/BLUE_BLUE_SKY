@@ -25,6 +25,7 @@ import ModulePalette from './ModulePalette';
 import IconPicker from './IconPicker';
 import NodeEditPanel from './NodeEditPanel';
 import { useDesignTopologyStore } from '../../stores/designTopologyStore';
+import { useAiContextStore } from '../../stores/aiContextStore';
 import { calculateEdgeLosses, calculateAggregatorStats } from '../../services/lossCalculation';
 import { collectLinkedViews } from '../../utils/linkedViews';
 import { useAlignmentGuides } from './useAlignmentGuides';
@@ -58,7 +59,16 @@ const DesignCanvasInner: React.FC = () => {
     toggleEdgeLossEnabled,
     nodeScales,
     setNodeScale,
+    currentTopologyId,
   } = useDesignTopologyStore();
+
+  // 把当前拓扑同步给全局 AI 助手，作为对话上下文
+  const setContextTopologyId = useAiContextStore((s) => s.setSelectedTopologyId);
+  useEffect(() => {
+    setContextTopologyId(currentTopologyId);
+  }, [currentTopologyId, setContextTopologyId]);
+  // 离开页面时清空，避免其他页面误用旧拓扑
+  useEffect(() => () => setContextTopologyId(null), [setContextTopologyId]);
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, flowToScreenPosition } = useReactFlow();
