@@ -40,7 +40,10 @@ export function jsonSchemaToZod(node: JsonSchemaNode | undefined): z.ZodTypeAny 
     }
     // 非字符串枚举：用 union of literals
     const literals = node.enum.map((v) => z.literal(v as string | number | boolean));
-    const union = literals.length === 1 ? literals[0] : z.union(literals as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
+    const union =
+      literals.length === 1
+        ? literals[0]
+        : z.union([literals[0], literals[1], ...literals.slice(2)]);
     return applyMeta(union, node);
   }
 

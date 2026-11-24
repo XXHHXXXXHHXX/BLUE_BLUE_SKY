@@ -51,11 +51,14 @@ export async function POST(request: NextRequest) {
     if (skipped.length > 0) {
       console.warn('[AI Agent] 部分插件工具被跳过:', skipped);
     }
-    // 插件工具的参数 schema 是运行时动态的（z.ZodTypeAny / JSON Schema 转换结果），
-    // 无法让 TS 推断出具体输入类型，这里用宽松类型承载，交给 SDK 运行时校验
+    // 插件工具的参数 schema 是运行时动态的（zod v4 的 ZodTypeAny / JSON Schema 转换结果），
+    // 而 ai SDK 的 tool() 类型签名按固定 schema 推断输入类型，二者无法静态对齐。
+    // 这里整体断言为 any，输入校验交给 SDK 运行时完成（schema 仍是真实的 zod 对象）。
     const tools: Record<string, any> = {};
     for (const spec of toolSpecs) {
-      tools[spec.name] = tool({
+      // 先把参数对象声明为 any 再传入 tool()：否则 TS 会先按 tool() 的泛型重载
+      // 去匹配字面量，动态 schema 推断成 never 后重载全部失败
+      const toolOptions: any = {
         description: spec.description,
         inputSchema: spec.inputSchema,
         execute: async (args: Record<string, unknown>) => {
@@ -68,7 +71,8 @@ export async function POST(request: NextRequest) {
             return { error: msg };
           }
         },
-      });
+      };
+      tools[spec.name] = tool(toolOptions);
     }
 
     const system = [BASE_SYSTEM_PROMPT, ...promptHints].join('\n');
