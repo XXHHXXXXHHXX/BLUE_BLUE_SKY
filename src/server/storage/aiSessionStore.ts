@@ -29,6 +29,18 @@ export interface AiChatMessage {
   logs?: unknown[];
   attachments?: Array<{ type: 'excel' | 'ppt'; url: string; fileName: string }>;
   error?: string;
+  /** 待用户确认的写操作（刷新后仍需可继续处理，必须落库） */
+  pendingApprovals?: Array<{
+    approvalId: string;
+    toolCallId: string;
+    toolName: string;
+    input?: unknown;
+    reason?: string;
+  }>;
+  /** 本轮 assistant 的内容块（审批续跑时回传给模型） */
+  rawParts?: Array<Record<string, unknown>>;
+  /** 本轮发给模型的消息历史（审批续跑时作为前缀） */
+  apiMessages?: Array<{ role: string; content: unknown }>;
 }
 
 export interface AiChatSession {

@@ -117,6 +117,30 @@ interface ChatSession {
   updatedAt: number;
 }
 
+/** 恢复单条消息：清理流式态，并校验待审批是否仍可续跑
+ *
+ * 续跑需要 apiMessages + rawParts（含 tool-call 与 approval-request）。
+ * 缺任一项时该审批无法回传，降级为提示文案，避免用户点了「允许」却报错。
+ */
+function restoreMessage(m: ChatMessage): ChatMessage {
+  const restored: ChatMessage = { ...m, loading: false };
+  const pending = restored.pendingApprovals;
+  if (!pending || pending.length === 0) return restored;
+
+  const hasToolCall = (restored.rawParts || []).some((p) => p.type === 'tool-call');
+  const hasRequest = (restored.rawParts || []).some((p) => p.type === 'tool-approval-request');
+  const resumable = hasToolCall && hasRequest && (restored.apiMessages?.length ?? 0) > 0;
+  if (resumable) return restored;
+
+  const names = pending.map((p) => p.toolName).join('、');
+  const notice = `（上次会话中断，未完成的确认已失效：${names}。如需执行请重新发起请求。）`;
+  return {
+    ...restored,
+    pendingApprovals: [],
+    content: restored.content ? `${restored.content}\n\n${notice}` : notice,
+  };
+}
+
 function createSession(): ChatSession {
   return {
     id: `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -160,6 +184,8 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
   /** 服务端会话持久化：浏览器 clientId + 保存防抖定时器 */
   const clientIdRef = useRef<string>('');
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 待保存的会话（防抖被冲刷时使用最新值，避免闭包过期） */
+  const pendingSaveRef = useRef<ChatSession | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const { reports, fetchReports } = useTestReportStore();
   /** 页面写入的选中报告（全局挂载后不再由 props 传递） */
@@ -229,7 +255,7 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
           const restored = data.sessions.map((s) => ({
             ...s,
             // 流式态不落库，恢复时统一置为已完成
-            messages: (s.messages || []).map((m) => ({ ...m, loading: false })),
+            messages: (s.messages || []).map((m) => restoreMessage(m)),
           }));
           setSessions(restored);
           setActiveSessionId(restored[0].id);
@@ -245,6 +271,34 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
     };
   }, [open, sessionsLoaded]);
 
+  /** 立即把会话写入服务端（供防抖到期、审批出现、页面隐藏时调用） */
+  const flushSave = useCallback((session: ChatSession | null) => {
+    if (!session) return;
+    const clientId = clientIdRef.current || getClientId();
+    if (!clientId) return;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    pendingSaveRef.current = null;
+    // 流式中的 loading 标记不落库
+    const payload = {
+      ...session,
+      messages: session.messages.map((m) => {
+        const copy = { ...m };
+        delete copy.loading;
+        return copy;
+      }),
+    };
+    fetch('/api/ai/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-client-id': clientId },
+      body: JSON.stringify({ session: payload }),
+      // 页面正在卸载时也要尽量送达
+      keepalive: true,
+    }).catch((err) => console.error('保存 AI 会话失败:', err));
+  }, []);
+
   /** 会话变化后防抖保存当前会话到服务端 */
   useEffect(() => {
     if (!sessionsLoaded) return;
@@ -254,27 +308,41 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
     if (!session) return;
     // 全新的空会话不落库，避免服务端堆积空壳
     if (session.messages.length === 0 && session.title === '新会话') return;
+    pendingSaveRef.current = session;
+    // 有待确认的审批时立即保存：刷新后仍能继续处理，不能被防抖吞掉
+    const hasPendingApproval = session.messages.some(
+      (m) => (m.pendingApprovals?.length ?? 0) > 0,
+    );
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    if (hasPendingApproval) {
+      flushSave(session);
+      return;
+    }
     saveTimerRef.current = setTimeout(() => {
-      // 流式中的 loading 标记不落库
-      const payload = {
-        ...session,
-        messages: session.messages.map((m) => {
-          const copy = { ...m };
-          delete copy.loading;
-          return copy;
-        }),
-      };
-      fetch('/api/ai/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-client-id': clientId },
-        body: JSON.stringify({ session: payload }),
-      }).catch((err) => console.error('保存 AI 会话失败:', err));
+      saveTimerRef.current = null;
+      flushSave(pendingSaveRef.current);
     }, 800);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [sessions, activeSessionId, sessionsLoaded]);
+  }, [sessions, activeSessionId, sessionsLoaded, flushSave]);
+
+  /** 页面隐藏/卸载前冲刷未保存的会话，避免审批卡片丢失 */
+  useEffect(() => {
+    const handleFlush = () => {
+      if (pendingSaveRef.current) flushSave(pendingSaveRef.current);
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') handleFlush();
+    };
+    window.addEventListener('pagehide', handleFlush);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('pagehide', handleFlush);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      handleFlush();
+    };
+  }, [flushSave]);
 
   useEffect(() => {
     if (listRef.current) {
