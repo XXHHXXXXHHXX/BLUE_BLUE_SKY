@@ -138,6 +138,10 @@ export interface PipelineStage {
   status?: 'pending' | 'running' | 'completed' | 'error' | 'skipped';
   /** 用例包要求的必填环境变量及其当前填写值 */
   requiredEnvVarValues?: Record<string, string>;
+  /** 该阶段执行模式：local=本地用例包（默认），huoyan=提交到火眼平台 */
+  packageMode?: 'local' | 'huoyan';
+  /** 火眼模式下的阶段火眼配置 */
+  huoyan?: HuoyanJobConfig;
 }
 
 export interface TestTab {

@@ -51,7 +51,9 @@ export async function POST(request: NextRequest) {
     if (skipped.length > 0) {
       console.warn('[AI Agent] 部分插件工具被跳过:', skipped);
     }
-    const tools: Record<string, ReturnType<typeof tool>> = {};
+    // 插件工具的参数 schema 是运行时动态的（z.ZodTypeAny / JSON Schema 转换结果），
+    // 无法让 TS 推断出具体输入类型，这里用宽松类型承载，交给 SDK 运行时校验
+    const tools: Record<string, any> = {};
     for (const spec of toolSpecs) {
       tools[spec.name] = tool({
         description: spec.description,

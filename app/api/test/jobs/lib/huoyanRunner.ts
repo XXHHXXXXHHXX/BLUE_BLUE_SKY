@@ -311,7 +311,7 @@ async function executeHuoyan(
     }
 
     const resultItem: JobResult = {
-      iteration: stage ? 1 : 1,
+      iteration: 1,
       power: 0,
       score: success ? score : 0,
       ...(success && scores ? { scores } : {}),
