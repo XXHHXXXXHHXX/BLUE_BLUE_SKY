@@ -10,6 +10,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Input, InputNumber, Select, Space, Switch, Tag, Typography, message } from 'antd';
 import {
   HUOYAN_DEFAULT_BASE_URL,
+  HUOYAN_DEFAULT_TIMEOUT_HOURS,
   HUOYAN_QUEUE_IDS,
   type HuoyanArgument,
   type HuoyanBinding,
@@ -164,6 +165,7 @@ const HuoyanConfigPanel: React.FC<HuoyanConfigPanelProps> = ({ value, onChange, 
     definitionId: '',
     arguments: [],
     bindings: [],
+    timeoutHours: HUOYAN_DEFAULT_TIMEOUT_HOURS,
   };
 
   const update = (patch: Partial<HuoyanJobConfig>) => onChange({ ...currentConfig, ...patch });
@@ -314,6 +316,27 @@ const HuoyanConfigPanel: React.FC<HuoyanConfigPanelProps> = ({ value, onChange, 
 
       <div>
         <Space size="small">
+          <span style={{ fontSize: 12, color: '#666', width: 90, display: 'inline-block' }}>超时时间</span>
+          <InputNumber
+            size="small"
+            style={{ width: 140 }}
+            min={0.1}
+            step={1}
+            value={currentConfig.timeoutHours ?? HUOYAN_DEFAULT_TIMEOUT_HOURS}
+            onChange={(v) =>
+              update({ timeoutHours: typeof v === 'number' && v > 0 ? v : undefined })
+            }
+            disabled={disabled}
+            addonAfter="小时"
+          />
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            默认 {HUOYAN_DEFAULT_TIMEOUT_HOURS} 小时，超时后按失败处理并尝试取消火眼运行
+          </Text>
+        </Space>
+      </div>
+
+      <div>
+        <Space size="small">
           <span style={{ fontSize: 12, color: '#666', width: 90, display: 'inline-block' }}>火眼用例包</span>
           <Select
             size="small"
@@ -379,6 +402,9 @@ export function validateHuoyanConfig(config: HuoyanJobConfig | undefined): strin
   if (!config) return '请配置火眼执行参数';
   if (!config.queueId) return '请选择火眼队列';
   if (!config.definitionId) return '请选择火眼用例包';
+  if (config.timeoutHours !== undefined && !(config.timeoutHours > 0)) {
+    return '超时时间必须大于 0 小时';
+  }
   return null;
 }
 

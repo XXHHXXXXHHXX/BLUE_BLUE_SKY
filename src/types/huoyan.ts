@@ -36,6 +36,20 @@ export interface HuoyanJobConfig {
   arguments: HuoyanArgument[];
   /** 角色绑定（如 target -> 137） */
   bindings: HuoyanBinding[];
+  /** 手动超时时间（小时），缺省 12 小时；超时后按失败处理并尝试取消火眼运行 */
+  timeoutHours?: number;
+}
+
+/** 火眼任务默认超时（小时） */
+export const HUOYAN_DEFAULT_TIMEOUT_HOURS = 12;
+
+/** 解析火眼超时（小时）为毫秒；非法/未设置时回退默认 12 小时 */
+export function resolveHuoyanTimeoutMs(timeoutHours?: number | null): number {
+  const hours =
+    typeof timeoutHours === 'number' && Number.isFinite(timeoutHours) && timeoutHours > 0
+      ? timeoutHours
+      : HUOYAN_DEFAULT_TIMEOUT_HOURS;
+  return hours * 60 * 60 * 1000;
 }
 
 /** 火眼任务运行态（服务端回写） */

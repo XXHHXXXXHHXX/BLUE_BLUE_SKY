@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import type { SerialMonitorConfig } from '../../../../src/types/serial';
+import type { HuoyanJobConfig } from '../../../../src/types/huoyan';
 
 // ========== 数据目录配置 ==========
 const DATA_DIR = path.join(process.cwd(), '.data');
@@ -46,6 +47,10 @@ export interface PipelineStageTemplate {
   envVars?: Array<{ key: string; value: string }>;
   /** 用例包要求的必填环境变量及其填写值 */
   requiredEnvVarValues?: Record<string, string>;
+  /** 阶段执行模式：local=本地用例包，huoyan=火眼平台 */
+  packageMode?: 'local' | 'huoyan';
+  /** 火眼模式下的阶段配置 */
+  huoyan?: HuoyanJobConfig;
 }
 
 export interface PipelineTemplateData {

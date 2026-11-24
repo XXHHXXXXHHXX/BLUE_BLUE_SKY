@@ -1080,6 +1080,20 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
         failValidation('请填写所有阶段名称', stageKey);
         return;
       }
+      // 火眼阶段：不部署用例包，改为校验火眼配置与目标机绑定
+      if (stage.packageMode === 'huoyan') {
+        const huoyanError = validateHuoyanConfig(stage.huoyan);
+        if (huoyanError) {
+          failValidation(`阶段 [${stage.name}] ${huoyanError}`, stageKey);
+          return;
+        }
+        const missingBinding = (stage.huoyan?.bindings || []).find((b) => !b.target_name);
+        if (missingBinding) {
+          failValidation(`阶段 [${stage.name}] 请为角色 "${missingBinding.role}" 选择火眼目标机`, stageKey);
+          return;
+        }
+        continue;
+      }
       if (stage.packageSource === 'library' && !stage.packageLibraryId) {
         failValidation(`阶段 [${stage.name}] 未选择用例包`, stageKey);
         return;
@@ -1142,6 +1156,37 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
 
       for (let i = 0; i < stages.length; i++) {
         const stage = stages[i];
+
+        // 火眼阶段：不部署用例包，直接提交阶段配置
+        if (stage.packageMode === 'huoyan') {
+          const huoyan = stage.huoyan!;
+          addShellOutput(
+            tab.id,
+            `[${new Date().toLocaleTimeString()}] 阶段 ${i + 1}/${stages.length}: ${stage.name} - 火眼模式（用例: ${huoyan.definitionName || huoyan.definitionId}，超时: ${huoyan.timeoutHours ?? 12} 小时）`,
+          );
+          const stageMonitorCommands = stage.monitorCommands ?? tab.powerTestConfig.monitorCommands;
+          serverStages.push({
+            id: stage.id,
+            name: stage.name,
+            order: i,
+            remotePath: '',
+            packageMode: 'huoyan',
+            huoyan,
+            iterationParams: [],
+            adjustmentCommands: [],
+            monitorCommands: stageMonitorCommands,
+            envVars: [],
+            heartbeatEnabled: tab.powerTestConfig.heartbeatEnabled,
+            heartbeatInterval: tab.powerTestConfig.heartbeatInterval,
+            heartbeatMaxFailures: tab.powerTestConfig.heartbeatMaxFailures,
+            alertWebhook: tab.powerTestConfig.alertWebhook,
+            globalBmcSessionId: tab.powerTestConfig.globalBmcSessionId,
+            suppressMonitorLogs: tab.muteMonitorOutput,
+          } as any);
+          updatePipelineStage(tab.id, stage.id, { status: 'pending' });
+          continue;
+        }
+
         addShellOutput(tab.id, `[${new Date().toLocaleTimeString()}] 阶段 ${i + 1}/${stages.length}: ${stage.name} - 正在部署用例包...`);
 
         const deployFormData = new FormData();
@@ -1476,10 +1521,11 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     }
     isAbortingRef.current = true;
     abortJob(jobId);
+    const hasHuoyanStage = (tab.pipelineStages || []).some((s) => s.packageMode === 'huoyan');
     addShellOutput(
       tab.id,
-      tab.powerTestConfig.packageMode === 'huoyan'
-        ? `[${new Date().toLocaleTimeString()}] 正在中止火眼任务，已请求火眼平台停止该用例...`
+      tab.powerTestConfig.packageMode === 'huoyan' || hasHuoyanStage
+        ? `[${new Date().toLocaleTimeString()}] 正在中止任务，若当前为火眼用例已请求火眼平台停止...`
         : `[${new Date().toLocaleTimeString()}] 正在中止后台任务，等待当前命令结束...`,
     );
   };
@@ -1660,6 +1706,8 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       monitorCommands: stage.monitorCommands,
       envVars: stage.envVars,
       requiredEnvVarValues: stage.requiredEnvVarValues,
+      packageMode: stage.packageMode,
+      huoyan: stage.huoyan,
     }));
   };
 
@@ -1682,6 +1730,8 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       monitorCommands: s.monitorCommands,
       envVars: s.envVars,
       requiredEnvVarValues: s.requiredEnvVarValues,
+      packageMode: s.packageMode,
+      huoyan: s.huoyan,
     }));
     setPipelineStages(tab.id, stages);
     setSelectedPipelineTemplateId(templateId);
@@ -1750,7 +1800,10 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
   const activePipelineStage = tab.pipelineMode
     ? (activeJob?.config.stages?.[activeJob.config.currentStageIndex ?? currentStageIndex] ?? tab.pipelineStages?.[currentStageIndex])
     : undefined;
-  const stageTotalIterations = tab.pipelineMode && activePipelineStage && Array.isArray((activePipelineStage as any).iterationParams)
+  const stageIsHuoyan = tab.pipelineMode && (activePipelineStage as any)?.packageMode === 'huoyan';
+  const stageTotalIterations = stageIsHuoyan
+    ? 1
+    : tab.pipelineMode && activePipelineStage && Array.isArray((activePipelineStage as any).iterationParams)
     ? calculateTotalIterations((activePipelineStage as any).iterationParams)
     : totalIterations;
   const progress = stageTotalIterations > 0 ? Math.round((tab.currentIteration / stageTotalIterations) * 100) : 0;
@@ -2137,8 +2190,9 @@ echo "{\"score\": \${SCORE}}"
 
       <Row gutter={24}>
         <Col span={8}>
-          {/* 火眼模式由平台执行用例，本地迭代参数/调整命令不参与 */}
-          {tab.powerTestConfig.packageMode !== 'huoyan' && (
+          {/* 单阶段火眼模式由平台执行用例，本地迭代参数/调整命令不参与；
+              流水线模式下每个阶段各自决定执行方式，左栏仍需展示 */}
+          {!(tab.powerTestConfig.packageMode === 'huoyan' && !tab.pipelineMode) && (
           <>
           {/* 配置模板保存/加载 */}
           <Card title="配置模板" size="small" style={{ marginBottom: 16 }}>
@@ -2703,34 +2757,29 @@ echo "{\"score\": \${SCORE}}"
           >
             <div style={{ marginBottom: 12 }}>
               <Space size="middle">
-                <Radio.Group
-                  size="small"
-                  value={tab.powerTestConfig.packageMode || 'local'}
-                  onChange={(e) => setPowerTestConfig(tab.id, { packageMode: e.target.value })}
-                  disabled={tab.isRunningTest}
-                >
-                  <Radio.Button value="local">本地用例包</Radio.Button>
-                  <Radio.Button value="huoyan">火眼模式</Radio.Button>
-                </Radio.Group>
-                {(!tab.powerTestConfig.packageMode || tab.powerTestConfig.packageMode === 'local') && (
-                  <Switch
-                    checked={tab.pipelineMode}
-                    onChange={(checked) => setPipelineMode(tab.id, checked)}
+                {/* 流水线模式下每个阶段各自选择执行方式，顶层模式选择不适用 */}
+                {!tab.pipelineMode && (
+                  <Radio.Group
+                    size="small"
+                    value={tab.powerTestConfig.packageMode || 'local'}
+                    onChange={(e) => setPowerTestConfig(tab.id, { packageMode: e.target.value })}
                     disabled={tab.isRunningTest}
-                    checkedChildren="流水线模式"
-                    unCheckedChildren="单阶段模式"
-                  />
+                  >
+                    <Radio.Button value="local">本地用例包</Radio.Button>
+                    <Radio.Button value="huoyan">火眼模式</Radio.Button>
+                  </Radio.Group>
                 )}
+                <Switch
+                  checked={tab.pipelineMode}
+                  onChange={(checked) => setPipelineMode(tab.id, checked)}
+                  disabled={tab.isRunningTest}
+                  checkedChildren="流水线模式"
+                  unCheckedChildren="单阶段模式"
+                />
               </Space>
             </div>
 
-            {tab.powerTestConfig.packageMode === 'huoyan' ? (
-              <HuoyanConfigPanel
-                value={tab.powerTestConfig.huoyanConfig}
-                onChange={(huoyanConfig) => setPowerTestConfig(tab.id, { huoyanConfig })}
-                disabled={tab.isRunningTest}
-              />
-            ) : tab.pipelineMode ? (
+            {tab.pipelineMode ? (
               <div>
                 {/* 流水线模板：保存/选择/删除 */}
                 <Card size="small" style={{ marginBottom: 12, background: '#fafafa' }}>
@@ -2877,20 +2926,29 @@ echo "{\"score\": \${SCORE}}"
                       <Space direction="vertical" style={{ width: '100%' }}>
                         <Radio.Group
                           size="small"
-                          value={stage.packageSource}
+                          value={stage.packageMode || 'local'}
                           onChange={(e) =>
                             updatePipelineStage(tab.id, stage.id, {
-                              packageSource: e.target.value,
-                              packageFile: undefined,
-                              packageFileName: '',
-                              packageLibraryId: undefined,
+                              packageMode: e.target.value,
+                              ...(e.target.value === 'huoyan'
+                                ? { packageFile: undefined, packageFileName: '', packageLibraryId: undefined }
+                                : { huoyan: undefined }),
                             })
                           }
                           disabled={tab.isRunningTest}
                         >
-                          <Radio.Button value="library">用例包库</Radio.Button>
+                          <Radio.Button value="local">本地用例包</Radio.Button>
+                          <Radio.Button value="huoyan">火眼模式</Radio.Button>
                         </Radio.Group>
 
+                        {stage.packageMode === 'huoyan' ? (
+                          <HuoyanConfigPanel
+                            value={stage.huoyan}
+                            onChange={(huoyan) => updatePipelineStage(tab.id, stage.id, { huoyan })}
+                            disabled={tab.isRunningTest}
+                          />
+                        ) : (
+                        <>
                         <div style={{ marginBottom: 8 }}>
                           <GroupedSelect
                             placeholder="选择用例包"
@@ -3041,6 +3099,8 @@ echo "{\"score\": \${SCORE}}"
                             showManage={false}
                           />
                         </div>
+                        </>
+                        )}
 
                         <Button
                           block
@@ -3104,6 +3164,12 @@ echo "{\"score\": \${SCORE}}"
                   </Button>
                 </Space>
               </div>
+            ) : tab.powerTestConfig.packageMode === 'huoyan' ? (
+              <HuoyanConfigPanel
+                value={tab.powerTestConfig.huoyanConfig}
+                onChange={(huoyanConfig) => setPowerTestConfig(tab.id, { huoyanConfig })}
+                disabled={tab.isRunningTest}
+              />
             ) : (
               <>
                 <div style={{ marginBottom: 12 }}>
@@ -3362,18 +3428,18 @@ echo "{\"score\": \${SCORE}}"
                     size="large"
                     icon={<PlayCircleOutlined />}
                     onClick={
-                      tab.powerTestConfig.packageMode === 'huoyan'
-                        ? handleStartHuoyan
-                        : tab.pipelineMode
+                      tab.pipelineMode
                         ? handleStartPipeline
+                        : tab.powerTestConfig.packageMode === 'huoyan'
+                        ? handleStartHuoyan
                         : handleStartTest
                     }
                   >
-                    {tab.powerTestConfig.packageMode === 'huoyan'
+                    {tab.pipelineMode
+                      ? (tab.powerTestConfig.scheduledStartAt ? '定时流水线测试' : '开始流水线测试')
+                      : tab.powerTestConfig.packageMode === 'huoyan'
                       ? (tab.powerTestConfig.scheduledStartAt ? '定时火眼任务' : '开始火眼任务')
-                      : tab.powerTestConfig.scheduledStartAt
-                      ? (tab.pipelineMode ? '定时流水线测试' : '定时迭代测试')
-                      : (tab.pipelineMode ? '开始流水线测试' : '开始迭代测试')}
+                      : (tab.powerTestConfig.scheduledStartAt ? '定时迭代测试' : '开始迭代测试')}
                   </Button>
                 </>
               )}

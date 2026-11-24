@@ -17,6 +17,10 @@ export interface PipelineStageTemplateData {
   monitorCommands?: PipelineStage['monitorCommands'];
   envVars?: PipelineStage['envVars'];
   requiredEnvVarValues?: Record<string, string>;
+  /** 阶段执行模式：local=本地用例包，huoyan=火眼平台 */
+  packageMode?: 'local' | 'huoyan';
+  /** 火眼模式下的阶段配置 */
+  huoyan?: PipelineStage['huoyan'];
 }
 
 export interface PipelineTemplate {

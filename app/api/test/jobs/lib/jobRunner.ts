@@ -25,7 +25,7 @@ import { templateSnapshotOf } from '../../../../../src/types/serial';
 import { loadUserSerialTemplates } from '../../../../../src/server/storage/serialTemplateStore';
 import { compileTemplateSnapshot } from '../../../../../src/server/serialTemplateCompiler';
 import type { CompiledSerialTemplate } from '../../../../../src/utils/serialTemplateContract';
-import { runHuoyanJob } from './huoyanRunner';
+import { runHuoyanJob, runHuoyanStage, cancelActiveHuoyan } from './huoyanRunner';
 
 /** 单条监控命令的运行状态（SSH 轮询 / 持续模式 / 串口采集） */
 interface MonitorState {
@@ -682,6 +682,10 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
   // 注册立即中止处理器
   const abortHandler = () => {
     addJobLog(jobId, 'info', '正在执行立即中止...');
+    // 流水线中若当前阶段正在火眼平台运行，通知平台取消/跳过
+    if (cancelActiveHuoyan(jobId)) {
+      addJobLog(jobId, 'info', '已通知火眼平台中止当前用例');
+    }
     // 先终止持续模式监控的远程后台进程（再释放 SSH 连接），避免残留 perf 等进程
     const curStage = getJob(jobId)?.config;
     const allMonitorCmds = [
@@ -1535,7 +1539,21 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
           || job.results.filter((r) =>
             isPipelineMode ? r.stageId === stage.id : (!r.stageId || r.stageId === stage.id)))
         : undefined;
-      const stageOutcome = await runStage(stage, resumeFromIter, existingStageResults);
+      // 火眼阶段：不部署用例包、不执行 run.sh，交由火眼平台运行，蓝天只做监控采集
+      let stageOutcome: { success: boolean; results: JobResult[]; errorMessage?: string };
+      if (stage.packageMode === 'huoyan') {
+        if (!stage.huoyan) {
+          stageOutcome = {
+            success: false,
+            results: [],
+            errorMessage: `阶段 [${stage.name}] 选择了火眼模式，但缺少火眼配置`,
+          };
+        } else {
+          stageOutcome = await runHuoyanStage(jobId, stage.huoyan, stage, stageIndex);
+        }
+      } else {
+        stageOutcome = await runStage(stage, resumeFromIter, existingStageResults);
+      }
 
       // 若已中止，不覆盖阶段状态，由外层统一处理
       if (isAborted()) {
