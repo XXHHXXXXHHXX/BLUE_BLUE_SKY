@@ -33,7 +33,7 @@ export const topologyPlugin: AiPlugin = {
   promptHint:
     '涉及拓扑时先调用 listTopologies 确认拓扑 ID，再用 getTopology 查看结构。' +
     '新增节点/连线、删除节点、修改拓扑结构、启停监控都属于会改变系统状态的操作，' +
-    '必须先向用户确认具体内容再执行，并在回复中说明改了什么。',
+    '直接调用工具即可（系统会弹出确认框由用户决定是否执行），执行后在回复中说明改了什么。',
   tools: [
     {
       name: 'listTopologies',
@@ -63,6 +63,7 @@ export const topologyPlugin: AiPlugin = {
     {
       name: 'createTopology',
       description: '新建一个拓扑；可选从现有拓扑复制。会改变系统数据，需用户明确要求',
+      requiresApproval: true,
       inputSchema: z.object({
         name: z.string().describe('新拓扑名称'),
         description: z.string().optional(),
@@ -83,6 +84,7 @@ export const topologyPlugin: AiPlugin = {
     {
       name: 'addTopologyNode',
       description: '在指定拓扑中新增一个节点（模块）。会改变系统数据，需用户明确要求',
+      requiresApproval: true,
       inputSchema: z.object({
         topologyId: z.string(),
         nodeType: z.enum(NODE_TYPES).describe('节点类型，如 cpu / memory / fan / psu / ac / custom'),
@@ -110,6 +112,7 @@ export const topologyPlugin: AiPlugin = {
     {
       name: 'addTopologyEdge',
       description: '在指定拓扑中连接两个节点（新增连线）。会改变系统数据，需用户明确要求',
+      requiresApproval: true,
       inputSchema: z.object({
         topologyId: z.string(),
         source: z.string().describe('源节点 ID'),
@@ -132,6 +135,7 @@ export const topologyPlugin: AiPlugin = {
     {
       name: 'removeTopologyNode',
       description: '删除拓扑中的节点及其关联连线。会改变系统数据，需用户明确要求',
+      requiresApproval: true,
       inputSchema: z.object({ topologyId: z.string(), nodeId: z.string() }),
       execute: async (args) => {
         try {
@@ -144,6 +148,7 @@ export const topologyPlugin: AiPlugin = {
     {
       name: 'removeTopologyEdge',
       description: '删除拓扑中的一条连线。会改变系统数据，需用户明确要求',
+      requiresApproval: true,
       inputSchema: z.object({ topologyId: z.string(), edgeId: z.string() }),
       execute: async (args) => {
         try {
@@ -156,6 +161,7 @@ export const topologyPlugin: AiPlugin = {
     {
       name: 'updateTopologyNode',
       description: '修改节点显示名或别名。会改变系统数据，需用户明确要求',
+      requiresApproval: true,
       inputSchema: z.object({
         topologyId: z.string(),
         nodeId: z.string(),
@@ -188,6 +194,7 @@ export const topologyPlugin: AiPlugin = {
     {
       name: 'setMonitorState',
       description: '开启/关闭实时监控或调整轮询间隔。会改变系统状态，需用户明确要求',
+      requiresApproval: true,
       inputSchema: z.object({
         isPolling: z.boolean().optional().describe('true=开启监控，false=关闭'),
         pollInterval: z.number().int().min(500).optional().describe('轮询间隔（毫秒）'),

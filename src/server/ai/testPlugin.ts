@@ -21,7 +21,7 @@ export const testPlugin: AiPlugin = {
   promptHint:
     '涉及用例测试时，先用 listJobs / listTestPackages / listPipelineTemplates 了解现状。' +
     '创建任务（createTestJob）和停止任务（stopTestJob）会真实下发执行，' +
-    '必须先把任务名、目标机、用例包、参数等完整方案告知用户并取得确认，再调用工具。',
+    '直接调用工具即可（系统会弹出确认框展示完整参数由用户决定是否执行）。',
   tools: [
     {
       name: 'listJobs',
@@ -81,6 +81,7 @@ export const testPlugin: AiPlugin = {
       name: 'createTestJob',
       description:
         '创建并启动测试任务（本地迭代 / 流水线 / 火眼三种模式之一）。会真实下发执行，需用户明确确认方案后再调用',
+      requiresApproval: true,
       inputSchema: z.object({
         name: z.string().describe('任务名称'),
         host: z.string().optional().describe('目标机 IP（本地/流水线模式）'),
@@ -183,6 +184,7 @@ export const testPlugin: AiPlugin = {
     {
       name: 'stopTestJob',
       description: '停止指定运行中/等待中的测试任务。会真实中止执行，需用户明确要求',
+      requiresApproval: true,
       inputSchema: z.object({ jobId: z.string() }),
       execute: async (args) => {
         try {

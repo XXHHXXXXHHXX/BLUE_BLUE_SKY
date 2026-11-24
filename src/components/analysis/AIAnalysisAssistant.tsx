@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
-import { Drawer, Input, Button, Space, FloatButton, List, Card, Typography, Tag, Collapse, Alert } from 'antd';
+import { Drawer, Input, Button, Space, FloatButton, List, Card, Typography, Tag, Collapse, Alert, Tooltip } from 'antd';
 import { RobotOutlined, SendOutlined, EyeOutlined, EyeInvisibleOutlined, FolderOpenOutlined, FileExcelOutlined, FilePptOutlined, PlusOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
 import ReactMarkdown from 'react-markdown';
@@ -49,6 +49,21 @@ interface Attachment {
   fileName: string;
 }
 
+/** 待用户确认的写操作 */
+interface PendingApproval {
+  approvalId: string;
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+  reason?: string;
+}
+
+/** 回传给模型的内容块（assistant 的 tool-call / tool-approval-request） */
+type RawContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }
+  | { type: 'tool-approval-request'; approvalId: string; toolCallId: string };
+
 interface ChatMessage {
   id: string;
   role: MessageRole;
@@ -60,6 +75,12 @@ interface ChatMessage {
   logs?: LogEntry[];
   attachments?: Attachment[];
   error?: string;
+  /** 本轮发给模型的消息（审批续跑时作为历史前缀） */
+  apiMessages?: Array<{ role: string; content: unknown }>;
+  /** 本轮 assistant 产生的内容块（审批续跑时回传） */
+  rawParts?: RawContentPart[];
+  /** 等待用户确认的写操作 */
+  pendingApprovals?: PendingApproval[];
 }
 
 interface AIResponse {
@@ -73,6 +94,17 @@ type StreamEvent =
   | { type: 'tool-call'; toolCall: { toolName: string; input: unknown; toolCallId?: string } }
   | { type: 'tool-result'; toolResult: { toolName: string; output: unknown; toolCallId?: string } }
   | { type: 'tool-error'; toolError: { toolName: string; error: string; toolCallId?: string } }
+  | {
+      type: 'tool-approval-request';
+      approval: {
+        approvalId: string;
+        toolCallId: string;
+        toolName?: string;
+        input?: unknown;
+        reason?: string;
+        isAutomatic?: boolean;
+      };
+    }
   | { type: 'step-finish'; finishReason?: string }
   | { type: 'error'; error: string }
   | { type: 'done' };
@@ -115,6 +147,11 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
   const [showTrace, setShowTrace] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pluginPanelOpen, setPluginPanelOpen] = useState(false);
+  /** bypass 模式：跳过写操作确认，权限完全交给 AI（保存在本浏览器） */
+  const [bypass, setBypass] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('blue_sky_ai_bypass') === '1';
+  });
   const [selectedReportIds, setSelectedReportIds] = useState<string[]>(
     externalSelectedReportIds ?? (selectedReportId ? [selectedReportId] : [])
   );
@@ -245,6 +282,12 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
     }
   }, [messages, isLoading]);
 
+  // bypass 开关持久化到本浏览器
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('blue_sky_ai_bypass', bypass ? '1' : '0');
+  }, [bypass]);
+
   useEffect(() => {
     // 仅在显式传入 props 时覆盖；全局挂载下选择由 aiContextStore 驱动
     if (externalSelectedReportIds || selectedReportId) {
@@ -308,6 +351,194 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
     return `当前选中 ${selectedReports.length} 份报告: ${selectedReports.map((r) => r.name).join('、')}`;
   }, [selectedReports]);
 
+  /** 发起一次流式对话；requestMessages 是完整的模型消息历史 */
+  const runStream = useCallback(
+    async (requestMessages: Array<{ role: string; content: unknown }>, assistantId: string) => {
+      setIsLoading(true);
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      const updateAssistant = (updater: (msg: ChatMessage) => ChatMessage) => {
+        setMessages((prev) => {
+          const next = [...prev];
+          const idx = next.findIndex((m) => m.id === assistantId);
+          if (idx !== -1) next[idx] = updater(next[idx]);
+          return next;
+        });
+      };
+
+      const handleStreamEvent = (event: StreamEvent) => {
+        switch (event.type) {
+          case 'text-delta':
+            updateAssistant((msg) => ({
+              ...msg,
+              content: msg.content + event.text,
+              rawParts: [...(msg.rawParts || []), { type: 'text', text: event.text }],
+            }));
+            break;
+          case 'tool-call':
+            updateAssistant((msg) => ({
+              ...msg,
+              toolCalls: [
+                ...(msg.toolCalls || []),
+                { name: event.toolCall.toolName, args: (event.toolCall.input as Record<string, unknown>) || {} },
+              ],
+              rawParts: [
+                ...(msg.rawParts || []),
+                {
+                  type: 'tool-call',
+                  toolCallId: event.toolCall.toolCallId || '',
+                  toolName: event.toolCall.toolName,
+                  input: event.toolCall.input,
+                },
+              ],
+            }));
+            break;
+          case 'tool-approval-request':
+            updateAssistant((msg) => ({
+              ...msg,
+              rawParts: [
+                ...(msg.rawParts || []),
+                {
+                  type: 'tool-approval-request',
+                  approvalId: event.approval.approvalId,
+                  toolCallId: event.approval.toolCallId,
+                },
+              ],
+              pendingApprovals: [
+                ...(msg.pendingApprovals || []),
+                {
+                  approvalId: event.approval.approvalId,
+                  toolCallId: event.approval.toolCallId,
+                  toolName: event.approval.toolName || '未知工具',
+                  input: event.approval.input,
+                  reason: event.approval.reason,
+                },
+              ],
+            }));
+            break;
+          case 'tool-result': {
+            const result = event.toolResult.output as { url?: string; fileName?: string; error?: string } | undefined;
+            const attachmentType =
+              event.toolResult.toolName === 'generateExcelReport'
+                ? 'excel'
+                : event.toolResult.toolName === 'generatePPTReport'
+                  ? 'ppt'
+                  : null;
+            updateAssistant((msg) => ({
+              ...msg,
+              toolResults: [
+                ...(msg.toolResults || []),
+                { name: event.toolResult.toolName, result: event.toolResult.output },
+              ],
+              attachments:
+                attachmentType && result?.url
+                  ? [...(msg.attachments || []), { type: attachmentType, url: result.url, fileName: result.fileName || '未命名' }]
+                  : msg.attachments,
+            }));
+            break;
+          }
+          case 'tool-error':
+            updateAssistant((msg) => ({
+              ...msg,
+              toolResults: [
+                ...(msg.toolResults || []),
+                { name: event.toolError.toolName, error: event.toolError.error },
+              ],
+            }));
+            break;
+          case 'step-finish':
+            updateAssistant((msg) => ({
+              ...msg,
+              steps: [
+                ...(msg.steps || []),
+                { stepCount: (msg.steps?.length || 0) + 1, finishReason: event.finishReason },
+              ],
+            }));
+            break;
+          case 'error':
+            updateAssistant((msg) => ({ ...msg, error: event.error, loading: false }));
+            break;
+          case 'done':
+            updateAssistant((msg) => ({ ...msg, loading: false }));
+            break;
+        }
+      };
+
+      try {
+        const res = await fetch('/api/ai/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: requestMessages,
+            clientId: clientIdRef.current || getClientId(),
+            bypass,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          const data = (await res.json()) as AIResponse;
+          throw new Error(data.error || `请求失败 ${res.status}`);
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error('响应流不可用');
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const payload = line.slice(6);
+            if (!payload) continue;
+            try {
+              handleStreamEvent(JSON.parse(payload) as StreamEvent);
+            } catch (e) {
+              console.error('解析 SSE 事件失败:', payload, e);
+            }
+          }
+        }
+
+        if (buffer.startsWith('data: ')) {
+          const payload = buffer.slice(6);
+          if (payload) {
+            try {
+              handleStreamEvent(JSON.parse(payload) as StreamEvent);
+            } catch (e) {
+              console.error('解析 SSE 事件失败:', payload, e);
+            }
+          }
+        }
+
+        updateAssistant((msg) => ({ ...msg, loading: false }));
+      } catch (err: unknown) {
+        const errorText =
+          err instanceof Error && err.name === 'AbortError'
+            ? '已取消'
+            : err instanceof Error
+              ? err.message
+              : 'AI 分析失败';
+        updateAssistant((msg) => ({
+          ...msg,
+          content: msg.content || `抱歉，${errorText}`,
+          loading: false,
+          error: errorText,
+        }));
+      } finally {
+        setIsLoading(false);
+        abortRef.current = null;
+      }
+    },
+    [bypass, setMessages],
+  );
+
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading) return;
 
@@ -327,186 +558,87 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
 
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
     setInput('');
-    setIsLoading(true);
 
-    const controller = new AbortController();
-    abortRef.current = controller;
+    const selectedReportsContext = selectedReports.length
+      ? `\n\n当前用户已选中的报告：\n${selectedReports
+          .map(
+            (r, idx) =>
+              `${idx + 1}. 报告ID: ${r.id}, 名称: ${r.name}, 主机: ${r.config.host}, 样本数: ${r.results.length}`
+          )
+          .join('\n')}\n请优先基于这些报告回答，如需更详细数据可调用 getReportDetail。`
+      : '';
 
-    const updateLastAssistant = (updater: (msg: ChatMessage) => ChatMessage) => {
-      setMessages((prev) => {
-        const next = [...prev];
-        // 找到当前正在流式回复的 assistant 消息（从后往前第一个 loading 的 assistant）
-        let idx = -1;
-        for (let i = next.length - 1; i >= 0; i--) {
-          if (next[i].role === 'assistant' && next[i].loading) {
-            idx = i;
-            break;
-          }
-        }
-        if (idx !== -1) {
-          next[idx] = updater(next[idx]);
-        }
-        return next;
-      });
-    };
+    const pageContextHint = [
+      pageContext ? `当前页面：${pageContext}` : '',
+      contextTopologyId ? `当前拓扑ID：${contextTopologyId}` : '',
+    ]
+      .filter(Boolean)
+      .join('；');
+    const contextHint = pageContextHint ? `\n\n（${pageContextHint}）` : '';
 
-    const handleStreamEvent = (event: StreamEvent) => {
-      switch (event.type) {
-        case 'text-delta':
-          updateLastAssistant((msg) => ({ ...msg, content: msg.content + event.text }));
-          break;
-        case 'tool-call':
-          updateLastAssistant((msg) => ({
-            ...msg,
-            toolCalls: [
-              ...(msg.toolCalls || []),
-              { name: event.toolCall.toolName, args: (event.toolCall.input as Record<string, unknown>) || {} },
-            ],
-          }));
-          break;
-        case 'tool-result': {
-          const result = event.toolResult.output as { url?: string; fileName?: string; error?: string } | undefined;
-          const attachmentType = event.toolResult.toolName === 'generateExcelReport' ? 'excel' : event.toolResult.toolName === 'generatePPTReport' ? 'ppt' : null;
-          updateLastAssistant((msg) => ({
-            ...msg,
-            toolResults: [
-              ...(msg.toolResults || []),
-              { name: event.toolResult.toolName, result: event.toolResult.output },
-            ],
-            attachments: attachmentType && result?.url
-              ? [...(msg.attachments || []), { type: attachmentType, url: result.url, fileName: result.fileName || '未命名' }]
-              : msg.attachments,
-          }));
-          break;
-        }
-        case 'tool-error':
-          updateLastAssistant((msg) => ({
-            ...msg,
-            toolResults: [
-              ...(msg.toolResults || []),
-              { name: event.toolError.toolName, error: event.toolError.error },
-            ],
-          }));
-          break;
-        case 'step-finish':
-          updateLastAssistant((msg) => ({
-            ...msg,
-            steps: [
-              ...(msg.steps || []),
-              { stepCount: (msg.steps?.length || 0) + 1, finishReason: event.finishReason },
-            ],
-          }));
-          break;
-        case 'error':
-          updateLastAssistant((msg) => ({ ...msg, error: event.error, loading: false }));
-          break;
-        case 'done':
-          updateLastAssistant((msg) => ({ ...msg, loading: false }));
-          break;
-      }
-    };
+    // 普通轮次只回传文本历史：工具调用/结果块若单独回传而缺少配对的 tool 消息，
+    // 会被 OpenAI 兼容接口判为非法历史。审批续跑时由 handleApproval 单独拼装完整历史。
+    const history = messages.map((m) => ({ role: m.role, content: m.content }));
+    const requestMessages = [
+      ...history,
+      { role: 'user', content: userText + selectedReportsContext + contextHint },
+    ];
 
-    try {
-      const chatMessages = [...messages, userMessage].map((m) => ({
-        role: m.role,
-        content: m.content,
+    // 记录本轮请求，审批续跑时作为历史前缀
+    setMessages((prev) =>
+      prev.map((m) => (m.id === assistantId ? { ...m, apiMessages: requestMessages } : m)),
+    );
+
+    await runStream(requestMessages, assistantId);
+  }, [input, isLoading, messages, selectedReports, setMessages, runStream, pageContext, contextTopologyId]);
+
+  /** 用户对写操作给出确认/拒绝后，把审批结果回传给模型继续 */
+  const handleApproval = useCallback(
+    async (messageId: string, approved: boolean) => {
+      if (isLoading) return;
+      const target = messages.find((m) => m.id === messageId);
+      if (!target || !target.pendingApprovals || target.pendingApprovals.length === 0) return;
+
+      const approvalResponses = target.pendingApprovals.map((a) => ({
+        type: 'tool-approval-response' as const,
+        approvalId: a.approvalId,
+        approved,
       }));
-
-      const selectedReportsContext = selectedReports.length
-        ? `\n\n当前用户已选中的报告：\n${selectedReports
-            .map(
-              (r, idx) =>
-                `${idx + 1}. 报告ID: ${r.id}, 名称: ${r.name}, 主机: ${r.config.host}, 样本数: ${r.results.length}`
-            )
-            .join('\n')}\n请优先基于这些报告回答，如需更详细数据可调用 getReportDetail。`
-        : '';
-
-      const pageContextHint = [
-        pageContext ? `当前页面：${pageContext}` : '',
-        contextTopologyId ? `当前拓扑ID：${contextTopologyId}` : '',
-      ]
-        .filter(Boolean)
-        .join('；');
-      const contextHint = pageContextHint ? `\n\n（${pageContextHint}）` : '';
-
-      const bodyMessages = chatMessages.map((m, idx) => {
-        if (idx === chatMessages.length - 1 && m.role === 'user') {
-          return { ...m, content: m.content + selectedReportsContext + contextHint };
-        }
-        return m;
-      });
-
-      const res = await fetch('/api/ai/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: bodyMessages, clientId: clientIdRef.current || getClientId() }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok) {
-        const data = (await res.json()) as AIResponse;
-        throw new Error(data.error || `请求失败 ${res.status}`);
-      }
-
-      const reader = res.body?.getReader();
-      if (!reader) {
-        throw new Error('响应流不可用');
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6);
-          if (!payload) continue;
-          try {
-            const event = JSON.parse(payload) as StreamEvent;
-            handleStreamEvent(event);
-          } catch (e) {
-            console.error('解析 SSE 事件失败:', payload, e);
-          }
+      // 合并连续的文本增量，避免回传几百个单字 text 块
+      const assistantContent: RawContentPart[] = [];
+      for (const part of target.rawParts || []) {
+        if (part.type === 'text') {
+          const last = assistantContent[assistantContent.length - 1];
+          if (last && last.type === 'text') last.text += part.text;
+          else assistantContent.push({ ...part });
+        } else {
+          assistantContent.push(part);
         }
       }
+      const trimmedContent = assistantContent.filter(
+        (p) => p.type !== 'text' || p.text.trim().length > 0,
+      );
+      const requestMessages = [
+        ...(target.apiMessages || []),
+        { role: 'assistant', content: trimmedContent },
+        { role: 'tool', content: approvalResponses },
+      ];
 
-      // 处理缓冲区中剩余的一行
-      if (buffer.startsWith('data: ')) {
-        const payload = buffer.slice(6);
-        if (payload) {
-          try {
-            const event = JSON.parse(payload) as StreamEvent;
-            handleStreamEvent(event);
-          } catch (e) {
-            console.error('解析 SSE 事件失败:', payload, e);
-          }
-        }
-      }
+      // 清掉待确认状态，避免重复点击
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, pendingApprovals: [] } : m)),
+      );
 
-      updateLastAssistant((msg) => ({ ...msg, loading: false }));
-    } catch (err: unknown) {
-      const errorText =
-        err instanceof Error && err.name === 'AbortError'
-          ? '已取消'
-          : err instanceof Error
-            ? err.message
-            : 'AI 分析失败';
-      updateLastAssistant((msg) => ({
-        ...msg,
-        content: msg.content || `抱歉，${errorText}`,
-        loading: false,
-        error: errorText,
-      }));
-    } finally {
-      setIsLoading(false);
-      abortRef.current = null;
-    }
-  }, [input, isLoading, messages, selectedReports, setMessages]);
+      const assistantId = `a-${Date.now()}`;
+      setMessages((prev) => [
+        ...prev,
+        { id: assistantId, role: 'assistant', content: '', loading: true, apiMessages: requestMessages },
+      ]);
+
+      await runStream(requestMessages, assistantId);
+    },
+    [isLoading, messages, runStream, setMessages],
+  );
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -698,6 +830,53 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
           {msg.error && (
             <Alert message={msg.error} type="error" showIcon style={{ marginTop: 8 }} />
           )}
+          {msg.pendingApprovals && msg.pendingApprovals.length > 0 && (
+            <div
+              style={{
+                marginTop: 8,
+                padding: 10,
+                border: '1px solid #ffd591',
+                background: '#fffbe6',
+                borderRadius: 6,
+              }}
+            >
+              <Text strong style={{ fontSize: 13 }}>以下操作会改变系统状态，是否执行？</Text>
+              {msg.pendingApprovals.map((a, idx) => (
+                <div key={a.approvalId} style={{ marginTop: 8, fontSize: 12 }}>
+                  <Tag color="orange">{a.toolName}</Tag>
+                  <span style={{ color: '#8c8c8c' }}>{a.reason || '需要确认'}</span>
+                  <pre
+                    style={{
+                      background: '#f5f5f5',
+                      padding: 6,
+                      borderRadius: 4,
+                      margin: '6px 0 0',
+                      maxHeight: 160,
+                      overflow: 'auto',
+                      fontSize: 11,
+                    }}
+                  >
+                    {JSON.stringify(a.input, null, 2)}
+                  </pre>
+                  {idx === msg.pendingApprovals!.length - 1 && (
+                    <Space style={{ marginTop: 8 }}>
+                      <Button
+                        type="primary"
+                        size="small"
+                        disabled={isLoading}
+                        onClick={() => handleApproval(msg.id, true)}
+                      >
+                        允许执行
+                      </Button>
+                      <Button size="small" disabled={isLoading} onClick={() => handleApproval(msg.id, false)}>
+                        拒绝
+                      </Button>
+                    </Space>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           {isThinking && (
             <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
               <Text type="secondary" style={{ fontSize: 12 }}>
@@ -863,6 +1042,21 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
                 >
                   插件
                 </Button>
+                <Tooltip
+                  title={
+                    bypass
+                      ? '已开启：AI 执行写操作（改拓扑/启停监控/创建或停止任务）不再询问，直接执行'
+                      : '开启后 AI 可自行执行所有写操作，不再逐条确认'
+                  }
+                >
+                  <Tag
+                    color={bypass ? 'red' : 'default'}
+                    style={{ cursor: 'pointer', margin: 0 }}
+                    onClick={() => setBypass((v) => !v)}
+                  >
+                    bypass {bypass ? '已开启' : '关闭'}
+                  </Tag>
+                </Tooltip>
               </Space>
             </div>
 

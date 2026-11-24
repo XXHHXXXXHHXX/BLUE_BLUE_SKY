@@ -20,6 +20,8 @@ export interface AiToolSpec {
   description: string;
   inputSchema: z.ZodTypeAny;
   execute: (args: Record<string, unknown>, ctx: AiToolContext) => Promise<unknown>;
+  /** 会改变系统状态的写操作：默认需用户确认后才执行（bypass 模式下自动放行） */
+  requiresApproval?: boolean;
 }
 
 export interface AiPlugin {
