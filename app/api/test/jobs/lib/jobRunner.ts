@@ -885,16 +885,18 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
           addJobLog(jobId, 'info', `用例包已重新部署: ${remotePath}`);
           // 回写新路径，供后续阶段与再次恢复使用
           if (isPipelineMode) {
+            // 基于最新 stages 合并，避免覆盖运行中追加/改配的阶段
+            const latestConfig = getJob(jobId)?.config || jobConfig!;
             updateJob(jobId, {
               config: {
-                ...jobConfig!,
-                stages: (jobConfig?.stages || []).map((s) =>
+                ...latestConfig,
+                stages: (latestConfig.stages || []).map((s) =>
                   s.id === stage.id ? { ...s, remotePath } : s,
                 ),
               },
             });
           } else {
-            updateJob(jobId, { config: { ...jobConfig!, remotePath } });
+            updateJob(jobId, { config: { ...(getJob(jobId)?.config || jobConfig!), remotePath } });
           }
         } else {
           addJobLog(jobId, 'error', `用例包重新部署失败: ${deployResult.message}`);
@@ -923,6 +925,7 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
     }
 
     scriptDir = runShPath.substring(0, runShPath.lastIndexOf('/'));
+    // 用最新配置回写，避免覆盖运行中追加/改配的阶段
     const existingConfig = getJob(jobId)?.config;
     if (existingConfig) {
       updateJob(jobId, { config: { ...existingConfig, activeScriptDir: scriptDir } });
@@ -1503,22 +1506,33 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
 
     let finalErrorMessage: string | undefined;
 
-    for (let stageIndex = startStageIndex; stageIndex < stages.length; stageIndex++) {
+    // 阶段列表在运行中可能被改配/追加：每个阶段开始前重新读取，
+    // 已开始或已结束的阶段不再回看（其配置已生效或已固化）。
+    const readStages = (): PipelineStage[] => {
+      if (!isPipelineMode) return stages;
+      const latest = getJob(jobId)?.config.stages;
+      if (!latest || latest.length === 0) return stages;
+      return latest.slice().sort((a, b) => a.order - b.order);
+    };
+
+    for (let stageIndex = startStageIndex; stageIndex < readStages().length; stageIndex++) {
       if (isAborted()) {
         updateJob(jobId, { status: 'aborted' });
         return;
       }
 
-      const stage = stages[stageIndex];
-      addJobLog(jobId, 'info', `开始执行阶段 [${stage.name}]（${stageIndex + 1}/${stages.length}）`);
+      const liveStages = readStages();
+      const stage = liveStages[stageIndex];
+      if (!stage) break;
+      addJobLog(jobId, 'info', `开始执行阶段 [${stage.name}]（${stageIndex + 1}/${liveStages.length}）`);
 
-      // 更新当前阶段索引
+      // 更新当前阶段索引（用最新配置，避免覆盖运行中写入的 stages）
       updateJob(jobId, {
-        config: { ...job.config, currentStageIndex: stageIndex },
+        config: { ...(getJob(jobId)?.config || job.config), currentStageIndex: stageIndex },
       });
 
-      // 初始化/更新阶段结果状态为 running
-      const prevStageResults = job.stageResults || {};
+      // 初始化/更新阶段结果状态为 running（读最新，避免丢掉前面阶段的结果）
+      const prevStageResults = getJob(jobId)?.stageResults || job.stageResults || {};
       updateJob(jobId, {
         stageResults: {
           ...prevStageResults,
@@ -1560,8 +1574,8 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
         break;
       }
 
-      // 更新阶段结果
-      const currentStageResults = job.stageResults || {};
+      // 更新阶段结果（读最新，保留其他阶段结果）
+      const currentStageResults = getJob(jobId)?.stageResults || job.stageResults || {};
       updateJob(jobId, {
         stageResults: {
           ...currentStageResults,
@@ -1587,10 +1601,11 @@ export async function runJob(jobId: string, options?: RunJobOptions): Promise<vo
       cleanupMonitors();
       cleanupLogMonitor();
 
-      // 更新当前阶段索引为下一阶段
-      if (stageIndex < stages.length - 1) {
+      // 更新当前阶段索引为下一阶段（下一阶段可能已被追加）
+      const nextStages = readStages();
+      if (stageIndex < nextStages.length - 1) {
         updateJob(jobId, {
-          config: { ...job.config, currentStageIndex: stageIndex + 1 },
+          config: { ...(getJob(jobId)?.config || job.config), currentStageIndex: stageIndex + 1 },
         });
       }
     }

@@ -1158,5 +1158,104 @@ export function getJobCustomAvgRanges(jobId: string): Record<string, { avgStart?
   return job?.customAvgRanges;
 }
 
+/** 阶段是否还能修改：只有尚未开始的阶段（索引 > 当前阶段索引）允许改配/删除 */
+export function isStageEditable(job: Job, stageId: string): { editable: boolean; reason?: string } {
+  const stages = job.config.stages;
+  if (!stages || stages.length === 0) return { editable: false, reason: '该任务不是流水线模式' };
+  if (job.status !== 'running' && job.status !== 'pending') {
+    return { editable: false, reason: `任务已结束（${job.status}），无法修改阶段` };
+  }
+  const sorted = stages.slice().sort((a, b) => a.order - b.order);
+  const idx = sorted.findIndex((s) => s.id === stageId);
+  if (idx === -1) return { editable: false, reason: '阶段不存在' };
+  const current = job.config.currentStageIndex ?? 0;
+  if (idx <= current) {
+    return { editable: false, reason: `阶段 [${sorted[idx].name}] 已开始或已完成，不能再修改` };
+  }
+  return { editable: true };
+}
+
+export interface StagePatch {
+  stageId: string;
+  /** 可改字段：阶段名、迭代参数、监控命令、环境变量、心跳/告警、日志监控、火眼配置 */
+  patch: Partial<Pick<PipelineStage,
+    | 'name'
+    | 'iterationParams'
+    | 'monitorCommands'
+    | 'envVars'
+    | 'heartbeatEnabled'
+    | 'heartbeatInterval'
+    | 'heartbeatMaxFailures'
+    | 'alertWebhook'
+    | 'logMonitorConfig'
+    | 'globalBmcSessionId'
+    | 'suppressMonitorLogs'
+    | 'packageMode'
+    | 'huoyan'
+    | 'packageLibraryId'
+  >>;
+}
+
+/** 改配尚未开始的阶段；已开始/已结束的阶段拒绝修改 */
+export function updatePendingStage(jobId: string, input: StagePatch): {
+  success: boolean;
+  message: string;
+  stage?: PipelineStage;
+} {
+  const job = jobs.get(jobId);
+  if (!job) return { success: false, message: '任务不存在' };
+  const check = isStageEditable(job, input.stageId);
+  if (!check.editable) return { success: false, message: check.reason || '该阶段不可修改' };
+
+  const stages = job.config.stages!;
+  const idx = stages.findIndex((s) => s.id === input.stageId);
+  if (idx === -1) return { success: false, message: '阶段不存在' };
+
+  // 只覆盖显式传入的字段，避免把未提供的字段置空
+  const nextStage: PipelineStage = { ...stages[idx] };
+  for (const [key, value] of Object.entries(input.patch)) {
+    if (value === undefined) continue;
+    (nextStage as unknown as Record<string, unknown>)[key] = value;
+  }
+  const nextStages = [...stages];
+  nextStages[idx] = nextStage;
+
+  job.config = { ...job.config, stages: nextStages };
+  job.updatedAt = new Date().toISOString();
+  saveJobs(jobId);
+  return { success: true, message: `阶段 [${nextStage.name}] 已更新`, stage: nextStage };
+}
+
+/** 为运行中的流水线追加阶段（排在现有阶段之后） */
+export function appendPipelineStage(jobId: string, stage: PipelineStage): {
+  success: boolean;
+  message: string;
+  stage?: PipelineStage;
+} {
+  const job = jobs.get(jobId);
+  if (!job) return { success: false, message: '任务不存在' };
+  if (job.status !== 'running' && job.status !== 'pending') {
+    return { success: false, message: `任务已结束（${job.status}），无法追加阶段` };
+  }
+  const stages = job.config.stages;
+  if (!stages || stages.length === 0) {
+    return { success: false, message: '该任务不是流水线模式，无法追加阶段' };
+  }
+
+  const maxOrder = stages.reduce((acc, s) => (s.order > acc ? s.order : acc), 0);
+  const newStage: PipelineStage = {
+    ...stage,
+    id: stage.id || `stage-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    order: maxOrder + 1,
+    remotePath: stage.remotePath || '',
+    adjustmentCommands: stage.adjustmentCommands || [],
+  };
+
+  job.config = { ...job.config, stages: [...stages, newStage] };
+  job.updatedAt = new Date().toISOString();
+  saveJobs(jobId);
+  return { success: true, message: `已追加阶段 [${newStage.name}]`, stage: newStage };
+}
+
 // 初始化加载
 loadJobs();

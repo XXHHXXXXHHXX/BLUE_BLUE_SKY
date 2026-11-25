@@ -39,6 +39,7 @@ import { useTestReportStore } from '../../../../src/stores/testReportStore';
 import useMaximizableModal from '../../../../src/hooks/useMaximizableModal';
 import ShellTerminal from '../../../../src/components/test/ShellTerminal';
 import JobResultDisplay from '../../../../src/components/test/JobResultDisplay';
+import PipelineStageEditor from '../../../../src/components/test/PipelineStageEditor';
 
 const { Title, Text } = Typography;
 
@@ -664,6 +665,12 @@ export default function JobDetailPage() {
                     ]}
                   />
                 </Card>
+              </Col>
+            )}
+
+            {pipelineStages.length > 0 && (
+              <Col span={24}>
+                <PipelineStageEditor job={job} onChanged={refetchJob} />
               </Col>
             )}
 
