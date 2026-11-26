@@ -95,11 +95,13 @@ export async function POST(request: NextRequest) {
     const approvalToolNames = new Set(
       toolSpecs.filter((spec) => spec.requiresApproval).map((spec) => spec.name),
     );
+    // 注意：ai@7.0.44 的 ToolApprovalStatus 中 user-approval 的 reason 是 `never`
+    // （后续版本才放宽为 string），这里不能带 reason，提示文案在前端/SSE 层补。
     const toolApproval = bypass
       ? undefined
       : ({ toolCall }: { toolCall: { toolName: string } }) =>
           approvalToolNames.has(toolCall.toolName)
-            ? { type: 'user-approval' as const, reason: '该操作会改变系统状态，需要你确认' }
+            ? { type: 'user-approval' as const }
             : undefined;
 
     const result = streamText({
@@ -138,7 +140,10 @@ export async function POST(request: NextRequest) {
                     toolCallId: (part.toolCall as { toolCallId?: string }).toolCallId || '',
                     toolName: (part.toolCall as { toolName?: string }).toolName,
                     input: (part.toolCall as { input?: unknown }).input,
-                    reason: (part as { reason?: string }).reason,
+                    // 审批原因由服务端统一给出（ai@7.0.44 的 toolApproval 不支持 reason）
+                    reason:
+                      (part as { reason?: string }).reason ||
+                      '该操作会改变系统状态，需要你确认',
                     isAutomatic: (part as { isAutomatic?: boolean }).isAutomatic === true,
                   },
                 });
