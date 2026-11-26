@@ -67,17 +67,20 @@ export async function POST(request: NextRequest) {
       const toolOptions: any = {
         description: spec.description,
         inputSchema: spec.inputSchema,
-        execute: async (args: Record<string, unknown>) => {
+      };
+      // 客户端工具不提供 execute：模型调用后本轮暂停，由前端执行并回传 tool-result
+      if (!spec.clientSide && spec.execute) {
+        toolOptions.execute = async (args: Record<string, unknown>) => {
           console.log(`[AI Agent] 工具调用: ${spec.name}`, args);
           try {
-            return await spec.execute(args || {}, { clientId });
+            return await spec.execute!(args || {}, { clientId });
           } catch (err) {
             const msg = err instanceof Error ? err.message : `${spec.name} 失败`;
             console.error(`[AI Agent] ${spec.name} 错误:`, msg);
             return { error: msg };
           }
-        },
-      };
+        };
+      }
       tools[spec.name] = tool(toolOptions);
     }
 
@@ -91,6 +94,10 @@ export async function POST(request: NextRequest) {
       .filter(Boolean)
       .join('\n');
 
+    // 客户端工具：由前端执行 UI 动作，服务端不执行
+    const clientSideToolNames = new Set(
+      toolSpecs.filter((spec) => spec.clientSide).map((spec) => spec.name),
+    );
     // 写操作审批：默认要求用户确认；bypass 模式下全部自动放行
     const approvalToolNames = new Set(
       toolSpecs.filter((spec) => spec.requiresApproval).map((spec) => spec.name),
@@ -129,7 +136,13 @@ export async function POST(request: NextRequest) {
               case 'tool-call':
                 send({
                   type: 'tool-call',
-                  toolCall: { toolName: part.toolName, input: part.input, toolCallId: part.toolCallId },
+                  toolCall: {
+                    toolName: part.toolName,
+                    input: part.input,
+                    toolCallId: part.toolCallId,
+                    // 客户端工具：前端需要真正执行 UI 动作并回传结果
+                    clientSide: clientSideToolNames.has(part.toolName),
+                  },
                 });
                 break;
               case 'tool-approval-request':

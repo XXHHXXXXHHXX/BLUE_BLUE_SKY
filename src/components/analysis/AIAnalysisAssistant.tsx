@@ -9,6 +9,8 @@ import ReportPicker from './ReportPicker';
 import AIPluginPanel from './AIPluginPanel';
 import { getClientId } from '../../utils/clientId';
 import { useAiContextStore } from '../../stores/aiContextStore';
+import { useRouter } from 'next/navigation';
+import { executeUiAction } from '../../utils/aiUiActions';
 
 const { Text } = Typography;
 const { Panel } = Collapse;
@@ -91,7 +93,10 @@ interface AIResponse {
 
 type StreamEvent =
   | { type: 'text-delta'; text: string }
-  | { type: 'tool-call'; toolCall: { toolName: string; input: unknown; toolCallId?: string } }
+  | {
+      type: 'tool-call';
+      toolCall: { toolName: string; input: unknown; toolCallId?: string; clientSide?: boolean };
+    }
   | { type: 'tool-result'; toolResult: { toolName: string; output: unknown; toolCallId?: string } }
   | { type: 'tool-error'; toolError: { toolName: string; error: string; toolCallId?: string } }
   | {
@@ -163,6 +168,7 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
   selectedReportIds: externalSelectedReportIds,
   pageContext,
 }) => {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>(() => [createSession()]);
   const [activeSessionId, setActiveSessionId] = useState<string>(sessions[0].id);
@@ -419,12 +425,24 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
     return `当前选中 ${selectedReports.length} 份报告: ${selectedReports.map((r) => r.name).join('、')}`;
   }, [selectedReports]);
 
+  /** runStream 自身引用（用于客户端工具执行后递归续跑） */
+  const runStreamRef = useRef<
+    ((messages: Array<{ role: string; content: unknown }>, assistantId: string, depth?: number) => Promise<void>) | null
+  >(null);
+  /** 客户端工具续跑最大轮数，防止模型反复调界面工具导致无限递归 */
+  const MAX_UI_CONTINUATIONS = 3;
+
   /** 发起一次流式对话；requestMessages 是完整的模型消息历史 */
   const runStream = useCallback(
-    async (requestMessages: Array<{ role: string; content: unknown }>, assistantId: string) => {
+    async (requestMessages: Array<{ role: string; content: unknown }>, assistantId: string, depth = 0) => {
       setIsLoading(true);
       const controller = new AbortController();
       abortRef.current = controller;
+
+      /** 本轮出现的客户端工具调用（流结束后由前端执行并续跑） */
+      const clientCalls: Array<{ toolCallId: string; toolName: string; input: unknown }> = [];
+      /** 本轮 assistant 内容块（本地累积，避免异步读 state 拿到旧值） */
+      const localParts: RawContentPart[] = [];
 
       const updateAssistant = (updater: (msg: ChatMessage) => ChatMessage) => {
         setMessages((prev) => {
@@ -438,6 +456,7 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
       const handleStreamEvent = (event: StreamEvent) => {
         switch (event.type) {
           case 'text-delta':
+            localParts.push({ type: 'text', text: event.text });
             updateAssistant((msg) => ({
               ...msg,
               content: msg.content + event.text,
@@ -445,6 +464,19 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
             }));
             break;
           case 'tool-call':
+            if (event.toolCall.clientSide && event.toolCall.toolCallId) {
+              clientCalls.push({
+                toolCallId: event.toolCall.toolCallId,
+                toolName: event.toolCall.toolName,
+                input: event.toolCall.input,
+              });
+            }
+            localParts.push({
+              type: 'tool-call',
+              toolCallId: event.toolCall.toolCallId || '',
+              toolName: event.toolCall.toolName,
+              input: event.toolCall.input,
+            });
             updateAssistant((msg) => ({
               ...msg,
               toolCalls: [
@@ -586,6 +618,58 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
         }
 
         updateAssistant((msg) => ({ ...msg, loading: false }));
+
+        // 本轮有客户端工具调用：前端执行真实 UI 动作，再把结果回传续跑
+        if (clientCalls.length > 0 && depth >= MAX_UI_CONTINUATIONS) {
+          updateAssistant((msg) => ({
+            ...msg,
+            error: '界面操作次数过多已停止，请确认需求后重新提问',
+          }));
+        } else if (clientCalls.length > 0) {
+          const rawParts = localParts;
+          const results: Array<{ toolCallId: string; toolName: string; output: unknown }> = [];
+          for (const call of clientCalls) {
+            let output: unknown;
+            try {
+              output = await executeUiAction(
+                call.toolName,
+                (call.input as Record<string, unknown>) || {},
+                {
+                  navigate: (path) => router.push(path),
+                  pathname: pageContext || (typeof window !== 'undefined' ? window.location.pathname : '/'),
+                  openPanel: (panel) => {
+                    // 通过 aiContextStore 广播，由 AppLayout 打开对应弹窗
+                    useAiContextStore.getState().requestOpenPanel(panel);
+                  },
+                },
+              );
+            } catch (e) {
+              output = { ok: false, message: e instanceof Error ? e.message : '界面操作失败' };
+            }
+            results.push({ toolCallId: call.toolCallId, toolName: call.toolName, output });
+          }
+
+          // 拼装续跑消息：历史 + assistant(含 tool-call) + tool(tool-result)
+          const followUp = [
+            ...requestMessages,
+            { role: 'assistant', content: rawParts },
+            {
+              role: 'tool',
+              content: results.map((r) => ({
+                type: 'tool-result',
+                toolCallId: r.toolCallId,
+                toolName: r.toolName,
+                output: { type: 'json', value: r.output },
+              })),
+            },
+          ];
+          const nextId = `a-${Date.now()}`;
+          setMessages((prev) => [
+            ...prev,
+            { id: nextId, role: 'assistant', content: '', loading: true, apiMessages: followUp },
+          ]);
+          await runStreamRef.current?.(followUp, nextId, depth + 1);
+        }
       } catch (err: unknown) {
         const errorText =
           err instanceof Error && err.name === 'AbortError'
@@ -604,8 +688,11 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
         abortRef.current = null;
       }
     },
-    [bypass, setMessages],
+    [bypass, setMessages, router, pageContext],
   );
+
+  // 供递归续跑与读取最新会话使用
+  runStreamRef.current = runStream;
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading) return;

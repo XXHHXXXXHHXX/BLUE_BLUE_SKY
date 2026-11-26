@@ -19,9 +19,12 @@ export interface AiToolSpec {
   name: string;
   description: string;
   inputSchema: z.ZodTypeAny;
-  execute: (args: Record<string, unknown>, ctx: AiToolContext) => Promise<unknown>;
+  /** 客户端工具由浏览器执行，服务端不提供 execute */
+  execute?: (args: Record<string, unknown>, ctx: AiToolContext) => Promise<unknown>;
   /** 会改变系统状态的写操作：默认需用户确认后才执行（bypass 模式下自动放行） */
   requiresApproval?: boolean;
+  /** 客户端工具：由浏览器执行（导航/切页/选中/高亮等），服务端不执行 */
+  clientSide?: boolean;
 }
 
 export interface AiPlugin {

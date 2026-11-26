@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Layout, Menu, Typography, Switch, Space, Tag, Button } from 'antd';
 import {
   DashboardOutlined,
@@ -19,6 +19,7 @@ import { useBMCSessionStore } from '../../stores/bmcSessionStore';
 import TestPackageLibrary from '../test/TestPackageLibrary';
 import TestReportManager from '../test/TestReportManager';
 import AIAnalysisAssistant from '../analysis/AIAnalysisAssistant';
+import { useAiContextStore } from '../../stores/aiContextStore';
 
 const { Header, Sider, Content } = Layout;
 
@@ -42,6 +43,15 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const { sessions, connectedSessionId } = useBMCSessionStore();
   const [isPackageLibraryOpen, setIsPackageLibraryOpen] = useState(false);
   const [isReportManagerOpen, setIsReportManagerOpen] = useState(false);
+
+  // AI 请求打开面板（界面操控工具）
+  const panelRequest = useAiContextStore((s) => s.panelRequest);
+  useEffect(() => {
+    if (!panelRequest) return;
+    if (panelRequest === 'packageLibrary') setIsPackageLibraryOpen(true);
+    if (panelRequest === 'reportManager') setIsReportManagerOpen(true);
+    useAiContextStore.getState().consumePanelRequest();
+  }, [panelRequest]);
 
   // 分身页面（/view）隐藏导航栏和顶部 Header，全屏显示拓扑
   const isClonePage = pathname === '/view';
