@@ -1161,7 +1161,7 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
           </Space>
         }
         placement="right"
-        width={560}
+        size={560}
         open={open}
         onClose={() => {
           if (abortRef.current) {

@@ -326,7 +326,7 @@ const AiCanvas: React.FC = () => {
         </Space>
       }
       placement="left"
-      width={canvasWidth}
+      size={canvasWidth}
       open={open}
       onClose={() => setOpen(false)}
       closeIcon={<CloseOutlined />}
