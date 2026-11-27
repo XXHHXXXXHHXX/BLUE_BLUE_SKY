@@ -1236,6 +1236,22 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
                   <RobotOutlined style={{ fontSize: 32, marginBottom: 12 }} />
                   <div>你可以问我关于报告数据的任何问题</div>
                   {selectedReportsHint && <div style={{ marginTop: 8, fontSize: 12 }}>{selectedReportsHint}</div>}
+                  <div style={{ marginTop: 16, display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+                    {[
+                      '把这份报告的参数影响画出来',
+                      '用柱状图对比这几组数据',
+                      '分析最优参数并画到画布',
+                    ].map((q) => (
+                      <Button
+                        key={q}
+                        size="small"
+                        icon={<BarChartOutlined />}
+                        onClick={() => setInput(q)}
+                      >
+                        {q}
+                      </Button>
+                    ))}
+                  </div>
                   {selectedReports.length === 0 && (
                     <div style={{ marginTop: 16 }}>
                       <Button size="small" icon={<FolderOpenOutlined />} onClick={() => setPickerOpen(true)}>
