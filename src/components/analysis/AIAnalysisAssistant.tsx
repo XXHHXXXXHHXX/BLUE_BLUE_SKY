@@ -199,6 +199,8 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
   const { reports, fetchReports } = useTestReportStore();
   /** 页面写入的选中报告（全局挂载后不再由 props 传递） */
   const contextReportIds = useAiContextStore((s) => s.selectedReportIds);
+  /** 画布块数（用于悬浮按钮角标，订阅 store 才能实时更新） */
+  const canvasBlockCount = useAiCanvasStore((s) => s.blocks.length);
   /** 页面写入的当前拓扑（拓扑监控/设计页） */
   const contextTopologyId = useAiContextStore((s) => s.selectedTopologyId);
 
@@ -1137,13 +1139,20 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
 
   return (
     <>
-      <FloatButton
-        icon={<RobotOutlined />}
-        type="primary"
-        onClick={() => setOpen(true)}
-        tooltip="AI 分析助手"
-        style={{ right: 24, bottom: 24 }}
-      />
+      <FloatButton.Group shape="circle" style={{ right: 24, bottom: 24 }}>
+        <FloatButton
+          icon={<BarChartOutlined />}
+          onClick={() => useAiCanvasStore.getState().setOpen(true)}
+          tooltip={`可视化画布${canvasBlockCount > 0 ? `（${canvasBlockCount} 个视图）` : ''}`}
+          badge={{ count: canvasBlockCount, color: '#722ed1' }}
+        />
+        <FloatButton
+          icon={<RobotOutlined />}
+          type="primary"
+          onClick={() => setOpen(true)}
+          tooltip="AI 分析助手"
+        />
+      </FloatButton.Group>
       <Drawer
         title={
           <Space>
@@ -1160,6 +1169,9 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
           }
           setOpen(false);
         }}
+        // 不加遮罩：与左侧画布可同时操作（边聊边看图）
+        mask={false}
+        rootStyle={{ zIndex: 1100 }}
         styles={{ body: { padding: 0, display: 'flex', flexDirection: 'row', height: '100%' } }}
       >
         <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>

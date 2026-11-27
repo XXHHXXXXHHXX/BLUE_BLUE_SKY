@@ -310,6 +310,9 @@ const AiCanvas: React.FC = () => {
       open={open}
       onClose={() => setOpen(false)}
       closeIcon={<CloseOutlined />}
+      // 不加遮罩：画布与右侧 AI 对话要能同时操作（边聊边看图）
+      mask={false}
+      rootStyle={{ zIndex: 1000 }}
       styles={{ body: { background: '#fafafa', padding: 16 } }}
       extra={
         blocks.length > 0 && (
