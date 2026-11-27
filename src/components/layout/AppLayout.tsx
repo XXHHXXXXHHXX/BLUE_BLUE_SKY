@@ -19,6 +19,7 @@ import { useBMCSessionStore } from '../../stores/bmcSessionStore';
 import TestPackageLibrary from '../test/TestPackageLibrary';
 import TestReportManager from '../test/TestReportManager';
 import AIAnalysisAssistant from '../analysis/AIAnalysisAssistant';
+import AiCanvas from '../analysis/AiCanvas';
 import { useAiContextStore } from '../../stores/aiContextStore';
 
 const { Header, Sider, Content } = Layout;
@@ -177,6 +178,8 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       </Layout>
       {/* AI 助手全局挂载：所有页面（含分身页）都能唤起，能力由插件注册中心提供 */}
       <AIAnalysisAssistant pageContext={pathname} />
+      {/* AI 可视化画布：AI 通过 render* 工具把内容画在这里 */}
+      <AiCanvas />
     </Layout>
   );
 };

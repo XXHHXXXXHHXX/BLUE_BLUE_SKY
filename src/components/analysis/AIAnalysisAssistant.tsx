@@ -2,7 +2,7 @@
 
 import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import { Drawer, Input, Button, Space, FloatButton, List, Card, Typography, Tag, Collapse, Alert, Tooltip } from 'antd';
-import { RobotOutlined, SendOutlined, EyeOutlined, EyeInvisibleOutlined, FolderOpenOutlined, FileExcelOutlined, FilePptOutlined, PlusOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
+import { RobotOutlined, SendOutlined, EyeOutlined, EyeInvisibleOutlined, FolderOpenOutlined, FileExcelOutlined, FilePptOutlined, PlusOutlined, DeleteOutlined, ApiOutlined, BarChartOutlined } from '@ant-design/icons';
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
 import ReactMarkdown from 'react-markdown';
 import ReportPicker from './ReportPicker';
@@ -11,6 +11,8 @@ import { getClientId } from '../../utils/clientId';
 import { useAiContextStore } from '../../stores/aiContextStore';
 import { useRouter } from 'next/navigation';
 import { executeUiAction } from '../../utils/aiUiActions';
+import { executeCanvasAction, isCanvasTool } from '../../utils/aiCanvasActions';
+import { useAiCanvasStore } from '../../stores/aiCanvasStore';
 import { trimMessagesForModel } from '../../server/ai/messageTrim';
 
 const { Text } = Typography;
@@ -448,6 +450,8 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
 
       /** 本轮出现的客户端工具调用（流结束后由前端执行并续跑） */
       const clientCalls: Array<{ toolCallId: string; toolName: string; input: unknown }> = [];
+      /** 画布工具已在事件到达时即时执行，这里缓存结果供续跑回传 */
+      const earlyResults = new Map<string, unknown>();
       /** 本轮 assistant 内容块（本地累积，避免异步读 state 拿到旧值） */
       const localParts: RawContentPart[] = [];
 
@@ -477,6 +481,21 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
                 toolName: event.toolCall.toolName,
                 input: event.toolCall.input,
               });
+              // 画布工具：事件到达即执行，让图表/公式在流式过程中就"长"出来
+              if (isCanvasTool(event.toolCall.toolName)) {
+                try {
+                  const r = executeCanvasAction(
+                    event.toolCall.toolName,
+                    (event.toolCall.input as Record<string, unknown>) || {},
+                  );
+                  earlyResults.set(event.toolCall.toolCallId, r);
+                } catch (e) {
+                  earlyResults.set(event.toolCall.toolCallId, {
+                    ok: false,
+                    message: e instanceof Error ? e.message : '画布渲染失败',
+                  });
+                }
+              }
             }
             localParts.push({
               type: 'tool-call',
@@ -637,21 +656,26 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
           const results: Array<{ toolCallId: string; toolName: string; output: unknown }> = [];
           for (const call of clientCalls) {
             let output: unknown;
-            try {
-              output = await executeUiAction(
-                call.toolName,
-                (call.input as Record<string, unknown>) || {},
-                {
-                  navigate: (path) => router.push(path),
-                  pathname: pageContext || (typeof window !== 'undefined' ? window.location.pathname : '/'),
-                  openPanel: (panel) => {
-                    // 通过 aiContextStore 广播，由 AppLayout 打开对应弹窗
-                    useAiContextStore.getState().requestOpenPanel(panel);
+            // 画布工具已在事件到达时执行过，直接复用结果，避免重复渲染
+            if (earlyResults.has(call.toolCallId)) {
+              output = earlyResults.get(call.toolCallId);
+            } else {
+              try {
+                output = await executeUiAction(
+                  call.toolName,
+                  (call.input as Record<string, unknown>) || {},
+                  {
+                    navigate: (path) => router.push(path),
+                    pathname: pageContext || (typeof window !== 'undefined' ? window.location.pathname : '/'),
+                    openPanel: (panel) => {
+                      // 通过 aiContextStore 广播，由 AppLayout 打开对应弹窗
+                      useAiContextStore.getState().requestOpenPanel(panel);
+                    },
                   },
-                },
-              );
-            } catch (e) {
-              output = { ok: false, message: e instanceof Error ? e.message : '界面操作失败' };
+                );
+              } catch (e) {
+                output = { ok: false, message: e instanceof Error ? e.message : '界面操作失败' };
+              }
             }
             results.push({ toolCallId: call.toolCallId, toolName: call.toolName, output });
           }
@@ -1218,6 +1242,13 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
                   onClick={() => setShowTrace(!showTrace)}
                 >
                   {showTrace ? '隐藏交互过程' : '显示交互过程'}
+                </Button>
+                <Button
+                  size="small"
+                  icon={<BarChartOutlined />}
+                  onClick={() => useAiCanvasStore.getState().setOpen(true)}
+                >
+                  画布
                 </Button>
                 <Button
                   size="small"

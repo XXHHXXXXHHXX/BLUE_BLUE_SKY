@@ -25,6 +25,7 @@ import type { AiPlugin } from './pluginTypes';
 import { topologyPlugin } from './topologyPlugin';
 import { testPlugin } from './testPlugin';
 import { uiPlugin } from './uiPlugin';
+import { canvasPlugin } from './canvasPlugin';
 
 /** 报告查询插件 */
 const reportQueryPlugin: AiPlugin = {
@@ -213,4 +214,5 @@ export const BUILTIN_PLUGINS: AiPlugin[] = [
   topologyPlugin,
   testPlugin,
   uiPlugin,
+  canvasPlugin,
 ];
