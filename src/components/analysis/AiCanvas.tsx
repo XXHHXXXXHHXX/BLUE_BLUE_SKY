@@ -11,9 +11,13 @@ import {
   BarChartOutlined,
   ClearOutlined,
   CloseOutlined,
+  ArrowDownOutlined,
+  ArrowUpOutlined,
   DeleteOutlined,
   DownloadOutlined,
+  DownOutlined,
   FunctionOutlined,
+  RightOutlined,
   NumberOutlined,
   TableOutlined,
   FontSizeOutlined,
@@ -93,11 +97,15 @@ const MetricValue: React.FC<{ value: string | number; unit?: string; delta?: num
   );
 };
 
-const BlockCard: React.FC<{ block: CanvasBlock; onRemove: (id: string) => void }> = ({
-  block,
-  onRemove,
-}) => {
+const BlockCard: React.FC<{
+  block: CanvasBlock;
+  onRemove: (id: string) => void;
+  onMove: (id: string, dir: -1 | 1) => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+}> = ({ block, onRemove, onMove, canMoveUp, canMoveDown }) => {
   const chartRef = useRef<ReactECharts | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
 
   /** 图表导出 PNG（取 ECharts 实例的 dataURL） */
   const exportChartPng = () => {
@@ -113,6 +121,13 @@ const BlockCard: React.FC<{ block: CanvasBlock; onRemove: (id: string) => void }
   };
   const title = (
     <Space size={6}>
+      <span
+        style={{ color: '#722ed1', cursor: 'pointer' }}
+        onClick={() => setCollapsed((v) => !v)}
+        title={collapsed ? '展开' : '折叠'}
+      >
+        {collapsed ? <RightOutlined /> : <DownOutlined />}
+      </span>
       <span style={{ color: '#722ed1' }}>{BLOCK_ICON[block.type]}</span>
       <span>{block.title || '未命名'}</span>
       {block.revision > 1 && (
@@ -258,6 +273,24 @@ const BlockCard: React.FC<{ block: CanvasBlock; onRemove: (id: string) => void }
       styles={{ body: { padding: block.type === 'markdown' ? 12 : 16 } }}
       extra={
         <Space size={0}>
+          <Tooltip title="上移">
+            <Button
+              size="small"
+              type="text"
+              icon={<ArrowUpOutlined />}
+              disabled={!canMoveUp}
+              onClick={() => onMove(block.id, -1)}
+            />
+          </Tooltip>
+          <Tooltip title="下移">
+            <Button
+              size="small"
+              type="text"
+              icon={<ArrowDownOutlined />}
+              disabled={!canMoveDown}
+              onClick={() => onMove(block.id, 1)}
+            />
+          </Tooltip>
           {block.type === 'chart' && (
             <Tooltip title="导出 PNG">
               <Button size="small" type="text" icon={<DownloadOutlined />} onClick={exportChartPng} />
@@ -274,11 +307,15 @@ const BlockCard: React.FC<{ block: CanvasBlock; onRemove: (id: string) => void }
         </Space>
       }
     >
-      {body}
-      {block.description && block.type !== 'formula' && (
-        <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>
-          {block.description}
-        </Paragraph>
+      {collapsed ? null : (
+        <>
+          {body}
+          {block.description && block.type !== 'formula' && (
+            <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>
+              {block.description}
+            </Paragraph>
+          )}
+        </>
       )}
     </Card>
   );
@@ -304,7 +341,7 @@ function useCanvasWidth(): number {
 }
 
 const AiCanvas: React.FC = () => {
-  const { open, blocks, title, setOpen, clear, removeBlock } = useAiCanvasStore();
+  const { open, blocks, title, setOpen, clear, removeBlock, moveBlock } = useAiCanvasStore();
   const canvasWidth = useCanvasWidth();
 
   /** 导出画布为 JSON（不含 ECharts 实例，纯数据可留档/分享） */
@@ -379,7 +416,16 @@ const AiCanvas: React.FC = () => {
           </div>
         </div>
       ) : (
-        blocks.map((b) => <BlockCard key={b.id} block={b} onRemove={removeBlock} />)
+        blocks.map((b, i) => (
+          <BlockCard
+            key={b.id}
+            block={b}
+            onRemove={removeBlock}
+            onMove={moveBlock}
+            canMoveUp={i > 0}
+            canMoveDown={i < blocks.length - 1}
+          />
+        ))
       )}
     </Drawer>
   );

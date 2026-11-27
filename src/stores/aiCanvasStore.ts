@@ -116,6 +116,8 @@ interface AiCanvasState {
   /** 渲染/更新一个块：给定 id 则替换并递增 revision */
   upsertBlock: (block: Omit<CanvasBlock, 'revision' | 'createdAt'> & { id: string }) => void;
   removeBlock: (id: string) => void;
+  /** 上移（dir=-1）/下移（dir=1），越界忽略 */
+  moveBlock: (id: string, dir: -1 | 1) => void;
   clear: () => void;
 }
 
@@ -159,6 +161,17 @@ export const useAiCanvasStore = create<AiCanvasState>((set, get) => ({
 
   removeBlock: (id) => {
     const next = get().blocks.filter((b) => b.id !== id);
+    set({ blocks: next });
+    persist(next, get().title);
+  },
+
+  moveBlock: (id, dir) => {
+    const blocks = get().blocks;
+    const idx = blocks.findIndex((b) => b.id === id);
+    const target = idx + dir;
+    if (idx === -1 || target < 0 || target >= blocks.length) return;
+    const next = [...blocks];
+    [next[idx], next[target]] = [next[target], next[idx]];
     set({ blocks: next });
     persist(next, get().title);
   },
