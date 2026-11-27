@@ -42,9 +42,9 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
         <Alert
           type="warning"
           showIcon
-          message={this.props.title ? `${this.props.title}渲染失败` : '内容渲染失败'}
+          title={this.props.title ? `${this.props.title}渲染失败` : '内容渲染失败'}
           description={
-            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Space orientation="vertical" size={4} style={{ width: '100%' }}>
               <Text type="secondary" style={{ fontSize: 12, wordBreak: 'break-all' }}>
                 {this.state.error.message || '未知错误'}
               </Text>

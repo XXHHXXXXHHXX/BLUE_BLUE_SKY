@@ -221,7 +221,7 @@ const BlockCard: React.FC<{ block: CanvasBlock; onRemove: (id: string) => void }
                   : it.status === 'error'
                     ? 'red'
                     : 'gray',
-            children: (
+            content: (
               <div>
                 <Space size={6}>
                   <Text strong>{it.title}</Text>
