@@ -282,6 +282,13 @@ function buildSimpleChartOption(
   };
 }
 
+/** 单块数据上限：防止模型一次性传入上万行导致浏览器卡死 */
+const MAX_CHART_POINTS = 2000;
+const MAX_TABLE_ROWS = 500;
+const MAX_METRICS = 24;
+const MAX_TIMELINE_ITEMS = 60;
+const MAX_TEXT_CHARS = 20000;
+
 /** 执行一个画布工具；未知工具返回 ok:false */
 export function executeCanvasAction(
   toolName: string,
@@ -309,24 +316,37 @@ export function executeCanvasAction(
       let echartsOption = option;
       if (!echartsOption) {
         const chartType = (typeof args.chartType === 'string' ? args.chartType : 'bar') as ChartType;
-        const data = Array.isArray(args.data) ? (args.data as Array<Record<string, unknown>>) : [];
-        const yFields = Array.isArray(args.yFields) ? (args.yFields as string[]).map(String) : [];
+        let data = Array.isArray(args.data) ? (args.data as Array<Record<string, unknown>>) : [];
         if (data.length === 0) {
           return { ok: false, message: 'renderChart 需要 data（或直接提供 option）' };
         }
-        echartsOption = buildSimpleChartOption(
-          chartType,
-          typeof args.xField === 'string' ? args.xField : undefined,
-          yFields,
-          data,
-        );
+        if (data.length > MAX_CHART_POINTS) {
+          data = data.slice(0, MAX_CHART_POINTS);
+        }
+        const xField = typeof args.xField === 'string' ? args.xField : undefined;
+        let yFields = Array.isArray(args.yFields) ? (args.yFields as string[]).map(String) : [];
+        // 模型常漏传 yFields：自动推断数值字段（排除 xField）
+        if (yFields.length === 0) {
+          const keys = Object.keys(data[0] || {});
+          yFields = keys.filter(
+            (k) => k !== xField && data.some((row) => typeof row[k] === 'number' || (row[k] !== '' && row[k] != null && !isNaN(Number(row[k])))),
+          );
+          if (yFields.length === 0) {
+            return {
+              ok: false,
+              message: `无法从数据中推断数值字段，请显式提供 yFields。可用字段：${keys.join('、') || '无'}`,
+            };
+          }
+        }
+        echartsOption = buildSimpleChartOption(chartType, xField, yFields, data);
       }
-      upsert('chart', { echartsOption });
+      const height = typeof args.height === 'number' ? Math.min(800, Math.max(180, args.height)) : undefined;
+      upsert('chart', { echartsOption, chartHeight: height });
       return { ok: true, message: `已渲染图表 ${id}`, detail: { id } };
     }
 
     case 'renderMetrics': {
-      const metrics = Array.isArray(args.metrics) ? args.metrics : [];
+      const metrics = Array.isArray(args.metrics) ? args.metrics.slice(0, MAX_METRICS) : [];
       if (metrics.length === 0) return { ok: false, message: 'renderMetrics 需要 metrics' };
       upsert('metrics', { metrics });
       return { ok: true, message: `已渲染指标卡 ${id}`, detail: { id } };
@@ -334,10 +354,18 @@ export function executeCanvasAction(
 
     case 'renderTable': {
       const columns = Array.isArray(args.columns) ? args.columns : [];
-      const rows = Array.isArray(args.rows) ? args.rows : [];
+      const allRows = Array.isArray(args.rows) ? args.rows : [];
       if (columns.length === 0) return { ok: false, message: 'renderTable 需要 columns' };
+      const rows = allRows.slice(0, MAX_TABLE_ROWS);
       upsert('table', { columns, rows });
-      return { ok: true, message: `已渲染表格 ${id}`, detail: { id } };
+      return {
+        ok: true,
+        message:
+          allRows.length > MAX_TABLE_ROWS
+            ? `已渲染表格 ${id}（共 ${allRows.length} 行，仅展示前 ${MAX_TABLE_ROWS} 行）`
+            : `已渲染表格 ${id}`,
+        detail: { id, totalRows: allRows.length },
+      };
     }
 
     case 'renderFormula': {
@@ -351,15 +379,18 @@ export function executeCanvasAction(
     }
 
     case 'renderTimeline': {
-      const items = Array.isArray(args.items) ? args.items : [];
+      const items = Array.isArray(args.items) ? args.items.slice(0, MAX_TIMELINE_ITEMS) : [];
       if (items.length === 0) return { ok: false, message: 'renderTimeline 需要 items' };
       upsert('timeline', { items });
       return { ok: true, message: `已渲染时间线 ${id}`, detail: { id } };
     }
 
     case 'renderMarkdown': {
-      const content = typeof args.content === 'string' ? args.content : '';
+      let content = typeof args.content === 'string' ? args.content : '';
       if (!content) return { ok: false, message: 'renderMarkdown 需要 content' };
+      if (content.length > MAX_TEXT_CHARS) {
+        content = `${content.slice(0, MAX_TEXT_CHARS)}\n\n…（内容过长，已截断）`;
+      }
       upsert('markdown', { content });
       return { ok: true, message: `已渲染文本 ${id}`, detail: { id } };
     }

@@ -440,6 +440,8 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
   >(null);
   /** 客户端工具续跑最大轮数，防止模型反复调界面工具导致无限递归 */
   const MAX_UI_CONTINUATIONS = 3;
+  /** 纯画布渲染的续跑上限（画布无副作用，允许更多轮以支持「逐步画图/公式变幻」） */
+  const MAX_CANVAS_CONTINUATIONS = 6;
 
   /** 发起一次流式对话；requestMessages 是完整的模型消息历史 */
   const runStream = useCallback(
@@ -474,28 +476,30 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
               rawParts: [...(msg.rawParts || []), { type: 'text', text: event.text }],
             }));
             break;
-          case 'tool-call':
+          case 'tool-call': {
+            // 画布工具：事件到达即执行，让图表/公式在流式过程中就"长"出来
+            // 不依赖 toolCallId 是否存在——缺失时用本地序号兜底，避免漏渲染
+            const canvasKey = event.toolCall.toolCallId || `local-${clientCalls.length}`;
+            if (event.toolCall.clientSide && isCanvasTool(event.toolCall.toolName)) {
+              try {
+                const r = executeCanvasAction(
+                  event.toolCall.toolName,
+                  (event.toolCall.input as Record<string, unknown>) || {},
+                );
+                earlyResults.set(canvasKey, r);
+              } catch (e) {
+                earlyResults.set(canvasKey, {
+                  ok: false,
+                  message: e instanceof Error ? e.message : '画布渲染失败',
+                });
+              }
+            }
             if (event.toolCall.clientSide && event.toolCall.toolCallId) {
               clientCalls.push({
                 toolCallId: event.toolCall.toolCallId,
                 toolName: event.toolCall.toolName,
                 input: event.toolCall.input,
               });
-              // 画布工具：事件到达即执行，让图表/公式在流式过程中就"长"出来
-              if (isCanvasTool(event.toolCall.toolName)) {
-                try {
-                  const r = executeCanvasAction(
-                    event.toolCall.toolName,
-                    (event.toolCall.input as Record<string, unknown>) || {},
-                  );
-                  earlyResults.set(event.toolCall.toolCallId, r);
-                } catch (e) {
-                  earlyResults.set(event.toolCall.toolCallId, {
-                    ok: false,
-                    message: e instanceof Error ? e.message : '画布渲染失败',
-                  });
-                }
-              }
             }
             localParts.push({
               type: 'tool-call',
@@ -520,6 +524,7 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
               ],
             }));
             break;
+          }
           case 'tool-approval-request':
             updateAssistant((msg) => ({
               ...msg,
@@ -646,10 +651,15 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
         updateAssistant((msg) => ({ ...msg, loading: false }));
 
         // 本轮有客户端工具调用：前端执行真实 UI 动作，再把结果回传续跑
-        if (clientCalls.length > 0 && depth >= MAX_UI_CONTINUATIONS) {
+        // 纯画布渲染无副作用，放宽轮数上限；含界面/业务动作则用严格上限
+        const onlyCanvas = clientCalls.length > 0 && clientCalls.every((c) => isCanvasTool(c.toolName));
+        const limit = onlyCanvas ? MAX_CANVAS_CONTINUATIONS : MAX_UI_CONTINUATIONS;
+        if (clientCalls.length > 0 && depth >= limit) {
           updateAssistant((msg) => ({
             ...msg,
-            error: '界面操作次数过多已停止，请确认需求后重新提问',
+            error: onlyCanvas
+              ? '画布渲染轮次过多已停止，如需继续请再发一条消息'
+              : '界面操作次数过多已停止，请确认需求后重新提问',
           }));
         } else if (clientCalls.length > 0) {
           const rawParts = localParts;

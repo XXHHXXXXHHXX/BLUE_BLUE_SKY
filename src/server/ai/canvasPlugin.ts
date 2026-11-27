@@ -39,6 +39,7 @@ export const canvasPlugin: AiPlugin = {
         yFields: z.array(z.string()).optional().describe('Y 轴数值字段名列表（简单模式）'),
         data: z.array(z.record(z.string(), z.any())).optional().describe('数据行（简单模式）'),
         option: z.record(z.string(), z.any()).optional().describe('完整 ECharts option（高级模式）'),
+        height: z.number().optional().describe('图表高度像素，默认 320'),
         description: z.string().optional(),
       }),
     },

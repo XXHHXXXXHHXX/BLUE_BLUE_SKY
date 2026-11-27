@@ -6,11 +6,13 @@
  * 与业务页面无关，全局挂载；同一 block id 更新时重绘（用于公式变幻、图表变形）。
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Card, Drawer, Empty, Space, Table, Tag, Timeline, Tooltip, Typography } from 'antd';
+import { Button, Card, Drawer, Empty, Popconfirm, Space, Table, Tag, Timeline, Tooltip, Typography } from 'antd';
 import {
   BarChartOutlined,
   ClearOutlined,
   CloseOutlined,
+  DeleteOutlined,
+  DownloadOutlined,
   FunctionOutlined,
   NumberOutlined,
   TableOutlined,
@@ -20,6 +22,8 @@ import {
 import ReactECharts from 'echarts-for-react';
 import ReactMarkdown from 'react-markdown';
 import { useAiCanvasStore, type CanvasBlock } from '../../stores/aiCanvasStore';
+import ErrorBoundary from '../common/ErrorBoundary';
+import { downloadDataUrl } from '../../utils/chartExport';
 
 const { Text, Paragraph } = Typography;
 
@@ -74,11 +78,33 @@ const MetricValue: React.FC<{ value: string | number; unit?: string; delta?: num
   );
 };
 
-const BlockCard: React.FC<{ block: CanvasBlock }> = ({ block }) => {
+const BlockCard: React.FC<{ block: CanvasBlock; onRemove: (id: string) => void }> = ({
+  block,
+  onRemove,
+}) => {
+  const chartRef = useRef<ReactECharts | null>(null);
+
+  /** 图表导出 PNG（取 ECharts 实例的 dataURL） */
+  const exportChartPng = () => {
+    try {
+      const inst = chartRef.current?.getEchartsInstance?.();
+      if (!inst) return;
+      const url = inst.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
+      const name = (block.title || 'chart').replace(/[\\/:*?"<>|]/g, '_');
+      downloadDataUrl(url, `${name}.png`);
+    } catch (e) {
+      console.error('[AiCanvas] 导出图片失败', e);
+    }
+  };
   const title = (
     <Space size={6}>
       <span style={{ color: '#722ed1' }}>{BLOCK_ICON[block.type]}</span>
       <span>{block.title || '未命名'}</span>
+      {block.revision > 1 && (
+        <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+          v{block.revision}
+        </Tag>
+      )}
     </Space>
   );
 
@@ -86,12 +112,15 @@ const BlockCard: React.FC<{ block: CanvasBlock }> = ({ block }) => {
   switch (block.type) {
     case 'chart':
       body = block.echartsOption ? (
-        <ReactECharts
-          option={block.echartsOption}
-          style={{ height: 320 }}
-          notMerge
-          lazyUpdate
-        />
+        <ErrorBoundary title="图表">
+          <ReactECharts
+            ref={chartRef}
+            option={block.echartsOption}
+            style={{ height: block.chartHeight || 320 }}
+            notMerge
+            lazyUpdate
+          />
+        </ErrorBoundary>
       ) : (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无图表数据" />
       );
@@ -112,21 +141,23 @@ const BlockCard: React.FC<{ block: CanvasBlock }> = ({ block }) => {
 
     case 'table':
       body = (
-        <Table
-          size="small"
-          pagination={false}
-          scroll={{ x: 'max-content' }}
-          columns={(block.columns || []).map((c) => ({
-            title: c.title,
-            dataIndex: c.key,
-            key: c.key,
-            align: c.align,
-            render: (v: unknown) =>
-              typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? ''),
-          }))}
-          dataSource={(block.rows || []).map((r, i) => ({ ...r, __key: i }))}
-          rowKey="__key"
-        />
+        <ErrorBoundary title="表格">
+          <Table
+            size="small"
+            pagination={(block.rows?.length || 0) > 20 ? { pageSize: 20, size: 'small' } : false}
+            scroll={{ x: 'max-content' }}
+            columns={(block.columns || []).map((c) => ({
+              title: c.title,
+              dataIndex: c.key,
+              key: c.key,
+              align: c.align,
+              render: (v: unknown) =>
+                typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? ''),
+            }))}
+            dataSource={(block.rows || []).map((r, i) => ({ ...r, __key: i }))}
+            rowKey="__key"
+          />
+        </ErrorBoundary>
       );
       break;
 
@@ -190,9 +221,11 @@ const BlockCard: React.FC<{ block: CanvasBlock }> = ({ block }) => {
 
     case 'markdown':
       body = (
-        <div style={{ fontSize: 14, lineHeight: 1.7 }}>
-          <ReactMarkdown>{block.content || ''}</ReactMarkdown>
-        </div>
+        <ErrorBoundary title="文本">
+          <div style={{ fontSize: 14, lineHeight: 1.7 }}>
+            <ReactMarkdown>{block.content || ''}</ReactMarkdown>
+          </div>
+        </ErrorBoundary>
       );
       break;
   }
@@ -203,6 +236,23 @@ const BlockCard: React.FC<{ block: CanvasBlock }> = ({ block }) => {
       title={title}
       style={{ marginBottom: 12 }}
       styles={{ body: { padding: block.type === 'markdown' ? 12 : 16 } }}
+      extra={
+        <Space size={0}>
+          {block.type === 'chart' && (
+            <Tooltip title="导出 PNG">
+              <Button size="small" type="text" icon={<DownloadOutlined />} onClick={exportChartPng} />
+            </Tooltip>
+          )}
+          <Tooltip title="移除该视图">
+            <Button
+              size="small"
+              type="text"
+              icon={<DeleteOutlined />}
+              onClick={() => onRemove(block.id)}
+            />
+          </Tooltip>
+        </Space>
+      }
     >
       {body}
       {block.description && block.type !== 'formula' && (
@@ -215,7 +265,7 @@ const BlockCard: React.FC<{ block: CanvasBlock }> = ({ block }) => {
 };
 
 const AiCanvas: React.FC = () => {
-  const { open, blocks, title, setOpen, clear } = useAiCanvasStore();
+  const { open, blocks, title, setOpen, clear, removeBlock } = useAiCanvasStore();
 
   return (
     <Drawer
@@ -234,11 +284,19 @@ const AiCanvas: React.FC = () => {
       styles={{ body: { background: '#fafafa', padding: 16 } }}
       extra={
         blocks.length > 0 && (
-          <Tooltip title="清空画布">
-            <Button size="small" icon={<ClearOutlined />} onClick={clear}>
-              清空
-            </Button>
-          </Tooltip>
+          <Space>
+            <Popconfirm
+              title="清空画布？"
+              description={`将移除全部 ${blocks.length} 个视图，无法恢复`}
+              okText="清空"
+              cancelText="取消"
+              onConfirm={clear}
+            >
+              <Button size="small" icon={<ClearOutlined />}>
+                清空
+              </Button>
+            </Popconfirm>
+          </Space>
         )
       }
     >
@@ -249,7 +307,7 @@ const AiCanvas: React.FC = () => {
           style={{ marginTop: 60 }}
         />
       ) : (
-        blocks.map((b) => <BlockCard key={b.id} block={b} />)
+        blocks.map((b) => <BlockCard key={b.id} block={b} onRemove={removeBlock} />)
       )}
     </Drawer>
   );
