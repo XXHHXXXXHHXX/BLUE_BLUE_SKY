@@ -2,6 +2,7 @@ import { streamText, tool, isStepCount } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildToolRegistry } from '@/src/server/ai/pluginRegistry';
+import { trimMessagesForModel } from '@/src/server/ai/messageTrim';
 
 /** 基础 system prompt；各插件可通过 promptHint 追加能力说明 */
 const BASE_SYSTEM_PROMPT =
@@ -111,10 +112,18 @@ export async function POST(request: NextRequest) {
             ? { type: 'user-approval' as const }
             : undefined;
 
+    // 裁剪历史，避免工具结果累积撑爆模型上下文（512k 上限）
+    const { messages: trimmedMessages, trimmed, droppedTurns } = trimMessagesForModel(messages);
+    if (trimmed) {
+      console.warn(
+        `[AI Agent] 历史已裁剪：丢弃 ${droppedTurns} 轮，剩余 ${trimmedMessages.length} 条消息`,
+      );
+    }
+
     const result = streamText({
       model: openai.chat(modelName),
       system,
-      messages: messages as never,
+      messages: trimmedMessages as never,
       stopWhen: isStepCount(5),
       tools,
       ...(toolApproval ? { toolApproval } : {}),

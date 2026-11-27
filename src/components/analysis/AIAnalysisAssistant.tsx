@@ -11,6 +11,7 @@ import { getClientId } from '../../utils/clientId';
 import { useAiContextStore } from '../../stores/aiContextStore';
 import { useRouter } from 'next/navigation';
 import { executeUiAction } from '../../utils/aiUiActions';
+import { trimMessagesForModel } from '../../server/ai/messageTrim';
 
 const { Text } = Typography;
 const { Panel } = Collapse;
@@ -287,12 +288,18 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
       saveTimerRef.current = null;
     }
     pendingSaveRef.current = null;
-    // 流式中的 loading 标记不落库
+    // 流式中的 loading 标记不落库；
+    // apiMessages/rawParts 仅用于「待审批续跑」，没有待审批的消息不落库，
+    // 否则每条 assistant 都存一份完整历史，会话体积按 O(n²) 膨胀。
     const payload = {
       ...session,
       messages: session.messages.map((m) => {
         const copy = { ...m };
         delete copy.loading;
+        if (!copy.pendingApprovals || copy.pendingApprovals.length === 0) {
+          delete copy.apiMessages;
+          delete copy.rawParts;
+        }
         return copy;
       }),
     };
@@ -665,7 +672,16 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
           ];
           const nextId = `a-${Date.now()}`;
           setMessages((prev) => [
-            ...prev,
+            // 上一轮已处理完，清掉它的续跑快照，避免历史重复存储
+            ...prev.map((m) => {
+              if (m.id === assistantId) {
+                const copy = { ...m };
+                delete copy.apiMessages;
+                delete copy.rawParts;
+                return copy;
+              }
+              return m;
+            }),
             { id: nextId, role: 'assistant', content: '', loading: true, apiMessages: followUp },
           ]);
           await runStreamRef.current?.(followUp, nextId, depth + 1);
@@ -738,13 +754,25 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
       ...history,
       { role: 'user', content: userText + selectedReportsContext + contextHint },
     ];
+    // 前端先裁一次，避免把巨型历史发给服务端（服务端还会再裁一次兜底）
+    const trimmedRequest = trimMessagesForModel(requestMessages).messages;
 
-    // 记录本轮请求，审批续跑时作为历史前缀
+    // 记录本轮请求，审批续跑时作为历史前缀；
+    // 同时清掉其他消息上的 apiMessages/rawParts（无待审批时不再需要），
+    // 否则每条 assistant 都留一份完整历史，内存按 O(n²) 增长。
     setMessages((prev) =>
-      prev.map((m) => (m.id === assistantId ? { ...m, apiMessages: requestMessages } : m)),
+      prev.map((m) => {
+        if (m.id === assistantId) return { ...m, apiMessages: trimmedRequest };
+        if (m.pendingApprovals && m.pendingApprovals.length > 0) return m;
+        if (!m.apiMessages && !m.rawParts) return m;
+        const copy = { ...m };
+        delete copy.apiMessages;
+        delete copy.rawParts;
+        return copy;
+      }),
     );
 
-    await runStream(requestMessages, assistantId);
+    await runStream(trimmedRequest, assistantId);
   }, [input, isLoading, messages, selectedReports, setMessages, runStream, pageContext, contextTopologyId]);
 
   /** 用户对写操作给出确认/拒绝后，把审批结果回传给模型继续 */
@@ -778,6 +806,7 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
         { role: 'assistant', content: trimmedContent },
         { role: 'tool', content: approvalResponses },
       ];
+      const trimmedRequest = trimMessagesForModel(requestMessages).messages;
 
       // 清掉待确认状态，避免重复点击
       setMessages((prev) =>
@@ -787,10 +816,10 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
       const assistantId = `a-${Date.now()}`;
       setMessages((prev) => [
         ...prev,
-        { id: assistantId, role: 'assistant', content: '', loading: true, apiMessages: requestMessages },
+        { id: assistantId, role: 'assistant', content: '', loading: true, apiMessages: trimmedRequest },
       ]);
 
-      await runStream(requestMessages, assistantId);
+      await runStream(trimmedRequest, assistantId);
     },
     [isLoading, messages, runStream, setMessages],
   );
