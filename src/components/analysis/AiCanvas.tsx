@@ -264,8 +264,37 @@ const BlockCard: React.FC<{ block: CanvasBlock; onRemove: (id: string) => void }
   );
 };
 
+/** 画布宽度：宽屏固定 720，窄屏自适应（避免遮挡 AI 对话抽屉） */
+function useCanvasWidth(): number {
+  const [width, setWidth] = useState(() =>
+    typeof window === 'undefined' ? 720 : Math.min(720, Math.max(320, window.innerWidth - 40)),
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = () =>
+      setWidth(Math.min(720, Math.max(320, window.innerWidth - 40)));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return width;
+}
+
 const AiCanvas: React.FC = () => {
   const { open, blocks, title, setOpen, clear, removeBlock } = useAiCanvasStore();
+  const canvasWidth = useCanvasWidth();
+
+  /** 导出画布为 JSON（不含 ECharts 实例，纯数据可留档/分享） */
+  const exportCanvasJson = () => {
+    try {
+      const payload = JSON.stringify({ title, blocks, exportedAt: new Date().toISOString() }, null, 2);
+      const blob = new Blob([payload], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      downloadDataUrl(url, `${(title || 'canvas').replace(/[\\/:*?"<>|]/g, '_')}.json`);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      console.error('[AiCanvas] 导出 JSON 失败', e);
+    }
+  };
 
   return (
     <Drawer
@@ -277,7 +306,7 @@ const AiCanvas: React.FC = () => {
         </Space>
       }
       placement="left"
-      width={720}
+      width={canvasWidth}
       open={open}
       onClose={() => setOpen(false)}
       closeIcon={<CloseOutlined />}
@@ -285,6 +314,11 @@ const AiCanvas: React.FC = () => {
       extra={
         blocks.length > 0 && (
           <Space>
+            <Tooltip title="导出画布数据（JSON，可留档或分享）">
+              <Button size="small" icon={<DownloadOutlined />} onClick={exportCanvasJson}>
+                导出
+              </Button>
+            </Tooltip>
             <Popconfirm
               title="清空画布？"
               description={`将移除全部 ${blocks.length} 个视图，无法恢复`}
@@ -301,11 +335,22 @@ const AiCanvas: React.FC = () => {
       }
     >
       {blocks.length === 0 ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="AI 还没有画任何东西。试着对它说「把结果画出来」"
-          style={{ marginTop: 60 }}
-        />
+        <div style={{ marginTop: 40 }}>
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description="AI 还没有画任何东西"
+          />
+          <div style={{ marginTop: 16, maxWidth: 420, margin: '16px auto 0' }}>
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              试着对 AI 说：
+            </Text>
+            <ul style={{ margin: '8px 0 0', paddingLeft: 20, fontSize: 13, color: '#595959', lineHeight: 1.9 }}>
+              <li>「把这份报告的参数影响画出来」</li>
+              <li>「用柱状图对比这几组数据」</li>
+              <li>「把建模公式和结论画到画布上」</li>
+            </ul>
+          </div>
+        </div>
       ) : (
         blocks.map((b) => <BlockCard key={b.id} block={b} onRemove={removeBlock} />)
       )}
