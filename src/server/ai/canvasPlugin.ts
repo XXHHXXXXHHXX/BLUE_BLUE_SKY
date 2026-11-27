@@ -20,6 +20,7 @@ export const canvasPlugin: AiPlugin = {
     '你可以在界面上「画图」给用户看：需要展示数据时用 renderChart（柱/线/饼/散点/雷达/仪表盘），' +
     '展示关键数字用 renderMetrics，展示明细用 renderTable，展示数学公式用 renderFormula，' +
     '展示步骤或过程用 renderTimeline，展示结论文字用 renderMarkdown。' +
+    '如果已经调用过 runSmartAnalysis，直接把它的返回结果传给 renderAnalysisResult，一次渲染整套分析视图（推荐）。' +
     '用户说「画出来/可视化/让我看看/展示一下」时，直接调用这些工具，不要只在文字里描述。' +
     '同一个 id 再次调用会更新该块（可用于让图表/公式随分析推进而变幻）；' +
     '开始新话题时先调用 clearCanvas 清空画布。' +
@@ -118,6 +119,18 @@ export const canvasPlugin: AiPlugin = {
         id: z.string(),
         title: z.string().optional(),
         content: z.string().describe('Markdown 内容'),
+      }),
+    },
+    {
+      name: 'renderAnalysisResult',
+      description:
+        '把 runSmartAnalysis 的完整返回值一次性渲染成整套视图（核心指标 + 参数影响饼图/柱图 + ' +
+        '各参数效应曲线 + 最优参数表 + 分析说明）。调用 runSmartAnalysis 后直接把它返回的 result 传进来即可，' +
+        '不要手工拆成多次 renderChart。',
+      clientSide: true,
+      inputSchema: z.object({
+        result: z.record(z.string(), z.any()).describe('runSmartAnalysis 工具返回的完整结果对象'),
+        idPrefix: z.string().optional().describe('块 ID 前缀，默认 analysis'),
       }),
     },
     {

@@ -19,6 +19,7 @@ export const CANVAS_TOOL_NAMES = new Set([
   'renderFormula',
   'renderTimeline',
   'renderMarkdown',
+  'renderAnalysisResult',
   'setCanvasTitle',
   'clearCanvas',
 ]);
@@ -398,6 +399,154 @@ export function executeCanvasAction(
       }
       upsert('markdown', { content });
       return { ok: true, message: `已渲染文本 ${id}`, detail: { id } };
+    }
+
+    case 'renderAnalysisResult': {
+      // 一次调用把 runSmartAnalysis 的完整结果铺到画布（省去模型手工组装 7 次调用）
+      const result = args.result as Record<string, unknown> | undefined;
+      if (!result || typeof result !== 'object') {
+        return { ok: false, message: 'renderAnalysisResult 需要 result（runSmartAnalysis 的返回值）' };
+      }
+      if (result.error) {
+        return { ok: false, message: `分析结果含错误：${String(result.error)}` };
+      }
+      const prefix = typeof args.idPrefix === 'string' && args.idPrefix ? args.idPrefix : 'analysis';
+      const created: string[] = [];
+      const push = (
+        suffix: string,
+        type: CanvasBlockType,
+        title: string,
+        extra: Record<string, unknown>,
+      ) => {
+        const blockId = `${prefix}-${suffix}`;
+        store.upsertBlock({
+          id: blockId,
+          type,
+          title,
+          ...extra,
+        } as Parameters<typeof store.upsertBlock>[0]);
+        created.push(blockId);
+      };
+
+      const r2 = typeof result.model_r2 === 'number' ? result.model_r2 : undefined;
+      const modelType = result.model_type === 'xgboost' ? 'XGBoost' : '多项式回归';
+      const opt = result.optimal_point as
+        | { values?: Record<string, number | string>; predicted_score?: number }
+        | undefined;
+      const actual = result.actual_best as
+        | { values?: Record<string, number | string>; actual_score?: number }
+        | undefined;
+
+      // 1. 核心指标
+      const metrics: Array<{ label: string; value: string | number; unit?: string; color?: string }> = [
+        { label: '模型', value: modelType },
+      ];
+      if (typeof r2 === 'number') {
+        metrics.push({
+          label: '拟合度 R²',
+          value: r2,
+          color: r2 >= 0.8 ? '#52c41a' : r2 >= 0.5 ? '#faad14' : '#ff4d4f',
+        });
+      }
+      if (typeof result.samples === 'number') metrics.push({ label: '样本量', value: result.samples, unit: '条' });
+      if (Array.isArray(result.features)) metrics.push({ label: '特征数', value: result.features.length, unit: '个' });
+      if (typeof opt?.predicted_score === 'number') {
+        metrics.push({ label: '最优预测值', value: opt.predicted_score, color: '#1890ff' });
+      }
+      if (typeof actual?.actual_score === 'number') {
+        metrics.push({ label: '历史最佳实测', value: actual.actual_score, color: '#52c41a' });
+      }
+      push('metrics', 'metrics', '核心指标', { metrics });
+
+      // 2. 参数影响比重（饼图）
+      const importance = Array.isArray(result.feature_importance)
+        ? (result.feature_importance as Array<{ feature: string; impact_ratio: number }>)
+        : [];
+      if (importance.length > 0) {
+        push('impact-pie', 'chart', '参数影响比重', {
+          echartsOption: {
+            tooltip: { trigger: 'item', formatter: '{b}: {c}% ({d}%)' },
+            legend: { bottom: 0 },
+            series: [
+              {
+                type: 'pie',
+                radius: ['40%', '70%'],
+                itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
+                label: { formatter: '{b}\n{d}%' },
+                data: importance.map((i) => ({ name: i.feature, value: i.impact_ratio })),
+              },
+            ],
+            color: PALETTE,
+          },
+        });
+        push('impact-bar', 'chart', '参数重要性排序', {
+          echartsOption: {
+            tooltip: { trigger: 'axis' },
+            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+            xAxis: { type: 'category', data: importance.map((i) => i.feature) },
+            yAxis: { type: 'value' },
+            series: [
+              {
+                type: 'bar',
+                barWidth: '50%',
+                itemStyle: { color: PALETTE[0], borderRadius: [4, 4, 0, 0] },
+                data: importance.map((i) => i.impact_ratio),
+              },
+            ],
+          },
+        });
+      }
+
+      // 3. 参数效应曲线
+      const effects = Array.isArray(result.parameter_effects)
+        ? (result.parameter_effects as Array<{
+            feature: string;
+            data: Array<{ x: number | string; shap: number; actual_y: number }>;
+          }>)
+        : [];
+      for (const pe of effects.slice(0, 6)) {
+        push(`effect-${pe.feature}`, 'chart', `${pe.feature} 影响曲线`, {
+          echartsOption: {
+            tooltip: { trigger: 'axis' },
+            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+            xAxis: { type: 'category', data: pe.data.map((d) => d.x) },
+            yAxis: [
+              { type: 'value', name: '实际表现' },
+              { type: 'value', name: 'SHAP' },
+            ],
+            series: [
+              { name: '实际表现', type: 'line', smooth: true, data: pe.data.map((d) => d.actual_y) },
+              { name: 'SHAP', type: 'line', smooth: true, yAxisIndex: 1, data: pe.data.map((d) => d.shap) },
+            ],
+          },
+        });
+      }
+
+      // 4. 最优参数组合表
+      const optValues = opt?.values || {};
+      if (Object.keys(optValues).length > 0) {
+        push('optimal', 'table', '最优参数组合', {
+          columns: [
+            { key: 'param', title: '参数' },
+            { key: 'value', title: '推荐值' },
+          ],
+          rows: Object.entries(optValues).map(([k, v]) => ({ param: k, value: String(v) })),
+        });
+      }
+
+      // 5. 分析说明
+      const notes = [result.algorithm_note, result.optimization_note].filter(
+        (n): n is string => typeof n === 'string' && n.length > 0,
+      );
+      if (notes.length > 0) {
+        push('notes', 'markdown', '分析说明', { content: notes.join('\n\n') });
+      }
+
+      return {
+        ok: true,
+        message: `已把分析结果渲染为 ${created.length} 个视图`,
+        detail: { blocks: created },
+      };
     }
 
     case 'setCanvasTitle': {
