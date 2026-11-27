@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   Select,
@@ -28,57 +28,25 @@ import {
   CheckCircleOutlined,
   AimOutlined,
   InfoCircleOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
 import { collectScoreNames } from '../../utils/scoreParsing';
 import BaselineComparisonPanel from './BaselineComparisonPanel';
 import MultiXYChartPanel from './MultiXYChartPanel';
+import LiveModelingConsole from './LiveModelingConsole';
 import { useAiContextStore } from '../../stores/aiContextStore';
+import {
+  buildEffectLineOption,
+  buildImpactBarOption,
+  buildImpactPieOption,
+  buildWaterfallOption,
+  type AnalysisResult,
+} from '../../utils/analysisCharts';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
-
-interface RankPoint {
-  rank: number;
-  /** 参数取值：数值参数为 number，字符串枚举参数为原始字符串 */
-  values: Record<string, number | string>;
-  predicted_score?: number;
-  actual_score?: number;
-}
-
-interface AnalysisResult {
-  success: boolean;
-  model_type: string;
-  model_r2: number;
-  samples: number;
-  features: string[];
-  target: string;
-  direction: string;
-  rank: number;
-  optimal_point: RankPoint;
-  top3_inferred: RankPoint[];
-  actual_best: RankPoint;
-  top3_actual: RankPoint[];
-  feature_importance: Array<{
-    feature: string;
-    shap_importance: number;
-    xgb_importance: number;
-    correlation: number;
-    impact_ratio: number;
-  }>;
-  parameter_effects: Array<{
-    feature: string;
-    data: Array<{ x: number | string; shap: number; actual_y: number }>;
-  }>;
-  waterfall_data: {
-    base_value: number;
-    features: Array<{ feature: string; value: number | string; shap: number }>;
-    final_prediction: number;
-  } | null;
-  algorithm_note: string;
-  optimization_note: string;
-}
 
 const DataAnalysisPanel: React.FC = () => {
   const { reports, fetchReports } = useTestReportStore();
@@ -89,6 +57,10 @@ const DataAnalysisPanel: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string>('');
+  /** 当前激活的页签；AI 助手可请求切到实时建模页 */
+  const [activeTab, setActiveTab] = useState('smart');
+  /** 实时建模启动令牌：递增即触发一次流式分析 */
+  const [runToken, setRunToken] = useState(0);
 
   useEffect(() => {
     fetchReports();
@@ -111,6 +83,41 @@ const DataAnalysisPanel: React.FC = () => {
     return allReports.find((r) => r.id === selectedReportId);
   }, [allReports, selectedReportId]);
 
+  // AI 助手可通过 aiContextStore 请求「在数据分析页启动实时建模」
+  const liveRequest = useAiContextStore((s) => s.liveAnalysisRequest);
+  const consumeLiveRequest = useAiContextStore((s) => s.consumeLiveAnalysisRequest);
+  /** 待启动标记：报告数据可能尚未加载完成，等 selectedReport 就绪后再触发 */
+  const pendingLiveRef = useRef(false);
+
+  const startLiveAnalysis = useCallback(() => {
+    if (!selectedReport) return;
+    setActiveTab('live');
+    setRunToken((t) => t + 1);
+  }, [selectedReport]);
+
+  // 消费 AI 发起的实时建模请求：先同步筛选条件，等报告就绪后启动
+  useEffect(() => {
+    if (!liveRequest) return;
+    if (liveRequest.reportId && liveRequest.reportId !== selectedReportId) {
+      setSelectedReportId(liveRequest.reportId);
+    }
+    if (liveRequest.target) setSelectedTarget(liveRequest.target);
+    if (liveRequest.direction) setDirection(liveRequest.direction);
+    if (typeof liveRequest.rank === 'number') setRank(liveRequest.rank);
+    setActiveTab('live');
+    pendingLiveRef.current = true;
+    consumeLiveRequest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveRequest]);
+
+  // 报告就绪后真正触发一次流式分析
+  useEffect(() => {
+    if (!pendingLiveRef.current) return;
+    if (!selectedReport) return;
+    pendingLiveRef.current = false;
+    setRunToken((t) => t + 1);
+  }, [selectedReport]);
+
   const targetOptions = useMemo(() => {
     const opts = [{ label: '性能分数 (score)', value: 'score' }];
     if (selectedReport?.results?.length) {
@@ -130,6 +137,7 @@ const DataAnalysisPanel: React.FC = () => {
 
   const handleAnalyze = async () => {
     if (!selectedReport) return;
+    setActiveTab('smart');
     setLoading(true);
     setError('');
     setResult(null);
@@ -152,167 +160,20 @@ const DataAnalysisPanel: React.FC = () => {
     }
   };
 
-  // ========== 图表配置 ==========
-  const impactPieOption = useMemo(() => {
-    if (!result?.feature_importance?.length) return null;
-    return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c}% ({d}%)' },
-      legend: { bottom: 0 },
-      series: [
-        {
-          type: 'pie',
-          radius: ['40%', '70%'],
-          avoidLabelOverlap: true,
-          itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
-          label: { show: true, formatter: '{b}\n{d}%' },
-          data: result.feature_importance.map((item) => ({
-            name: item.feature,
-            value: item.impact_ratio,
-          })),
-        },
-      ],
-    };
-  }, [result]);
-
-  const impactBarOption = useMemo(() => {
-    if (!result?.feature_importance?.length) return null;
-    const names = result.feature_importance.map((i) => i.feature);
-    const shapVals = result.feature_importance.map((i) => i.shap_importance);
-    return {
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-      xAxis: { type: 'category', data: names },
-      yAxis: { type: 'value', name: 'SHAP 重要性' },
-      series: [
-        {
-          type: 'bar',
-          data: shapVals,
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: '#1890ff' },
-                { offset: 1, color: '#69c0ff' },
-              ],
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
-          barWidth: '50%',
-        },
-      ],
-    };
-  }, [result]);
-
-  const effectLineOption = (feature: string, data: Array<{ x: number | string; shap: number; actual_y: number }>) => {
-    return {
-      tooltip: { trigger: 'axis' },
-      grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-      xAxis: { type: 'category', name: feature, data: data.map((d) => d.x) },
-      yAxis: [
-        { type: 'value', name: '实际表现', position: 'left' },
-        { type: 'value', name: 'SHAP 值', position: 'right' },
-      ],
-      series: [
-        {
-          name: '实际表现',
-          type: 'line',
-          data: data.map((d) => d.actual_y),
-          smooth: true,
-          symbol: 'circle',
-          lineStyle: { color: '#52c41a', width: 2 },
-          itemStyle: { color: '#52c41a' },
-        },
-        {
-          name: 'SHAP 值',
-          type: 'line',
-          yAxisIndex: 1,
-          data: data.map((d) => d.shap),
-          smooth: true,
-          symbol: 'diamond',
-          lineStyle: { color: '#fa8c16', width: 2 },
-          itemStyle: { color: '#fa8c16' },
-        },
-      ],
-    };
-  };
-
-  const waterfallOption = useMemo(() => {
-    if (!result?.waterfall_data) return null;
-    const { base_value, features, final_prediction } = result.waterfall_data;
-    const categories = ['基础值', ...features.map((f) => f.feature), '预测值'];
-    const values = features.map((f) => f.shap);
-    const cumulative = [base_value];
-    let sum = base_value;
-    for (const v of values) {
-      sum += v;
-      cumulative.push(sum);
-    }
-    cumulative.push(final_prediction);
-
-    const invisible = [0];
-    for (let i = 0; i < values.length; i++) {
-      const prev = cumulative[i];
-      const curr = values[i];
-      invisible.push(curr >= 0 ? prev : prev + curr);
-    }
-    invisible.push(0);
-
-    const barValues = [base_value, ...values.map((v) => Math.abs(v)), final_prediction - cumulative[cumulative.length - 2]];
-
-    return {
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'shadow' },
-        formatter: (params: any[]) => {
-          const idx = params[0].dataIndex;
-          if (idx === 0) return `基础值: ${base_value.toFixed(2)}`;
-          if (idx === categories.length - 1) return `最终预测: ${final_prediction.toFixed(2)}`;
-          const f = features[idx - 1];
-          return `${f.feature}=${f.value}<br/>SHAP: ${f.shap > 0 ? '+' : ''}${f.shap.toFixed(2)}`;
-        },
-      },
-      grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-      xAxis: { type: 'category', data: categories },
-      yAxis: { type: 'value' },
-      series: [
-        {
-          type: 'bar',
-          stack: 'total',
-          itemStyle: { borderColor: 'transparent', color: 'transparent' },
-          emphasis: { itemStyle: { borderColor: 'transparent', color: 'transparent' } },
-          data: invisible,
-        },
-        {
-          type: 'bar',
-          stack: 'total',
-          data: barValues.map((v, i) => ({
-            value: v,
-            itemStyle: {
-              color:
-                i === 0
-                  ? '#8c8c8c'
-                  : i === categories.length - 1
-                  ? '#1890ff'
-                  : barValues[i] >= 0
-                  ? '#52c41a'
-                  : '#ff4d4f',
-            },
-          })),
-          label: {
-            show: true,
-            position: 'top',
-            formatter: (p: any) => {
-              if (p.dataIndex === 0) return base_value.toFixed(1);
-              if (p.dataIndex === categories.length - 1) return final_prediction.toFixed(1);
-              const val = values[p.dataIndex - 1];
-              return (val > 0 ? '+' : '') + val.toFixed(1);
-            },
-          },
-        },
-      ],
-    };
-  }, [result]);
+  // ========== 图表配置（与实时建模控制台共用同一套构造器） ==========
+  const impactPieOption = useMemo(
+    () => buildImpactPieOption(result?.feature_importance),
+    [result],
+  );
+  const impactBarOption = useMemo(
+    () => buildImpactBarOption(result?.feature_importance),
+    [result],
+  );
+  const effectLineOption = buildEffectLineOption;
+  const waterfallOption = useMemo(
+    () => buildWaterfallOption(result?.waterfall_data),
+    [result],
+  );
 
   return (
     <div style={{ padding: 16, maxWidth: 1400, margin: '0 auto' }}>
@@ -320,20 +181,7 @@ const DataAnalysisPanel: React.FC = () => {
         <BarChartOutlined /> 数据分析中心
       </Title>
 
-      <Tabs
-        defaultActiveKey="smart"
-        items={[
-          {
-            key: 'smart',
-            label: (
-              <Space>
-                <ExperimentOutlined />
-                智能分析
-              </Space>
-            ),
-            children: (
-              <>
-      {/* 配置区 */}
+      {/* 配置区：两个页签共用，切换页签不丢失选择 */}
       <Card title="分析配置" style={{ marginBottom: 16 }}>
         <Row gutter={16} align="middle">
           <Col xs={24} sm={12} md={8}>
@@ -399,20 +247,30 @@ const DataAnalysisPanel: React.FC = () => {
               ]}
             />
           </Col>
-          <Col xs={24} sm={24} md={4}>
+          <Col xs={24} sm={24} md={7}>
             <div style={{ marginBottom: 8 }}>
               <Text style={{ opacity: 0 }}>占位</Text>
             </div>
-            <Button
-              type="primary"
-              icon={<ExperimentOutlined />}
-              loading={loading}
-              disabled={!selectedReport}
-              onClick={handleAnalyze}
-              size="large"
-            >
-              启动智能分析
-            </Button>
+            <Space wrap>
+              <Button
+                type="primary"
+                icon={<ExperimentOutlined />}
+                loading={loading}
+                disabled={!selectedReport}
+                onClick={handleAnalyze}
+                size="large"
+              >
+                启动智能分析
+              </Button>
+              <Button
+                icon={<ThunderboltOutlined />}
+                disabled={!selectedReport}
+                onClick={startLiveAnalysis}
+                size="large"
+              >
+                AI 实时建模
+              </Button>
+            </Space>
           </Col>
         </Row>
 
@@ -433,6 +291,47 @@ const DataAnalysisPanel: React.FC = () => {
         )}
       </Card>
 
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
+          {
+            key: 'live',
+            label: (
+              <Space>
+                <ThunderboltOutlined />
+                AI 实时建模
+              </Space>
+            ),
+            children: (
+              <>
+                <LiveModelingConsole
+                  runToken={runToken}
+                  params={
+                    selectedReport
+                      ? {
+                          reportId: selectedReport.id,
+                          target: selectedTarget,
+                          direction: direction === 'min' ? 'min' : 'max',
+                          rank,
+                        }
+                      : null
+                  }
+                  onComplete={(r) => setResult(r)}
+                />
+              </>
+            ),
+          },
+          {
+            key: 'smart',
+            label: (
+              <Space>
+                <ExperimentOutlined />
+                智能分析
+              </Space>
+            ),
+            children: (
+              <>
       {error && (
         <Alert message={error} type="error" showIcon style={{ marginBottom: 16 }} />
       )}
