@@ -27,6 +27,21 @@ import { downloadDataUrl } from '../../utils/chartExport';
 
 const { Text, Paragraph } = Typography;
 
+/** 单元格渲染：对象/数组转 JSON，空值显示 -，超长截断 */
+function renderCell(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '-';
+  if (typeof v === 'object') {
+    try {
+      const s = JSON.stringify(v);
+      return s.length > 200 ? `${s.slice(0, 200)}…` : s;
+    } catch {
+      return '[对象]';
+    }
+  }
+  const s = String(v);
+  return s.length > 200 ? `${s.slice(0, 200)}…` : s;
+}
+
 const BLOCK_ICON: Record<string, React.ReactNode> = {
   chart: <BarChartOutlined />,
   metrics: <NumberOutlined />,
@@ -151,10 +166,15 @@ const BlockCard: React.FC<{ block: CanvasBlock; onRemove: (id: string) => void }
               dataIndex: c.key,
               key: c.key,
               align: c.align,
-              render: (v: unknown) =>
-                typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v ?? ''),
+              render: (v: unknown) => renderCell(v),
             }))}
-            dataSource={(block.rows || []).map((r, i) => ({ ...r, __key: i }))}
+            dataSource={(block.rows || []).map((r, i) => ({
+              // 模型可能给出非对象行（数组/原始值），统一包成对象避免展开异常
+              ...(r && typeof r === 'object' && !Array.isArray(r)
+                ? (r as Record<string, unknown>)
+                : { value: r }),
+              __key: i,
+            }))}
             rowKey="__key"
           />
         </ErrorBoundary>

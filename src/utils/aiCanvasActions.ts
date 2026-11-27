@@ -250,11 +250,16 @@ function buildSimpleChartOption(
   }
 
   if (chartType === 'gauge') {
-    const value = data.length ? Number(data[0][yf[0]] ?? 0) : 0;
+    const raw = data.length ? Number(data[0][yf[0]] ?? 0) : 0;
+    const value = Number.isFinite(raw) ? raw : 0;
+    // 量程取数据最大值与 100 中较大者，避免数值超出 0~100 时指针越界
+    const max = Math.max(100, Math.ceil(Math.abs(value) * 1.2));
     return {
       series: [
         {
           type: 'gauge',
+          min: 0,
+          max,
           progress: { show: true },
           detail: { valueAnimation: true, formatter: '{value}' },
           data: [{ value, name: yf[0] || '数值' }],
