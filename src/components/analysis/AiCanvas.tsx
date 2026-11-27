@@ -284,15 +284,19 @@ const BlockCard: React.FC<{ block: CanvasBlock; onRemove: (id: string) => void }
   );
 };
 
-/** 画布宽度：宽屏固定 720，窄屏自适应（避免遮挡 AI 对话抽屉） */
+/** 计算画布宽度：最多占视口一半，避免与右侧 AI 抽屉（560px）挤在一起 */
+function computeCanvasWidth(viewportWidth: number): number {
+  const half = Math.floor(viewportWidth * 0.5);
+  return Math.max(320, Math.min(720, half));
+}
+
 function useCanvasWidth(): number {
   const [width, setWidth] = useState(() =>
-    typeof window === 'undefined' ? 720 : Math.min(720, Math.max(320, window.innerWidth - 40)),
+    typeof window === 'undefined' ? 720 : computeCanvasWidth(window.innerWidth),
   );
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const onResize = () =>
-      setWidth(Math.min(720, Math.max(320, window.innerWidth - 40)));
+    const onResize = () => setWidth(computeCanvasWidth(window.innerWidth));
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
