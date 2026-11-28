@@ -67,8 +67,9 @@ import { getScrollLegend, tooltipBase, formatAxisTooltip } from '../../utils/mon
 import { useTestStore, type TestTab, type TestResult, type IterationParameter, type AdjustmentCommand, type LogMonitorConfig, type PipelineStage, type MonitorCommand } from '../../stores/testStore';
 import { useTestPackageStore, formatFileSize } from '../../stores/testPackageStore';
 import { useTestReportStore, generateChartOption } from '../../stores/testReportStore';
-import { useTestIterationConfigStore } from '../../stores/testIterationConfigStore';
+import { useTestIterationConfigStore, type SavedTestConfig } from '../../stores/testIterationConfigStore';
 import ConfigTemplateSelect from './ConfigTemplateSelect';
+import { mergeIterationConfigs, describeMerge } from '../../utils/configTemplateMerge';
 import GroupedSelect from './GroupedSelect';
 import { useBMCSessionStore } from '../../stores/bmcSessionStore';
 import { useTestJobStore, type Job, type PipelineStage as ServerPipelineStage } from '../../stores/testJobStore';
@@ -1216,15 +1217,25 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
           throw new Error(deployResult.message || `阶段 [${stage.name}] 部署失败`);
         }
 
-        // 解析阶段配置：阶段独立配置 > 配置模板 > 当前标签页配置
-        const template = stage.configTemplateId ? savedConfigs.find((c) => c.id === stage.configTemplateId) : null;
+        // 解析阶段配置：阶段独立配置 > 配置模板（可拼接多个）> 当前标签页配置
+        const stageTemplateIds = (stage.configTemplateIds || []).filter(Boolean);
+        const stageTemplates = stageTemplateIds
+          .map((id) => savedConfigs.find((c) => c.id === id && c.configType === 'iteration'))
+          .filter((c): c is SavedTestConfig => !!c);
+        const mergedStageTemplate = stageTemplates.length > 0 ? mergeIterationConfigs(stageTemplates).value : null;
+        const singleTemplate = stage.configTemplateId
+          ? savedConfigs.find((c) => c.id === stage.configTemplateId)
+          : null;
+        const template = mergedStageTemplate ?? singleTemplate;
         const baseEnvVars = stage.envVars ?? template?.envVars ?? tab.powerTestConfig.envVars;
         const requiredEnvVarEntries = Object.entries(stage.requiredEnvVarValues || {}).filter(([, v]) => v.trim());
         const mergedEnvVars = [...baseEnvVars, ...requiredEnvVarEntries.map(([key, value]) => ({ key, value }))];
         const baseConfig = {
           iterationParams: template?.iterationParams ?? tab.powerTestConfig.iterationParams,
           adjustmentCommands: template?.adjustmentCommands ?? tab.powerTestConfig.adjustmentCommands,
-          monitorCommands: stage.monitorCommands ?? template?.monitorCommands ?? tab.powerTestConfig.monitorCommands,
+          // 迭代配置模板不携带监控命令，拼接结果同样没有
+          monitorCommands:
+            stage.monitorCommands ?? singleTemplate?.monitorCommands ?? tab.powerTestConfig.monitorCommands,
           envVars: mergedEnvVars,
           logMonitorConfig: template?.logMonitorConfig ?? tab.powerTestConfig.logMonitorConfig,
           globalBmcSessionId: template?.globalBmcSessionId ?? tab.powerTestConfig.globalBmcSessionId,
@@ -1670,6 +1681,27 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
     message.success(`已加载配置: ${config.name}`);
   };
 
+  /** 拼接多个迭代参数配置模板：按顺序合并参数与调整命令，重映射 paramId */
+  const handleMergeConfigs = (configs: SavedTestConfig[]) => {
+    const result = mergeIterationConfigs(configs);
+    const merged = result.value;
+    const updates: Partial<TestTab['powerTestConfig']> = {
+      iterationParams: merged.iterationParams,
+      adjustmentCommands: merged.adjustmentCommands,
+      envVars: merged.envVars,
+    };
+    if (merged.logMonitorConfig !== undefined) {
+      updates.logMonitorConfig = merged.logMonitorConfig;
+    }
+    if (merged.globalBmcSessionId !== undefined) {
+      updates.globalBmcSessionId = merged.globalBmcSessionId;
+    }
+    setPowerTestConfig(tab.id, updates);
+    // 拼接结果不是单一模板，清空单选值避免误导
+    setSelectedConfigId(null);
+    message.success(describeMerge(result, 'iteration'));
+  };
+
   // 保存当前配置
   const handleSaveConfig = async () => {
     const values = await saveConfigForm.validateFields();
@@ -1703,6 +1735,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       packageLibraryId: stage.packageLibraryId,
       packageFileName: stage.packageFileName,
       configTemplateId: stage.configTemplateId ?? null,
+      configTemplateIds: stage.configTemplateIds,
       monitorCommands: stage.monitorCommands,
       envVars: stage.envVars,
       requiredEnvVarValues: stage.requiredEnvVarValues,
@@ -1727,6 +1760,7 @@ const PowerTestPanel: React.FC<PowerTestPanelProps> = ({ tab }) => {
       packageLibraryId: s.packageLibraryId,
       packageFileName: s.packageFileName,
       configTemplateId: s.configTemplateId ?? null,
+      configTemplateIds: s.configTemplateIds,
       monitorCommands: s.monitorCommands,
       envVars: s.envVars,
       requiredEnvVarValues: s.requiredEnvVarValues,
@@ -2209,6 +2243,8 @@ echo "{\"score\": \${SCORE}}"
                 }}
                 placeholder="选择已保存的配置模板"
                 disabled={tab.isRunningTest}
+                enableMerge
+                onMerge={handleMergeConfigs}
               />
               <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                 <Button
@@ -3092,12 +3128,30 @@ echo "{\"score\": \${SCORE}}"
                             onChange={(config) => {
                               updatePipelineStage(tab.id, stage.id, {
                                 configTemplateId: config ? config.id : null,
+                                // 单选会覆盖拼接结果，避免两套配置同时生效
+                                configTemplateIds: undefined,
                               });
+                            }}
+                            enableMerge
+                            onMerge={(configs) => {
+                              updatePipelineStage(tab.id, stage.id, {
+                                configTemplateIds: configs.map((c) => c.id),
+                                configTemplateId: null,
+                              });
+                              message.success(`已拼接 ${configs.length} 个迭代配置模板`);
                             }}
                             placeholder="选择配置模板（可选）"
                             disabled={tab.isRunningTest}
                             showManage={false}
                           />
+                          {stage.configTemplateIds && stage.configTemplateIds.length > 0 && (
+                            <div style={{ fontSize: 12, color: '#1677ff', marginTop: 4 }}>
+                              已拼接：{stage.configTemplateIds
+                                .map((id) => savedConfigs.find((c) => c.id === id)?.name)
+                                .filter(Boolean)
+                                .join(' → ')}
+                            </div>
+                          )}
                         </div>
                         </>
                         )}

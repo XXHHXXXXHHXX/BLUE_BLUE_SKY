@@ -33,6 +33,7 @@ import { useTestStore, type MonitorCommand } from '../../stores/testStore';
 import { useBMCSessionStore } from '../../stores/bmcSessionStore';
 import { useTestIterationConfigStore, type SavedTestConfig } from '../../stores/testIterationConfigStore';
 import ConfigTemplateSelect from './ConfigTemplateSelect';
+import { mergeMonitorConfigs, describeMerge } from '../../utils/configTemplateMerge';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
 import {
   DEFAULT_SERIAL_TEMPLATE_ID,
@@ -188,6 +189,15 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
     setSelectedConfigId(config.id);
   };
 
+  /** 拼接多个监控配置模板：按顺序合并命令，重生成 id 并去重 */
+  const handleMergeConfigs = (configs: SavedTestConfig[]) => {
+    const result = mergeMonitorConfigs(configs);
+    updateCommands(result.value.monitorCommands);
+    // 拼接结果不是单一模板，清空单选值避免误导
+    setSelectedConfigId(null);
+    message.success(describeMerge(result, 'monitor'));
+  };
+
   // 保存当前监控配置
   const handleSaveConfig = async () => {
     const values = await saveConfigForm.validateFields();
@@ -267,6 +277,8 @@ const MonitorConfigPanel: React.FC<MonitorConfigPanelProps> = ({
             }}
             placeholder="选择已保存的监控配置模板"
             disabled={disabled}
+            enableMerge
+            onMerge={handleMergeConfigs}
             renderExtra={(config) => (
               <span style={{ color: '#999', fontSize: 12 }}>
                 {config.monitorCommands?.length || 0} 条命令

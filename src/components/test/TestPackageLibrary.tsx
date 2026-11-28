@@ -22,6 +22,7 @@ import {
   UploadOutlined,
   SearchOutlined,
   DownloadOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload';
 import {
@@ -30,6 +31,7 @@ import {
   type TestPackage,
 } from '../../stores/testPackageStore';
 import useMaximizableModal from '../../hooks/useMaximizableModal';
+import PackageFileEditor from './PackageFileEditor';
 
 interface TestPackageLibraryProps {
   visible: boolean;
@@ -60,6 +62,8 @@ const TestPackageLibrary: React.FC<TestPackageLibraryProps> = ({
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [showUploadForm, setShowUploadForm] = useState(false);
+  /** 正在在线编辑的包（null 表示编辑器关闭） */
+  const [editingPackage, setEditingPackage] = useState<{ id: string; name: string } | null>(null);
 
   const mainModal = useMaximizableModal({ minWidth: 1200, minPageSize: 5, maxPageSize: 25 });
 
@@ -167,7 +171,7 @@ const TestPackageLibrary: React.FC<TestPackageLibraryProps> = ({
     {
       title: '操作',
       key: 'action',
-      width: 100,
+      width: 140,
       render: (_: unknown, record: TestPackage) => (
         <Space>
           <Button
@@ -177,6 +181,15 @@ const TestPackageLibrary: React.FC<TestPackageLibraryProps> = ({
             onClick={() => handleDownload(record.id, record.name)}
             title="下载"
           />
+          {!record.builtin && /\.zip$/i.test(record.filename) && (
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              size="small"
+              onClick={() => setEditingPackage({ id: record.id, name: record.name })}
+              title="在线编辑包内文件"
+            />
+          )}
           {!record.builtin && (
             <Popconfirm
               title="确定删除？"
@@ -191,7 +204,8 @@ const TestPackageLibrary: React.FC<TestPackageLibraryProps> = ({
   ];
 
   return (
-    <Modal
+    <>
+      <Modal
       title={mainModal.renderTitle(
         <Space>
           <DatabaseOutlined />
@@ -332,7 +346,16 @@ const TestPackageLibrary: React.FC<TestPackageLibraryProps> = ({
           )}
         </div>
       </Space>
-    </Modal>
+      </Modal>
+
+      <PackageFileEditor
+        visible={!!editingPackage}
+        packageId={editingPackage?.id ?? null}
+        packageName={editingPackage?.name ?? ''}
+        onClose={() => setEditingPackage(null)}
+        onChanged={() => fetchPackages()}
+      />
+    </>
   );
 };
 

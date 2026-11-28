@@ -20,6 +20,8 @@ export interface PipelineStageTemplate {
   packageFileName: string;
   /** 关联的迭代配置模板 ID（可选） */
   configTemplateId?: string | null;
+  /** 拼接的多个迭代配置模板 ID（按顺序拼接） */
+  configTemplateIds?: string[];
   /** 阶段独立监控命令 */
   monitorCommands?: Array<{
     id: string;

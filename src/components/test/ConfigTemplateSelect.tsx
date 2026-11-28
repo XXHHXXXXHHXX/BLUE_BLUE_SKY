@@ -25,6 +25,7 @@ import {
   MergeCellsOutlined,
   DownOutlined,
   RightOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons';
 import {
   useTestIterationConfigStore,
@@ -46,6 +47,13 @@ interface ConfigTemplateSelectProps {
   disabled?: boolean;
   /** 是否显示「管理」按钮（默认显示） */
   showManage?: boolean;
+  /**
+   * 是否显示「拼接」按钮（默认不显示）。
+   * 点击后可选多个模板，按勾选顺序拼成一个配置交给 onMerge。
+   */
+  enableMerge?: boolean;
+  /** 拼接多个模板后的回调（按勾选顺序） */
+  onMerge?: (configs: SavedTestConfig[]) => void;
 }
 
 /**
@@ -62,6 +70,8 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
   renderExtra,
   disabled,
   showManage = true,
+  enableMerge = false,
+  onMerge,
 }) => {
   const {
     configs,
@@ -87,6 +97,9 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const [ungroupedCollapsed, setUngroupedCollapsed] = useState(false);
   const [searchValue, setSearchValue] = useState('');
+  // 拼接弹窗：勾选的模板 id（顺序即拼接顺序）
+  const [isMergeOpen, setIsMergeOpen] = useState(false);
+  const [mergeIds, setMergeIds] = useState<string[]>([]);
 
   useEffect(() => {
     fetchConfigs(configType);
@@ -376,6 +389,19 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
           options={selectOptions}
           disabled={disabled}
         />
+        {enableMerge && (
+          <Button
+            size="small"
+            icon={<ApartmentOutlined />}
+            disabled={disabled || typeConfigs.length === 0}
+            onClick={() => {
+              setMergeIds([]);
+              setIsMergeOpen(true);
+            }}
+          >
+            拼接
+          </Button>
+        )}
         {showManage && (
           <Button
             size="small"
@@ -517,6 +543,78 @@ const ConfigTemplateSelect: React.FC<ConfigTemplateSelectProps> = ({
             renderItem={renderConfigRow}
             style={{ maxHeight: 360, overflow: 'auto' }}
           />
+        )}
+      </Modal>
+
+      {/* 拼接弹窗：按勾选顺序把多个最小单元模板拼成一个配置 */}
+      <Modal
+        title={`拼接配置模板（${configType === 'iteration' ? '迭代参数' : '监控配置'}）`}
+        open={isMergeOpen}
+        onCancel={() => setIsMergeOpen(false)}
+        onOk={() => {
+          if (mergeIds.length === 0) {
+            message.warning('请至少勾选一个模板');
+            return;
+          }
+          const picked = mergeIds
+            .map((id) => typeConfigs.find((c) => c.id === id))
+            .filter((c): c is SavedTestConfig => !!c);
+          if (picked.length === 0) {
+            message.warning('所选模板已不存在，请刷新后重试');
+            return;
+          }
+          onMerge?.(picked);
+          setIsMergeOpen(false);
+        }}
+        okText="拼接并应用"
+        cancelText="取消"
+        width={620}
+        destroyOnClose
+      >
+        <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>
+          勾选多个模板，按下方列表顺序拼接成一个配置。每个模板保持最小单元，拼接后互不影响。
+        </div>
+        {typeConfigs.length === 0 ? (
+          <Empty description="暂无配置模板" />
+        ) : (
+          <List
+            size="small"
+            dataSource={typeConfigs}
+            style={{ maxHeight: 360, overflow: 'auto' }}
+            renderItem={(config) => {
+              const order = mergeIds.indexOf(config.id);
+              const group = typeGroups.find((g) => g.id === config.groupId);
+              return (
+                <List.Item>
+                  <Space>
+                    <Checkbox
+                      checked={order >= 0}
+                      onChange={(e) => {
+                        setMergeIds((prev) =>
+                          e.target.checked
+                            ? [...prev, config.id]
+                            : prev.filter((id) => id !== config.id),
+                        );
+                      }}
+                    />
+                    <span>{config.name}</span>
+                    {group && <Tag color="blue">{group.name}</Tag>}
+                    {renderExtra?.(config)}
+                    {order >= 0 && <Tag color="green">第 {order + 1} 个</Tag>}
+                  </Space>
+                </List.Item>
+              );
+            }}
+          />
+        )}
+        {mergeIds.length > 0 && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#555' }}>
+            拼接顺序：
+            {mergeIds
+              .map((id) => typeConfigs.find((c) => c.id === id)?.name)
+              .filter(Boolean)
+              .join(' → ')}
+          </div>
         )}
       </Modal>
 

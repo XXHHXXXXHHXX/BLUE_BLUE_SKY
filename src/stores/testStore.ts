@@ -129,6 +129,8 @@ export interface PipelineStage {
   packageFileName: string;
   packageFile?: File;
   configTemplateId?: string | null;
+  /** 阶段拼接的多个迭代配置模板 ID（按顺序拼接；存在时优先于 configTemplateId） */
+  configTemplateIds?: string[];
   /** 阶段独立的监控命令；未设置时沿用配置模板或当前标签页配置 */
   monitorCommands?: MonitorCommand[];
   /** 阶段独立的环境变量；未设置时沿用配置模板或当前标签页配置 */
