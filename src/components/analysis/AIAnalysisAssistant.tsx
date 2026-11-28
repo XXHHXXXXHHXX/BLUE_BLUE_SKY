@@ -84,8 +84,17 @@ interface ChatMessage {
   apiMessages?: Array<{ role: string; content: unknown }>;
   /** 本轮 assistant 产生的内容块（审批续跑时回传） */
   rawParts?: RawContentPart[];
+  /** 本轮每条 tool-call 的结果（服务端已执行 / 画布即时 / 前端 UI），续跑时补齐 */
+  toolResultParts?: ToolResultPart[];
   /** 等待用户确认的写操作 */
   pendingApprovals?: PendingApproval[];
+}
+
+/** 回传给模型的工具结果块 */
+interface ToolResultPart {
+  toolCallId: string;
+  toolName: string;
+  output: unknown;
 }
 
 interface AIResponse {
@@ -147,6 +156,68 @@ function restoreMessage(m: ChatMessage): ChatMessage {
     pendingApprovals: [],
     content: restored.content ? `${restored.content}\n\n${notice}` : notice,
   };
+}
+
+/** 合并连续的文本增量，避免回传几百个单字 text 块；同时去掉空文本块 */
+function buildAssistantParts(parts: RawContentPart[]): RawContentPart[] {
+  const merged: RawContentPart[] = [];
+  for (const part of parts) {
+    if (part.type === 'text') {
+      const last = merged[merged.length - 1];
+      if (last && last.type === 'text') {
+        merged[merged.length - 1] = { type: 'text', text: last.text + part.text };
+      } else {
+        merged.push({ ...part });
+      }
+    } else {
+      merged.push(part);
+    }
+  }
+  return merged.filter((p) => {
+    if (p.type === 'text') return p.text.trim().length > 0;
+    // 没有 toolCallId 的调用无法配对结果，回传会让 SDK 判定缺结果，直接丢弃
+    if (p.type === 'tool-call') return !!p.toolCallId;
+    if (p.type === 'tool-approval-request') return !!p.toolCallId;
+    return true;
+  });
+}
+
+/**
+ * 为 assistant 里的每一条 tool-call 收集配对结果。
+ *
+ * ai SDK 在下一轮请求前会校验历史：assistant 的每个 tool-call 必须有对应 tool-result，
+ * 否则抛 AI_MissingToolResultsError。结果来源按优先级：
+ * 1. 服务端已执行（流里的 tool-result / tool-error 事件）
+ * 2. 前端执行（画布即时执行 / UI 动作）
+ * 3. 兜底：标记为未执行，保证历史合法
+ */
+function collectToolResults(
+  parts: RawContentPart[],
+  serverResults: Map<string, unknown>,
+  clientOutputs: Map<string, unknown>,
+): ToolResultPart[] {
+  const results: ToolResultPart[] = [];
+  const seen = new Set<string>();
+  for (const part of parts) {
+    if (part.type !== 'tool-call' || !part.toolCallId) continue;
+    if (seen.has(part.toolCallId)) continue;
+    seen.add(part.toolCallId);
+    let output: unknown;
+    if (clientOutputs.has(part.toolCallId)) {
+      output = clientOutputs.get(part.toolCallId);
+    } else if (serverResults.has(part.toolCallId)) {
+      output = serverResults.get(part.toolCallId);
+    } else {
+      output = { ok: false, message: '工具未执行（缺少结果）' };
+    }
+    // output 为 undefined 时 JSON 序列化会丢掉 value 字段，导致结果块非法
+    results.push({
+      toolCallId: part.toolCallId,
+      toolName: part.toolName,
+      output: output === undefined ? null : output,
+    });
+  }
+  return results;
 }
 
 function createSession(): ChatSession {
@@ -303,6 +374,7 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
         if (!copy.pendingApprovals || copy.pendingApprovals.length === 0) {
           delete copy.apiMessages;
           delete copy.rawParts;
+          delete copy.toolResultParts;
         }
         return copy;
       }),
@@ -456,6 +528,10 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
       const clientCalls: Array<{ toolCallId: string; toolName: string; input: unknown }> = [];
       /** 画布工具已在事件到达时即时执行，这里缓存结果供续跑回传 */
       const earlyResults = new Map<string, unknown>();
+      /** 服务端已执行的工具结果（按 toolCallId），续跑时必须一并回传 */
+      const serverResults = new Map<string, unknown>();
+      /** 本轮是否出现待用户确认的写操作（出现时不自动续跑，等用户点确认） */
+      let pendingApprovalCount = 0;
       /** 本轮 assistant 内容块（本地累积，避免异步读 state 拿到旧值） */
       const localParts: RawContentPart[] = [];
 
@@ -528,6 +604,7 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
             break;
           }
           case 'tool-approval-request':
+            pendingApprovalCount += 1;
             updateAssistant((msg) => ({
               ...msg,
               rawParts: [
@@ -551,6 +628,10 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
             }));
             break;
           case 'tool-result': {
+            // 服务端工具（带 execute）的结果：续跑时必须回传，否则历史里这条 tool-call 缺结果
+            if (event.toolResult.toolCallId) {
+              serverResults.set(event.toolResult.toolCallId, event.toolResult.output);
+            }
             const result = event.toolResult.output as { url?: string; fileName?: string; error?: string } | undefined;
             const attachmentType =
               event.toolResult.toolName === 'generateExcelReport'
@@ -572,6 +653,10 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
             break;
           }
           case 'tool-error':
+            // 工具执行失败同样算「已有结果」，续跑时用错误信息补齐，避免缺结果
+            if (event.toolError.toolCallId) {
+              serverResults.set(event.toolError.toolCallId, { error: event.toolError.error });
+            }
             updateAssistant((msg) => ({
               ...msg,
               toolResults: [
@@ -656,7 +741,13 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
         // 纯画布渲染无副作用，放宽轮数上限；含界面/业务动作则用严格上限
         const onlyCanvas = clientCalls.length > 0 && clientCalls.every((c) => isCanvasTool(c.toolName));
         const limit = onlyCanvas ? MAX_CANVAS_CONTINUATIONS : MAX_UI_CONTINUATIONS;
-        if (clientCalls.length > 0 && depth >= limit) {
+        if (pendingApprovalCount > 0) {
+          // 有待确认的写操作：不自动续跑，等用户点「允许/拒绝」。
+          // 此时把本轮已执行的结果存下来，审批续跑时一并回传，避免缺结果。
+          const rawParts = buildAssistantParts(localParts);
+          const results = collectToolResults(rawParts, serverResults, new Map());
+          updateAssistant((msg) => ({ ...msg, toolResultParts: results }));
+        } else if (clientCalls.length > 0 && depth >= limit) {
           updateAssistant((msg) => ({
             ...msg,
             error: onlyCanvas
@@ -664,16 +755,17 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
               : '界面操作次数过多已停止，请确认需求后重新提问',
           }));
         } else if (clientCalls.length > 0) {
-          const rawParts = localParts;
-          const results: Array<{ toolCallId: string; toolName: string; output: unknown }> = [];
+          // 先执行前端 UI 动作（画布工具已在事件到达时执行过，复用结果避免重复渲染）
+          const clientOutputs = new Map<string, unknown>();
           for (const call of clientCalls) {
-            let output: unknown;
-            // 画布工具已在事件到达时执行过，直接复用结果，避免重复渲染
             if (earlyResults.has(call.toolCallId)) {
-              output = earlyResults.get(call.toolCallId);
-            } else {
-              try {
-                output = await executeUiAction(
+              clientOutputs.set(call.toolCallId, earlyResults.get(call.toolCallId));
+              continue;
+            }
+            try {
+              clientOutputs.set(
+                call.toolCallId,
+                await executeUiAction(
                   call.toolName,
                   (call.input as Record<string, unknown>) || {},
                   {
@@ -684,13 +776,21 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
                       useAiContextStore.getState().requestOpenPanel(panel);
                     },
                   },
-                );
-              } catch (e) {
-                output = { ok: false, message: e instanceof Error ? e.message : '界面操作失败' };
-              }
+                ),
+              );
+            } catch (e) {
+              clientOutputs.set(call.toolCallId, {
+                ok: false,
+                message: e instanceof Error ? e.message : '界面操作失败',
+              });
             }
-            results.push({ toolCallId: call.toolCallId, toolName: call.toolName, output });
           }
+
+          // 关键：assistant 里的**每一条** tool-call 都必须有配对的 tool-result，
+          // 否则 ai SDK 会抛 AI_MissingToolResultsError。服务端工具（带 execute）的结果
+          // 已在流里通过 tool-result 事件返回，这里一并补齐。
+          const rawParts = buildAssistantParts(localParts);
+          const results = collectToolResults(rawParts, serverResults, clientOutputs);
 
           // 拼装续跑消息：历史 + assistant(含 tool-call) + tool(tool-result)
           const followUp = [
@@ -706,6 +806,8 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
               })),
             },
           ];
+          // 记录本轮结果，审批续跑时同样需要补齐
+          updateAssistant((msg) => ({ ...msg, toolResultParts: results }));
           const nextId = `a-${Date.now()}`;
           setMessages((prev) => [
             // 上一轮已处理完，清掉它的续跑快照，避免历史重复存储
@@ -714,6 +816,7 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
                 const copy = { ...m };
                 delete copy.apiMessages;
                 delete copy.rawParts;
+                delete copy.toolResultParts;
                 return copy;
               }
               return m;
@@ -800,10 +903,11 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
       prev.map((m) => {
         if (m.id === assistantId) return { ...m, apiMessages: trimmedRequest };
         if (m.pendingApprovals && m.pendingApprovals.length > 0) return m;
-        if (!m.apiMessages && !m.rawParts) return m;
+        if (!m.apiMessages && !m.rawParts && !m.toolResultParts) return m;
         const copy = { ...m };
         delete copy.apiMessages;
         delete copy.rawParts;
+        delete copy.toolResultParts;
         return copy;
       }),
     );
@@ -824,23 +928,26 @@ const AIAnalysisAssistant: React.FC<AIAnalysisAssistantProps> = ({
         approved,
       }));
       // 合并连续的文本增量，避免回传几百个单字 text 块
-      const assistantContent: RawContentPart[] = [];
-      for (const part of target.rawParts || []) {
-        if (part.type === 'text') {
-          const last = assistantContent[assistantContent.length - 1];
-          if (last && last.type === 'text') last.text += part.text;
-          else assistantContent.push({ ...part });
-        } else {
-          assistantContent.push(part);
-        }
-      }
-      const trimmedContent = assistantContent.filter(
-        (p) => p.type !== 'text' || p.text.trim().length > 0,
+      const trimmedContent = buildAssistantParts(target.rawParts || []);
+      // 审批轮次里可能同时存在已执行完的 tool-call（服务端工具/画布工具），
+      // 这些也必须带结果，否则同样会触发 AI_MissingToolResultsError。
+      const pendingIds = new Set(target.pendingApprovals.map((a) => a.toolCallId));
+      const executedResults = (target.toolResultParts || []).filter(
+        (r) => !pendingIds.has(r.toolCallId),
       );
+      const toolContent: Array<Record<string, unknown>> = [
+        ...executedResults.map((r) => ({
+          type: 'tool-result',
+          toolCallId: r.toolCallId,
+          toolName: r.toolName,
+          output: { type: 'json', value: r.output },
+        })),
+        ...approvalResponses,
+      ];
       const requestMessages = [
         ...(target.apiMessages || []),
         { role: 'assistant', content: trimmedContent },
-        { role: 'tool', content: approvalResponses },
+        { role: 'tool', content: toolContent },
       ];
       const trimmedRequest = trimMessagesForModel(requestMessages).messages;
 

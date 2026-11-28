@@ -116,6 +116,66 @@ function dropDanglingPrefix(turn: ChatMessage[]): ChatMessage[] {
 }
 
 /**
+ * 清理不成对的工具调用/结果。
+ *
+ * ai SDK 在请求前会校验：assistant 的每个 tool-call 必须有对应 tool-result，
+ * 否则抛 AI_MissingToolResultsError。裁剪（按条数/按轮次）可能把配对拆散，
+ * 这里统一兜底：
+ * - 丢弃没有结果的 tool-call（正在等待审批的除外，它由 approval-request 关联）
+ * - 丢弃没有对应 tool-call 的 tool-result
+ * - 丢弃清空后的 tool 消息
+ */
+function sanitizeToolPairs(messages: ChatMessage[]): ChatMessage[] {
+  const callIds = new Set<string>();
+  const approvalCallIds = new Set<string>();
+  const resultIds = new Set<string>();
+
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue;
+    for (const raw of msg.content) {
+      if (!raw || typeof raw !== 'object') continue;
+      const part = raw as ContentPart;
+      const id = typeof part.toolCallId === 'string' ? part.toolCallId : '';
+      if (!id) continue;
+      if (msg.role === 'assistant') {
+        if (part.type === 'tool-call') callIds.add(id);
+        if (part.type === 'tool-approval-request') approvalCallIds.add(id);
+      } else if (msg.role === 'tool' && part.type === 'tool-result') {
+        resultIds.add(id);
+      }
+    }
+  }
+
+  return messages
+    .map((msg) => {
+      if (!Array.isArray(msg.content)) return msg;
+      const filtered = msg.content.filter((raw) => {
+        if (!raw || typeof raw !== 'object') return true;
+        const part = raw as ContentPart;
+        const id = typeof part.toolCallId === 'string' ? part.toolCallId : '';
+        if (!id) return true;
+        if (msg.role === 'assistant' && part.type === 'tool-call') {
+          return resultIds.has(id) || approvalCallIds.has(id);
+        }
+        if (msg.role === 'assistant' && part.type === 'tool-approval-request') {
+          return callIds.has(id);
+        }
+        if (msg.role === 'tool' && part.type === 'tool-result') {
+          return callIds.has(id);
+        }
+        return true;
+      });
+      return { ...msg, content: filtered };
+    })
+    .filter((msg) => {
+      if (msg.role === 'tool') return Array.isArray(msg.content) && msg.content.length > 0;
+      // 清理后变空的 assistant 内容块会被 OpenAI 兼容接口判为非法消息，直接丢弃
+      if (msg.role === 'assistant' && Array.isArray(msg.content)) return msg.content.length > 0;
+      return true;
+    });
+}
+
+/**
  * 裁剪发给模型的消息历史。
  *
  * 返回裁剪后的数组，保证：
@@ -154,8 +214,10 @@ export function trimMessagesForModel(messages: ChatMessage[]): {
   let result = keptTurns.flat();
   // 4. 防止首条是孤立 tool 消息
   result = dropDanglingPrefix(result);
+  // 5. 清理因裁剪而失配的 tool-call / tool-result（否则 SDK 报 MissingToolResults）
+  result = sanitizeToolPairs(result);
   if (result.length === 0 && working.length > 0) {
-    result = working.slice(-1);
+    result = sanitizeToolPairs(working.slice(-1));
   }
 
   return {
