@@ -1,8 +1,8 @@
 import { streamText, tool, isStepCount } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildToolRegistry } from '@/src/server/ai/pluginRegistry';
 import { trimMessagesForModel } from '@/src/server/ai/messageTrim';
+import { aiProvider } from '@/src/server/ai/provider';
 
 /** 基础 system prompt；各插件可通过 promptHint 追加能力说明 */
 const BASE_SYSTEM_PROMPT =
@@ -14,11 +14,6 @@ const BASE_SYSTEM_PROMPT =
   '直接调用对应工具即可，系统会弹出确认框让用户决定是否执行；不要只在文字里反复追问。' +
   '执行后在回复中说明具体改了什么。' +
   '生成报告后，在回复中提供下载链接，并简要说明报告内容。';
-
-const openai = createOpenAI({
-  baseURL: process.env.AI_BASE_URL,
-  apiKey: process.env.AI_API_KEY,
-});
 
 function sanitizeToolOutput(output: unknown): unknown {
   if (output === null || output === undefined) return output;
@@ -121,7 +116,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result = streamText({
-      model: openai.chat(modelName),
+      model: aiProvider.chat(modelName),
       system,
       messages: trimmedMessages as never,
       stopWhen: isStepCount(5),
