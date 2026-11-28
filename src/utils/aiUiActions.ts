@@ -124,30 +124,6 @@ export async function executeUiAction(
       return { ok: true, message: `已切换到标签页 ${target.name}`, detail: { tabId: target.id } };
     }
 
-    case 'startLiveAnalysis': {
-      const reportId = String(args.reportId || '').trim();
-      if (!reportId) return { ok: false, message: '缺少 reportId' };
-      const direction = args.direction === 'min' ? 'min' : 'max';
-      const rank = typeof args.rank === 'number' ? args.rank : 0;
-      const target = typeof args.target === 'string' && args.target ? args.target : undefined;
-
-      // 先广播请求（数据分析页已挂载时立即消费），再确保跳到数据分析页
-      useAiContextStore.getState().requestLiveAnalysis({ reportId, target, direction, rank });
-      if (ctx.pathname !== '/analysis') {
-        ctx.navigate('/analysis');
-        return {
-          ok: true,
-          message: `已跳转到数据分析页并启动实时建模（报告 ${reportId}）`,
-          detail: { reportId, target, direction, rank },
-        };
-      }
-      return {
-        ok: true,
-        message: `已在当前页启动实时建模（报告 ${reportId}）`,
-        detail: { reportId, target, direction, rank },
-      };
-    }
-
     case 'openPanel': {
       const panel = String(args.panel || '');
       if (!ctx.openPanel) return { ok: false, message: '当前页面不支持打开该面板' };

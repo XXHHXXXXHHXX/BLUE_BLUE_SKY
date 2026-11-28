@@ -8,14 +8,6 @@ import { create } from 'zustand';
 /** AI 可请求打开的面板 */
 export type AiPanelRequest = 'packageLibrary' | 'reportManager';
 
-/** AI 请求在数据分析页启动一次「实时建模」 */
-export interface AiLiveAnalysisRequest {
-  reportId: string;
-  target?: string;
-  direction?: 'max' | 'min';
-  rank?: number;
-}
-
 interface AiContextState {
   /** 当前选中的报告 ID 列表（数据分析等页面写入） */
   selectedReportIds: string[];
@@ -23,22 +15,17 @@ interface AiContextState {
   selectedTopologyId: string | null;
   /** 待处理的面板打开请求（AppLayout 消费后清空） */
   panelRequest: AiPanelRequest | null;
-  /** 待处理的实时建模请求（数据分析页消费后清空） */
-  liveAnalysisRequest: AiLiveAnalysisRequest | null;
 
   setSelectedReportIds: (ids: string[]) => void;
   setSelectedTopologyId: (id: string | null) => void;
   requestOpenPanel: (panel: string) => void;
   consumePanelRequest: () => AiPanelRequest | null;
-  requestLiveAnalysis: (req: AiLiveAnalysisRequest) => void;
-  consumeLiveAnalysisRequest: () => AiLiveAnalysisRequest | null;
 }
 
 export const useAiContextStore = create<AiContextState>((set, get) => ({
   selectedReportIds: [],
   selectedTopologyId: null,
   panelRequest: null,
-  liveAnalysisRequest: null,
   setSelectedReportIds: (ids) => set({ selectedReportIds: ids }),
   setSelectedTopologyId: (id) => set({ selectedTopologyId: id }),
   requestOpenPanel: (panel) => {
@@ -49,14 +36,6 @@ export const useAiContextStore = create<AiContextState>((set, get) => ({
   consumePanelRequest: () => {
     const current = get().panelRequest;
     if (current) set({ panelRequest: null });
-    return current;
-  },
-  requestLiveAnalysis: (req) => {
-    if (req && req.reportId) set({ liveAnalysisRequest: req });
-  },
-  consumeLiveAnalysisRequest: () => {
-    const current = get().liveAnalysisRequest;
-    if (current) set({ liveAnalysisRequest: null });
     return current;
   },
 }));

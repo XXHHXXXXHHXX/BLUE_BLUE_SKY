@@ -54,16 +54,7 @@ def _is_numeric(v):
         return False
 
 
-def analyze(data: dict, emit=None) -> dict:
-    """执行建模分析。
-
-    emit: 可选回调 emit(step_id, title, narration, formula, payload)，
-    用于流式模式下把每个建模阶段实时推给前端做可视化渲染。
-    """
-    if emit is None:
-        def emit(*_args, **_kwargs):
-            return None
-
+def analyze(data: dict) -> dict:
     report = data.get('report', {})
     target = data.get('target', 'score')
     direction = data.get('direction', 'max')  # 'max' 或 'min'
@@ -98,21 +89,6 @@ def analyze(data: dict, emit=None) -> dict:
 
     if not param_names:
         return {"error": "未检测到迭代参数，无法分析"}
-
-    emit(
-        'data_ready',
-        '数据准备',
-        f'从报告中读取到 {len(results)} 条采样记录，识别出 {len(param_names)} 个迭代参数：'
-        f'{"、".join(param_names)}。分析目标为 {target}，优化方向为'
-        f'{"最大化" if direction == "max" else "最小化"}。',
-        'D = { (x_i, y_i) },  i = 1..n,  n = %d,  dim(x) = %d' % (len(results), len(param_names)),
-        {
-            'samples': len(results),
-            'features': param_names,
-            'target': target,
-            'direction': direction,
-        },
-    )
 
     # ===== 识别类别型（字符串枚举）参数并构建编码映射 =====
     # 数值型参数直接用原值；存在非纯数字取值的参数做 label-encoding
@@ -167,28 +143,6 @@ def analyze(data: dict, emit=None) -> dict:
                 out[p] = round(float(row[j]), 4)
         return out
 
-    cat_features = [p for p in param_names if is_categorical[p]]
-    emit(
-        'encoding',
-        '特征编码',
-        (
-            f'检测到 {len(cat_features)} 个字符串枚举参数（{"、".join(cat_features)}），'
-            '采用 label-encoding 映射为整数参与建模，输出时再还原为原始字符串；'
-            '其余参数按数值直接使用。'
-            if cat_features else
-            '全部迭代参数均为数值型，直接作为连续特征参与建模，无需编码。'
-        ),
-        (
-            '类别型: x̃ = index(v),  v ∈ { ' + ', '.join(
-                '%s: {%s}' % (p, ', '.join(cat_maps[p].keys())) for p in cat_features
-            ) + ' }' if cat_features else 'x̃ = x  (all numeric)'
-        ),
-        {
-            'categoricalFeatures': cat_features,
-            'encodings': {p: cat_maps[p] for p in cat_features},
-        },
-    )
-
     # 构建特征矩阵与目标向量
     X_list = []
     y_list = []
@@ -224,28 +178,6 @@ def analyze(data: dict, emit=None) -> dict:
     use_xgb = HAS_XGB and n_samples >= 8
     use_shap = HAS_SHAP and use_xgb
 
-    emit(
-        'model_select',
-        '模型选择',
-        (
-            f'样本量 {n_samples} ≥ 8 且环境具备 XGBoost，选用 XGBoost 梯度提升树作为代理模型'
-            '（对表格型非线性关系拟合能力强）。'
-            if use_xgb else
-            f'样本量 {n_samples} < 8 或环境缺少 XGBoost，选用多项式回归 + Ridge 正则化，避免小样本过拟合。'
-        ),
-        (
-            'f(x) = Σ_{k=1..K} f_k(x),  f_k ∈ 回归树,  K = n_estimators'
-            if use_xgb else
-            'f(x) = w₀ + Σ w_j φ_j(x) + λ‖w‖²,  φ = 多项式特征(2 阶)'
-        ),
-        {
-            'modelType': 'xgboost' if use_xgb else 'polynomial_regression',
-            'samples': n_samples,
-            'hasXgb': HAS_XGB,
-            'hasShap': HAS_SHAP,
-        },
-    )
-
     if use_xgb:
         # XGBoost surrogate model
         n_estimators = min(300, max(50, n_samples * 8))
@@ -264,18 +196,6 @@ def analyze(data: dict, emit=None) -> dict:
         model.fit(X, y)
         y_pred = model.predict(X)
         r2 = float(r2_score(y, y_pred))
-
-        emit(
-            'train',
-            '模型训练',
-            f'XGBoost 训练完成：{n_estimators} 棵树，最大深度 {max_depth}，学习率 0.08。',
-            'obj = Σ_i (y_i − ŷ_i)² + Σ_k Ω(f_k),  Ω(f) = γT + ½λ‖w‖²',
-            {
-                'nEstimators': n_estimators,
-                'maxDepth': max_depth,
-                'learningRate': 0.08,
-            },
-        )
 
         if use_shap:
             try:
@@ -306,14 +226,6 @@ def analyze(data: dict, emit=None) -> dict:
         y_pred = model.predict(X)
         r2 = float(r2_score(y, y_pred))
 
-        emit(
-            'train',
-            '模型训练',
-            f'多项式回归（{degree} 阶）+ Ridge 训练完成，已做标准化处理。',
-            'f(x) = w₀ + Σ_{|α|≤%d} w_α x^α,  min ‖y − Xw‖² + λ‖w‖²' % degree,
-            {'degree': degree, 'alpha': 1.0},
-        )
-
         shap_values = np.zeros_like(X)
         shap_importance = np.zeros(X.shape[1])
         xgb_importance = np.zeros(X.shape[1])
@@ -323,22 +235,6 @@ def analyze(data: dict, emit=None) -> dict:
         if xgb_importance.sum() > 0:
             xgb_importance = xgb_importance / xgb_importance.sum()
         shap_importance = xgb_importance.copy()
-
-    emit(
-        'evaluate',
-        '拟合评估',
-        (
-            f'模型在训练集上的决定系数 R² = {round(r2, 4)}，'
-            + ('拟合优度良好，模型解释力强。' if r2 >= 0.8
-               else '拟合优度中等，结论具备参考价值。' if r2 >= 0.5
-               else '拟合优度偏低，可能样本量不足或参数与目标关系较弱，结论仅供参考。')
-        ),
-        'R² = 1 − SS_res / SS_tot = 1 − Σ(y_i − ŷ_i)² / Σ(y_i − ȳ)²',
-        {
-            'r2': round(r2, 4),
-            'samples': n_samples,
-        },
-    )
 
     # 特征重要性汇总
     importance_list = []
@@ -360,22 +256,6 @@ def analyze(data: dict, emit=None) -> dict:
     else:
         for item in importance_list:
             item['impact_ratio'] = round(100.0 / len(importance_list), 2)
-
-    emit(
-        'importance',
-        '重要性归因',
-        (
-            '使用 SHAP（Shapley Additive exPlanations）基于博弈论计算每个参数对预测值的边际贡献，'
-            f'影响最大的参数是 {importance_list[0]["feature"]}（占比 {importance_list[0]["impact_ratio"]}%）。'
-            if use_shap else
-            '当前模型不支持 SHAP，改用 Pearson 相关系数绝对值衡量各参数与目标的相关强度。'
-        ),
-        'φ_j = Σ_{S⊆F\\{j}} |S|!(|F|−|S|−1)!/|F|! · [f(S∪{j}) − f(S)],  impact_j = |φ_j| / Σ|φ|',
-        {
-            'featureImportance': importance_list,
-            'hasShap': use_shap,
-        },
-    )
 
     # ========== 最优点推断 ==========
     param_defs = {p['name']: p for p in iteration_params}
@@ -408,21 +288,6 @@ def analyze(data: dict, emit=None) -> dict:
     total_combinations = 1
     for g in search_grids:
         total_combinations *= max(len(g), 1)
-
-    emit(
-        'search_space',
-        '搜索空间构建',
-        (
-            f'按各参数的取值范围/枚举构造候选空间，共 {total_combinations} 种组合，'
-            + ('规模可控，采用完整笛卡尔积遍历。' if total_combinations <= 200000
-               else '规模过大，改用 5 万次随机采样 + 已有样本点。')
-        ),
-        'Ω = ∏_{j=1..d} G_j,  |Ω| = %d' % total_combinations,
-        {
-            'totalCombinations': total_combinations,
-            'grids': {p: (len(g) if isinstance(g, list) else 0) for p, g in zip(param_names, search_grids)},
-        },
-    )
 
     search_points = []
     if total_combinations <= 200000:
@@ -470,21 +335,6 @@ def analyze(data: dict, emit=None) -> dict:
 
     selected_rank = min(rank, len(top3_inferred) - 1) if top3_inferred else 0
     optimal_point = top3_inferred[selected_rank] if top3_inferred else {"values": {}, "predicted_score": 0}
-
-    emit(
-        'optimize',
-        '最优点搜索',
-        (
-            f'在 {len(search_points)} 个候选点上用代理模型预测，按{"最大" if direction == "max" else "最小"}化方向排序，'
-            f'得到最优推断点预测值 {optimal_point.get("predicted_score")}。'
-        ),
-        'x* = arg' + ('max' if direction == 'max' else 'min') + '_{x∈Ω} f(x)',
-        {
-            'searchPoints': len(search_points),
-            'optimalPoint': optimal_point,
-            'top3Inferred': top3_inferred,
-        },
-    )
 
     # 已有数据中的实际前3（仅用于展示参考，始终按同一方向）
     if direction == 'min':
@@ -541,16 +391,6 @@ def analyze(data: dict, emit=None) -> dict:
             "data": effect_data
         })
 
-    emit(
-        'effects',
-        '参数效应曲线',
-        f'为 {len(parameter_effects)} 个参数分别计算其取值变化对 SHAP 贡献与实际表现的影响曲线，用于观察单参数响应规律。',
-        'effect_j(v) = φ_j(x | x_j = v),  v ∈ unique(x_j)',
-        {
-            'parameterEffects': parameter_effects,
-        },
-    )
-
     # 全局 SHAP 瀑布图数据（取选中的排名样本）
     waterfall_data = None
     if use_shap and search_points:
@@ -580,21 +420,7 @@ def analyze(data: dict, emit=None) -> dict:
         except Exception:
             pass
 
-    if waterfall_data:
-        emit(
-            'waterfall',
-            'SHAP 分解',
-            (
-                f'把最优点的预测值 {waterfall_data["final_prediction"]} 分解为'
-                f'基础值 {waterfall_data["base_value"]} 加各参数贡献之和，直观展示每个参数把分数推高或拉低了多少。'
-            ),
-            'f(x*) = E[f(X)] + Σ_j φ_j(x*),  base = %s, pred = %s' % (
-                waterfall_data['base_value'], waterfall_data['final_prediction']
-            ),
-            {'waterfallData': waterfall_data},
-        )
-
-    final_result = {
+    return {
         "success": True,
         "model_type": "xgboost" if use_xgb else "polynomial_regression",
         "model_r2": round(r2, 4),
@@ -628,9 +454,6 @@ def analyze(data: dict, emit=None) -> dict:
         )
     }
 
-    emit('complete', '分析完成', '所有建模阶段已完成，最终结果已生成。', '', {'result': final_result})
-    return final_result
-
 
 if __name__ == '__main__':
     # 强制 stdout 使用 UTF-8，避免 Windows 平台中文乱码
@@ -641,29 +464,5 @@ if __name__ == '__main__':
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
     input_data = json.load(sys.stdin)
-    # --stream 模式下逐行输出 NDJSON 事件（每行一个 JSON），供 SSE 接口实时转发
-    stream_mode = '--stream' in sys.argv
-
-    if stream_mode:
-        def _emit(step_id, title, narration, formula, payload):
-            event = {
-                'type': 'step',
-                'stepId': step_id,
-                'title': title,
-                'narration': narration,
-                'formula': formula,
-                'payload': payload,
-            }
-            print(json.dumps(event, ensure_ascii=False), flush=True)
-
-        try:
-            result = analyze(input_data, emit=_emit)
-            if isinstance(result, dict) and result.get('error'):
-                print(json.dumps({'type': 'error', 'message': result['error']}, ensure_ascii=False), flush=True)
-                sys.exit(1)
-        except Exception as exc:  # noqa: BLE001
-            print(json.dumps({'type': 'error', 'message': str(exc)}, ensure_ascii=False), flush=True)
-            sys.exit(1)
-    else:
-        result = analyze(input_data)
-        print(json.dumps(result, ensure_ascii=False))
+    result = analyze(input_data)
+    print(json.dumps(result, ensure_ascii=False))

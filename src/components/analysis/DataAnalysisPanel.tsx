@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Card,
   Select,
@@ -28,14 +28,12 @@ import {
   CheckCircleOutlined,
   AimOutlined,
   InfoCircleOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { useTestReportStore, type TestReport } from '../../stores/testReportStore';
 import { collectScoreNames } from '../../utils/scoreParsing';
 import BaselineComparisonPanel from './BaselineComparisonPanel';
 import MultiXYChartPanel from './MultiXYChartPanel';
-import LiveModelingConsole from './LiveModelingConsole';
 import { useAiContextStore } from '../../stores/aiContextStore';
 import {
   buildEffectLineOption,
@@ -57,10 +55,8 @@ const DataAnalysisPanel: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string>('');
-  /** 当前激活的页签；AI 助手可请求切到实时建模页 */
+  /** 当前激活的页签 */
   const [activeTab, setActiveTab] = useState('smart');
-  /** 实时建模启动令牌：递增即触发一次流式分析 */
-  const [runToken, setRunToken] = useState(0);
 
   useEffect(() => {
     fetchReports();
@@ -82,41 +78,6 @@ const DataAnalysisPanel: React.FC = () => {
   const selectedReport = useMemo(() => {
     return allReports.find((r) => r.id === selectedReportId);
   }, [allReports, selectedReportId]);
-
-  // AI 助手可通过 aiContextStore 请求「在数据分析页启动实时建模」
-  const liveRequest = useAiContextStore((s) => s.liveAnalysisRequest);
-  const consumeLiveRequest = useAiContextStore((s) => s.consumeLiveAnalysisRequest);
-  /** 待启动标记：报告数据可能尚未加载完成，等 selectedReport 就绪后再触发 */
-  const pendingLiveRef = useRef(false);
-
-  const startLiveAnalysis = useCallback(() => {
-    if (!selectedReport) return;
-    setActiveTab('live');
-    setRunToken((t) => t + 1);
-  }, [selectedReport]);
-
-  // 消费 AI 发起的实时建模请求：先同步筛选条件，等报告就绪后启动
-  useEffect(() => {
-    if (!liveRequest) return;
-    if (liveRequest.reportId && liveRequest.reportId !== selectedReportId) {
-      setSelectedReportId(liveRequest.reportId);
-    }
-    if (liveRequest.target) setSelectedTarget(liveRequest.target);
-    if (liveRequest.direction) setDirection(liveRequest.direction);
-    if (typeof liveRequest.rank === 'number') setRank(liveRequest.rank);
-    setActiveTab('live');
-    pendingLiveRef.current = true;
-    consumeLiveRequest();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveRequest]);
-
-  // 报告就绪后真正触发一次流式分析
-  useEffect(() => {
-    if (!pendingLiveRef.current) return;
-    if (!selectedReport) return;
-    pendingLiveRef.current = false;
-    setRunToken((t) => t + 1);
-  }, [selectedReport]);
 
   const targetOptions = useMemo(() => {
     const opts = [{ label: '性能分数 (score)', value: 'score' }];
@@ -160,7 +121,7 @@ const DataAnalysisPanel: React.FC = () => {
     }
   };
 
-  // ========== 图表配置（与实时建模控制台共用同一套构造器） ==========
+  // ========== 图表配置 ==========
   const impactPieOption = useMemo(
     () => buildImpactPieOption(result?.feature_importance),
     [result],
@@ -251,26 +212,16 @@ const DataAnalysisPanel: React.FC = () => {
             <div style={{ marginBottom: 8 }}>
               <Text style={{ opacity: 0 }}>占位</Text>
             </div>
-            <Space wrap>
-              <Button
-                type="primary"
-                icon={<ExperimentOutlined />}
-                loading={loading}
-                disabled={!selectedReport}
-                onClick={handleAnalyze}
-                size="large"
-              >
-                启动智能分析
-              </Button>
-              <Button
-                icon={<ThunderboltOutlined />}
-                disabled={!selectedReport}
-                onClick={startLiveAnalysis}
-                size="large"
-              >
-                AI 实时建模
-              </Button>
-            </Space>
+            <Button
+              type="primary"
+              icon={<ExperimentOutlined />}
+              loading={loading}
+              disabled={!selectedReport}
+              onClick={handleAnalyze}
+              size="large"
+            >
+              启动智能分析
+            </Button>
           </Col>
         </Row>
 
@@ -295,33 +246,6 @@ const DataAnalysisPanel: React.FC = () => {
         activeKey={activeTab}
         onChange={setActiveTab}
         items={[
-          {
-            key: 'live',
-            label: (
-              <Space>
-                <ThunderboltOutlined />
-                AI 实时建模
-              </Space>
-            ),
-            children: (
-              <>
-                <LiveModelingConsole
-                  runToken={runToken}
-                  params={
-                    selectedReport
-                      ? {
-                          reportId: selectedReport.id,
-                          target: selectedTarget,
-                          direction: direction === 'min' ? 'min' : 'max',
-                          rank,
-                        }
-                      : null
-                  }
-                  onComplete={(r) => setResult(r)}
-                />
-              </>
-            ),
-          },
           {
             key: 'smart',
             label: (

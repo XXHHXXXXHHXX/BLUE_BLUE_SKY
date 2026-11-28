@@ -29,8 +29,8 @@ export const uiPlugin: AiPlugin = {
   promptHint:
     '你可以直接操控界面：用户说「打开/切到某页」「切换到某个拓扑」「选中某份报告」' +
     '「高亮/定位某个配置」「帮我填好某个配置」时，直接调用对应界面工具，不要只给文字说明。' +
-    '用户想「实时看建模过程/可视化分析/动态演示」时，调用 startLiveAnalysis 打开实时建模控制台，' +
-    '不要在文字里罗列结果——界面会逐阶段渲染。' +
+    '用户想「看图表/可视化/画出来」时，用画布工具（renderChart 等）把内容画到界面上，' +
+    '不要在文字里罗列数据。' +
     `可用页面：${PAGE_ROUTES.map((r) => `${r.label}=${r.path}`).join('、')}。`,
   tools: [
     {
@@ -85,20 +85,6 @@ export const uiPlugin: AiPlugin = {
       clientSide: true,
       inputSchema: z.object({
         panel: z.enum(['packageLibrary', 'reportManager']).describe('要打开的面板'),
-      }),
-    },
-    {
-      name: 'startLiveAnalysis',
-      description:
-        '在数据分析页启动「AI 实时建模」：会跳转到数据分析页，并逐阶段实时渲染建模过程' +
-        '（数据准备→特征编码→模型选择→训练→R²评估→SHAP归因→最优点搜索→参数效应→瀑布分解）。' +
-        '用户说「实时分析/动态演示/看着你建模/可视化分析某报告」时使用。',
-      clientSide: true,
-      inputSchema: z.object({
-        reportId: z.string().describe('要分析的测试报告 ID，可先用 listReports 获取'),
-        target: z.string().optional().describe('分析目标，默认 score；命名分数用 score:<名称>，监控指标用其 id'),
-        direction: z.enum(['max', 'min']).optional().describe('优化方向，默认 max'),
-        rank: z.number().int().min(0).max(2).optional().describe('取第几优，默认 0（最优）'),
       }),
     },
   ],
